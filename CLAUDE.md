@@ -25,9 +25,8 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 
 ## Pièges d'environnement (voir `docs/SYMFONY_SETUP.md`)
 
-- Le dépôt vit sous `~/Documents` (iCloud) : `backend/vendor` est un **lien symbolique vers `vendor.nosync/`**, sans quoi iCloud crée des copies `* 2.php` et Composer se bloque. Ne pas remplacer ce lien par un vrai dossier.
-- **Pas de `symfony/flex`** (il bloque au téléchargement des recettes) : config Symfony écrite à la main, et paquets `symfony/*` épinglés en `^7.4` dans `composer.json` (vérifier `composer show | grep ' 8\.'` après une mise à jour).
-- Composer peut ne pas rendre la main sur ce poste : le lancer en arrière-plan avec un journal plutôt qu'en direct.
+- **Ne jamais cloner ni déplacer le dépôt sous `~/Documents` ou `~/Desktop`** (synchronisés par iCloud) : iCloud y crée des copies de conflit (`Request 2.php`, `dev 2` dans `.git`…) qui corrompent `vendor/` et `.git`, et Composer se bloque. Le dépôt vit dans `~/GitHub/`.
+- **Symfony Flex est installé** : il épingle la famille Symfony via `extra.symfony.require` (`7.4.*`). Ses recettes ne doivent pas écraser notre config : après un `composer require`, relire le diff de `.env` (une recette peut y ajouter un `DATABASE_URL` Postgres qui masquerait notre SQLite) et supprimer `compose*.yaml` si une recette en ajoute. Vérifier `composer show | grep ' 8\.'` (doit rester vide).
 
 ## Commandes
 

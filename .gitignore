@@ -52,8 +52,7 @@
 /.web-server-pid
 
 # MTG Sim : dépendances et caches (le .gitignore ci-dessus est un modèle Symfony racine-seulement)
-backend/vendor
-backend/vendor.nosync/
+backend/vendor/
 backend/var/
 backend/.env.local
 backend/.env.*.local

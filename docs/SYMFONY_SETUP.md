@@ -58,14 +58,9 @@ curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: applic
 
 ## Pièges rencontrés lors de l'intégration
 
-- **Dossier synchronisé par iCloud (`~/Documents`)** : l'installation de `vendor/` y génère des copies de conflit (`Request 2.php`, `Kernel 3.php`…) et fait bloquer Composer (« Generating autoload files » qui ne rend jamais la main). Contournement : `vendor` est un lien symbolique vers **`vendor.nosync/`**, que iCloud ignore :
-
-  ```bash
-  cd backend && rm -rf vendor && mkdir vendor.nosync && ln -s vendor.nosync vendor && composer install
-  ```
-
-  Même précaution pour `node_modules` si des doublons apparaissent. Idéalement, cloner le dépôt hors d'un dossier iCloud.
-- **Symfony Flex bloque** (téléchargement parallèle des recettes depuis GitHub qui ne se termine pas). Le projet n'utilise donc **pas Flex** : la config (`config/`, `bin/console`, `public/index.php`, `src/Kernel.php`, `.env`) est versionnée à la main. Ne pas ajouter `symfony/flex`.
-- **Sans Flex, la famille Symfony n'est pas épinglée** : `composer.json` fixe explicitement tous les paquets `symfony/*` en `^7.4`. Sans cela, Composer en résout une partie en 8.x et `lint:container` échoue (`symfony/var-exporter` 8 incompatible avec Doctrine). Vérifier avec `composer show | grep ' 8\.'` après chaque mise à jour.
+- **Dossier synchronisé par iCloud (`~/Documents`)** : c'était la cause de tous les blocages. Installer `vendor/` y générait des copies de conflit (`Request 2.php`, `Kernel 3.php`…), et iCloud a même dupliqué des références dans `.git` (`refs/heads/dev 2`), ce qui cassait `git fetch`. Composer ne rendait jamais la main après « Generating autoload files ». Le dépôt a donc été déplacé hors d'iCloud, dans `~/GitHub/`. Ne pas le remettre sous `~/Documents` ou `~/Desktop`. (Le contournement `vendor.nosync` n'est plus utilisé.)
+- **Symfony Flex** : il avait l'air de bloquer, mais c'était iCloud. Hors iCloud il fonctionne et il est installé. Il épingle la famille Symfony (`extra.symfony.require: 7.4.*`), ce qui évite de retomber sur un mélange 7.4 / 8.x (`symfony/var-exporter` 8 est incompatible avec Doctrine). La config existait déjà : ses recettes ont ajouté `cache.yaml`, `routing.yaml`, `config/routes/`, `preload.php`, `symfony.lock`, `bin/phpunit`, des `.gitignore` de dossiers, et un bloc dans `.env`. Nettoyage fait après coup : bloc `.env` dupliqué retiré (il remettait un `DATABASE_URL` Postgres), `compose.yaml` / `compose.override.yaml` / `.env.dev` supprimés, script `assets:install` retiré. `DEFAULT_URI` (requis par `routing.yaml`) est dans `.env`.
+- Après chaque `composer require` / `update` : relire le diff de `.env`, supprimer `compose*.yaml` ajouté par une recette, et vérifier `composer show | grep ' 8\.'` (vide).
 - `doctrine:database:create` n'est pas supporté pour SQLite (le fichier est créé par la migration) ; `make:migration` n'est pas installé : utiliser `doctrine:migrations:diff`.
+- `config/reference.php` est généré automatiquement par Symfony et change selon l'environnement : le versionner tel quel.
 - Le `memory_limit` du serveur doit rester confortable (le test d'API le fixe à 512 Mo).
