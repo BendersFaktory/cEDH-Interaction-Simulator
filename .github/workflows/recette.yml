@@ -13,6 +13,10 @@ jobs:
     services:
       mysql:
         image: mysql:9.3
+        # Pull authentifié : évite la limite de pulls anonymes de Docker Hub.
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         env:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: mtg_sim
