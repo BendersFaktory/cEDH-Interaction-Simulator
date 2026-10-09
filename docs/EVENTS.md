@@ -15,6 +15,7 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 | `SpellResolved` | non | `stackId`, `card`, `controller`, `destination` (`battlefield`\|`graveyard`\|`command`) | Pile → destination |
 | `SpellCountered` | non | `stackId`, `card`, `controller`, `by` (stackId du contresort), `destination` (`graveyard`\|`command`) | Pile → cimetière, ou zone de commandement si c'est un commandant |
 | `SpellFizzled` | non | `target` | Aucun (cible devenue illégale) |
+| `CardDiscarded` | non | `player`, `card`, `destination` (`graveyard`\|`command`), `hand` (taille de main résultante) | Main → cimetière (défausse à 7 au cleanup, joueur actif) |
 | `AttackerDeclared` | non | `player`, `card` (id), `defender` (joueur attaqué), `tapped` (true) | La créature attaque `defender` et s'engage |
 | `BlockerDeclared` | non | `player`, `blocker` (id), `attacker` (id) | La créature bloque l'attaquant |
 | `DeclarationFinished` | **oui** | `player`, `step` (`attackers`\|`blockers`) | Aucun (le déclarant a terminé ; émis seulement s'il avait encore un choix) |
@@ -28,6 +29,10 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 ## Déclarations de combat
 
 `AttackerDeclared` / `BlockerDeclared` ne sont **pas** des priorités : le déclarant occupe `priority.holder` de la `DecisionRequest` (champ `declaring` = `attackers` | `blockers`) et est réinterrogé après chaque choix jusqu'à l'action `done`. Les étapes `declare_attackers`, `declare_blockers` et `combat_damage` n'existent que s'il y a des attaquants ; chacune ouvre ensuite une ronde de priorité complète.
+
+## Défausse au cleanup
+
+Comme les déclarations de combat, la défausse n'est pas une priorité : le joueur actif dont la main dépasse 7 cartes occupe `priority.holder` de la `DecisionRequest` (phase `cleanup`, actions de type `discard`, une par nom de carte) et est réinterrogé jusqu'à 7 cartes. Aucun état n'est ajouté à `GameState`.
 
 ## Ajouter un événement
 

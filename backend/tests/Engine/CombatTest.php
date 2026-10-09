@@ -139,7 +139,7 @@ final class CombatTest extends TestCase
         $this->assertSame('cmd', $died[0]->payload['card']['id']);
         $this->assertSame('command', $died[0]->payload['destination']);
         $this->assertSame('cmd', $s->player(0)->command[0]->id);
-        $this->assertSame([], $s->player(0)->graveyard);
+        $this->assertSame([], array_filter($s->player(0)->graveyard, static fn ($c) => $c->commander), 'jamais au cimetière');
     }
 
     public function testCommanderDamageAccumulatesAndEliminatesAtTwentyOne(): void

@@ -130,6 +130,13 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'CardDiscarded': {
+      const pl = v.players[p.player]
+      removeCard(pl.hand, p.card.id)
+      zoneOf(pl, p.destination).push(board(p.card))
+      break
+    }
+
     case 'AttackerDeclared': {
       const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
       if (c) {

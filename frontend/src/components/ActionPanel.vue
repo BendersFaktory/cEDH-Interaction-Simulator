@@ -11,6 +11,7 @@ const groups = computed(() => {
     { title: 'Attaquer', items: actions.filter((a) => a.type === 'attack') },
     { title: 'Bloquer', items: actions.filter((a) => a.type === 'block') },
     { title: 'Terminer la déclaration', items: actions.filter((a) => a.type === 'done') },
+    { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },
     { title: 'Sorts', items: actions.filter((a) => a.type === 'cast') },
     { title: 'Priorité', items: actions.filter((a) => a.type === 'pass') },

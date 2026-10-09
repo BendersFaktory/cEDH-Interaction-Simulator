@@ -8,6 +8,7 @@ use App\Engine\Action\Action;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
+use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PlayLand;
 use App\Engine\Game\CardInstance;
@@ -19,6 +20,7 @@ use App\Engine\Game\GameState;
  *  2. joue un terrain ;
  *  3. à son tour, en phase principale, pile vide : lance un sort au hasard (jamais sur soi-même) ;
  *  4. sinon passe.
+ * Défausse (main > 7) : un terrain en surplus (≥ 5 en jeu), sinon la carte la plus chère, à égalité le plus petit id.
  * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible ; bloque quand le bloqueur survit
  * ou tue l'attaquant (un seul bloqueur par attaquant), et chump-bloque seulement si l'attaque est létale.
  * TODO: évaluateur de menace (ne pas contrer n'importe quoi), gestion du mana, etc.
@@ -27,6 +29,10 @@ final class HeuristicAgent implements PlayerAgent
 {
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
+        $discards = array_values(array_filter($legal, static fn (Action $a) => $a instanceof Discard));
+        if ($discards !== []) {
+            return $this->discard($state, $discards, $playerId);
+        }
         if ($state->combat->declaring === 'attackers') {
             return $this->declareAttackers($state, $legal, $playerId);
         }
@@ -66,6 +72,23 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return AutoPassAgent::pass($legal, $playerId);
+    }
+
+    /** @param list<Discard> $discards */
+    private function discard(GameState $state, array $discards, int $playerId): Action
+    {
+        $p = $state->player($playerId);
+        $lands = count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isLand()));
+        $best = null;
+        foreach ($discards as $d) {
+            $card = $p->findInHand($d->cardId);
+            $score = $card->isLand() ? ($lands >= 5 ? 1000 : -1) : $card->cost;
+            if ($best === null || $score > $best[1] || ($score === $best[1] && $card->id < $best[0]->cardId)) {
+                $best = [$d, $score];
+            }
+        }
+
+        return $best[0];
     }
 
     /** @param list<Action> $legal */

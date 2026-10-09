@@ -33,7 +33,7 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard'
   player: number
   cardId?: string
   targets?: string[]

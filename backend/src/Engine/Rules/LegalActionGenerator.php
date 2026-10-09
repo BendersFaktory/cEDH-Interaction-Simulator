@@ -6,6 +6,7 @@ namespace App\Engine\Rules;
 
 use App\Engine\Action\Action;
 use App\Engine\Action\CastSpell;
+use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
@@ -14,6 +15,8 @@ use App\Engine\Action\PlayLand;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
+use App\Engine\Game\Phase;
+use App\Engine\Game\PlayerState;
 
 /**
  * Calcule les actions légales d'un joueur À CET INSTANT (état du GameState fait foi).
@@ -27,6 +30,11 @@ final class LegalActionGenerator
     {
         if ($s->combat->declaring !== null) {
             return $this->declarationActions($s, $playerId);
+        }
+
+        if ($s->phase === Phase::Cleanup && $playerId === $s->activePlayer
+            && count($s->player($playerId)->hand) > PlayerState::MAX_HAND_SIZE) {
+            return $this->discardActions($s, $playerId);
         }
 
         $p = $s->player($playerId);
@@ -62,6 +70,25 @@ final class LegalActionGenerator
                 }
                 $seen[$key] = true;
                 $actions[] = new CastSpell($playerId, $card->id, $targets);
+            }
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Défausse obligatoire (main > 7 au cleanup) : une action par nom de carte, pas de « passer ».
+     *
+     * @return list<Action>
+     */
+    private function discardActions(GameState $s, int $playerId): array
+    {
+        $actions = [];
+        $seen = [];
+        foreach ($s->player($playerId)->hand as $card) {
+            if (!isset($seen[$card->name])) {
+                $seen[$card->name] = true;
+                $actions[] = new Discard($playerId, $card->id);
             }
         }
 

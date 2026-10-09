@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (combat à 4 joueurs vérifié). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (défausse à 7 vérifiée). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -16,7 +16,8 @@
 
 - [x] **Phases complètes** : untap, upkeep, pioche, main 1, début/fin de combat, main 2, fin, cleanup ; untap et cleanup sans priorité. *(Vérifié le 2026-10-10 : `smoke.php 42` déterministe (9861 événements, 1 terrain/tour, ordre des étapes correct), PHPUnit 45 tests dont `PhasesTest` (6) et `StateReconstructorTest` inchangé, `vue-tsc` + vitest, `npm run recette` sans problème.)*
   - [x] Étapes déclaration d'attaquants / bloqueurs / dégâts (entre `BeginCombat` et `EndCombat`) : faites avec le combat, sautées sans attaquant.
-  - [ ] Défausse à 7 cartes au cleanup (nouvelle décision humaine, `CardDiscarded`).
+  - [x] Défausse à 7 cartes au cleanup (décision hors priorité du joueur actif, `Discard` / `CardDiscarded`, `HandSizeManager`). *(Vérifié le 2026-10-10 : PHPUnit 63 tests dont `DiscardTest` (7), `smoke.php 42` déterministe, une défausse observée sur les graines 6, 16 et 22 ; `vue-tsc` + vitest 7 tests ; `npm run recette` sans problème. La partie seed 42 ne comporte aucune défausse : le reducer est couvert par un test dédié.)*
+  - [ ] Choix de défausse de l'IA plus fin (garder les contresorts, mana) : §3.
   - [ ] Mesurer à nouveau taille en base / latence (`docs/SYMFONY_SETUP.md`) : ~2× plus d'événements et de rondes par partie.
   - [ ] Le tour 1 pioche (pas de saut de pioche) ; vérifier si on veut la règle Commander exacte.
 - [x] **Combat à 4 joueurs** : déclarer attaquants (vers un joueur précis) et bloqueurs = décisions séquentielles pour `human` ; force/endurance, mal d'invocation, `CombatManager` + `CombatResolver`, mort des créatures (SBA), commandant mort → zone de commandement. *(Vérifié le 2026-10-10 : `smoke.php 42` déterministe (3294 événements, partie finie au tour 38, 28 morts de créatures), 12 graines : commandants morts, relances avec taxe, 2 éliminations par `commander_damage` ; PHPUnit 56 tests dont `CombatTest` (11) ; `StateReconstructorTest` vert avec pauses humaines pendant déclaration ; `vue-tsc` + vitest 6 tests ; `npm run recette` : J0 déclare une attaque (scénario 8).)*

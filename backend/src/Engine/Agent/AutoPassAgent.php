@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Agent;
 
 use App\Engine\Action\Action;
+use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PassPriority;
 use App\Engine\Game\GameState;
@@ -29,6 +30,13 @@ final class AutoPassAgent implements PlayerAgent
         // Pendant une déclaration (attaquants/bloqueurs), « passer » = ne rien déclarer.
         foreach ($legal as $action) {
             if ($action instanceof FinishDeclaration) {
+                return $action;
+            }
+        }
+
+        // Défausse obligatoire : la première carte proposée (déterministe).
+        foreach ($legal as $action) {
+            if ($action instanceof Discard) {
                 return $action;
             }
         }

@@ -125,7 +125,7 @@ async function run() {
   let attacked = false, sawBlock = false
   for (let i = 0; i < 400 && !attacked; i++) {
     if (!(await page.locator('.actions').count())) break
-    const order = ['Attaquer', 'Bloquer', 'Terrains', 'Sorts', 'Terminer la déclaration', 'Priorité']
+    const order = ['Défausser', 'Attaquer', 'Bloquer', 'Terrains', 'Sorts', 'Terminer la déclaration', 'Priorité']
     for (const title of order) {
       // Sorts : on ne lance que des créatures (le Bolt/Contresort ne servent pas ce scénario).
       const b = title === 'Sorts' ? page.locator('.actions h4:has-text("Sorts") ~ button:is(:has-text("Grizzly"), :has-text("Commandant"))').first() : first(title)

@@ -8,6 +8,7 @@ use App\Engine\Action\Action;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Decision\DecisionRequired;
 use App\Engine\Rules\CombatManager;
+use App\Engine\Rules\HandSizeManager;
 use App\Engine\Rules\LegalActionGenerator;
 use App\Engine\Rules\PriorityManager;
 use App\Engine\Rules\StackResolver;
@@ -28,6 +29,7 @@ final class GameEngine
     private readonly TurnManager $turns;
     private readonly PriorityManager $priority;
     private readonly CombatManager $combat;
+    private readonly HandSizeManager $handSize;
 
     public function __construct(
         AgentRegistry $agents,
@@ -37,6 +39,7 @@ final class GameEngine
         $sba = new StateBasedActions();
         $legal ??= new LegalActionGenerator();
         $this->combat = new CombatManager($agents, $legal);
+        $this->handSize = new HandSizeManager($agents, $legal);
         $this->turns = new TurnManager($sba, $this->combat);
         $this->priority = new PriorityManager(
             $agents,
@@ -68,6 +71,9 @@ final class GameEngine
                     if (!($s->phase === Phase::DeclareAttackers && $s->combat->attackers === [])) {
                         $this->priority->runRound($s, $injected);
                     }
+                }
+                if ($s->phase === Phase::Cleanup) {
+                    $this->handSize->run($s, $injected);
                 }
                 if ($s->over) {
                     break;

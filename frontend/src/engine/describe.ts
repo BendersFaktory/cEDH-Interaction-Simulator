@@ -36,6 +36,8 @@ export function describeEvent(e: GameEvent): string {
       return 'Le sort n\'a plus de cible valide'
     case 'DamageDealt':
       return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)${p.commanderDamage ? ` — dégâts de commandant : ${p.commanderDamage.total}/21` : ''}`
+    case 'CardDiscarded':
+      return `J${p.player} défausse ${p.card.name} (main : ${p.hand})`
     case 'AttackerDeclared':
       return `J${p.player} attaque J${p.defender} avec ${p.card}`
     case 'BlockerDeclared':

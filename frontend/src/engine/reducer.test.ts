@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GameEvent } from '../types/engine'
 import fixture from './__fixtures__/game.json'
-import { replay } from './reducer'
+import { applyEvent, replay } from './reducer'
 
 const events = fixture.events as GameEvent[]
 
@@ -70,5 +70,24 @@ describe('reducer — combat', () => {
     expect(pl.battlefield.some((c) => c.id === died.payload.card.id)).toBe(false)
     const zone = died.payload.destination === 'command' ? pl.command : pl.graveyard
     expect(zone.some((c) => c.id === died.payload.card.id)).toBe(true)
+  })
+})
+
+describe('reducer — défausse', () => {
+  it('une carte défaussée quitte la main pour le cimetière (ou la zone de commandement)', () => {
+    const drawn = events.find((e) => e.type === 'CardDrawn')!
+    const seq = Math.max(...events.map((e) => e.seq)) + 1
+    const discard: GameEvent = {
+      seq,
+      type: 'CardDiscarded',
+      payload: { player: drawn.payload.player, card: drawn.payload.card, destination: 'graveyard', hand: 0 },
+      verbose: false,
+    }
+    const before = replay(events, drawn.seq)
+    expect(before.players[drawn.payload.player].hand.some((c) => c.id === drawn.payload.card.id)).toBe(true)
+    const after = applyEvent(before, discard)
+    const pl = after.players[drawn.payload.player]
+    expect(pl.hand.some((c) => c.id === drawn.payload.card.id)).toBe(false)
+    expect(pl.graveyard.some((c) => c.id === drawn.payload.card.id)).toBe(true)
   })
 })

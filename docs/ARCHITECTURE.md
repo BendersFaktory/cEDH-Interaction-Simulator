@@ -11,6 +11,7 @@ Vue (reducer, store)  ──HTTP──►  SimulationController
                                   ├── TurnManager        étapes et tours (untap/cleanup sans priorité)
                                   ├── PriorityManager    boucle de priorité
                                   ├── CombatManager      déclarations d'attaquants/bloqueurs (+ CombatResolver : dégâts)
+                                  ├── HandSizeManager    défausse à 7 au cleanup (décision hors priorité)
                                   ├── StackResolver      résolution du sommet de pile
                                   ├── StateBasedActions  vérifiées avant chaque octroi de priorité
                                   ├── TriggerManager     (stub) déclencheurs, ordre APNAP
