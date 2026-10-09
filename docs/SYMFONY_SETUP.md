@@ -1,97 +1,99 @@
-# Intégrer le squelette dans une vraie app Symfony
+# Symfony : état réel de l'intégration
 
-`backend/` contient le moteur, la glue Symfony et les tests, mais pas de kernel ni de config. Le plus sûr est de partir d'une app Symfony neuve et d'y copier le code.
+`backend/` est désormais une **vraie app Symfony 7.4** (kernel, config, migrations, tests d'API), vérifiée le 2026-10-09. Le moteur `src/Engine/` reste du PHP pur, exclu de l'autowiring.
 
-> Ces étapes n'ont pas pu être exécutées lors de la génération du squelette (accès à Packagist bloqué). Elles sont standard, mais à valider au premier lancement.
+## Démarrage
 
-## 1. Créer l'app
+### 1. MySQL (prérequis)
+
+La persistance utilise **MySQL 9.3** (installeur Oracle, `/usr/local/mysql`). Serveur démarré (Réglages Système → MySQL), puis, une seule fois, avec `/usr/local/mysql/bin/mysql -u root -p` :
+
+```sql
+CREATE DATABASE mtg_sim      CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE mtg_sim_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'mtgsim'@'localhost' IDENTIFIED BY 'MOT_DE_PASSE';
+GRANT ALL PRIVILEGES ON mtg_sim.*      TO 'mtgsim'@'localhost';
+GRANT ALL PRIVILEGES ON mtg_sim_test.* TO 'mtgsim'@'localhost';
+```
+
+Le vrai mot de passe va dans des fichiers **non versionnés** (le `.env` versionné contient `CHANGEME`). Choisir un mot de passe sans `@ : / # %` (il est dans une URL) :
+
+- `backend/.env.local` : `DATABASE_URL="mysql://mtgsim:MOT_DE_PASSE@127.0.0.1:3306/mtg_sim?serverVersion=9.3.0&charset=utf8mb4"`
+- `backend/.env.test.local` : même URL avec la base `mtg_sim_test` (Symfony ne charge pas `.env.local` en environnement `test`).
+
+### 2. Application
 
 ```bash
-symfony new backend-app --version="7.*"        # ou: composer create-project symfony/skeleton backend-app
-cd backend-app
-composer require symfony/orm-pack
-composer require --dev phpunit/phpunit symfony/test-pack
+cd backend
+composer install
+php bin/console doctrine:migrations:migrate --no-interaction   # crée les tables dans mtg_sim
+php -S 127.0.0.1:8000 -t public                                 # ou: symfony serve -d --port=8000
 ```
 
-## 2. Copier le code
+Le front (`cd frontend && npm run dev`) relaie `/api` vers le port 8000 (voir `frontend/vite.config.ts`).
+
+## Vérifications
 
 ```bash
-cp -r ../backend/src/*   src/
-cp -r ../backend/tests/* tests/
-cp -r ../backend/bin/smoke.php ../backend/bin/export-fixture.php bin/
+vendor/bin/phpunit                          # 35 tests : suites "engine" (18), "api" (11) et "doctrine" (6)
+vendor/bin/phpunit --testsuite api          # API seule (contrôleur -> service -> moteur -> Doctrine/MySQL)
+php bin/console lint:container
+php bin/console doctrine:schema:validate
+php bin/console debug:router                # 7 routes sous /api/simulations
 ```
 
-(Conserve le `Kernel.php` généré par Symfony.)
+Les tests d'API (`tests/Api/SimulationApiTest.php`) utilisent la base `mtg_sim_test` (`.env.test` + `.env.test.local`), dont le schéma est recréé à chaque test : **MySQL doit tourner** pour les lancer.
 
-## 3. Configuration
+## Routes
 
-`config/services.yaml` — le moteur n'est pas un ensemble de services, on l'exclut de l'autowiring :
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| POST | `/api/simulations` | Crée et joue une partie (corps : `seed`, `controllers`) |
+| GET | `/api/simulations/{id}` | Vue de la simulation |
+| GET | `/api/simulations/{id}/events?after=N` | Journal (ancêtres jusqu'à la bifurcation + propres événements) |
+| GET | `/api/simulations/{id}/state?at=N` | État du checkpoint le plus proche (<= N) |
+| GET | `/api/simulations/{id}/pending` | Décision en attente (`actions`) |
+| POST | `/api/simulations/{id}/fork` | Bifurque (corps : `atEvent`, `controllers`) |
+| POST | `/api/simulations/{id}/decisions` | Répond à la décision en attente (`actionId`) |
 
-```yaml
-services:
-    _defaults:
-        autowire: true
-        autoconfigure: true
+Défaut = Commander à 4, J0 en `human:auto`. Pour 4 IA : `{"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}`.
+Erreurs : 409 (état incompatible : aucune décision attendue, aucun checkpoint), 422 (action, agent ou joueur inconnu), 404 (simulation absente), 400 (JSON invalide).
 
-    App\:
-        resource: '../src/'
-        exclude:
-            - '../src/Engine/'
-            - '../src/Entity/'
-            - '../src/Kernel.php'
-```
-
-`config/routes.yaml` :
-
-```yaml
-controllers:
-    resource: ../src/Controller/
-    type: attribute
-```
-
-`config/packages/doctrine.yaml` : le mapping par attributs sur `src/Entity` est celui par défaut du recipe.
-
-`.env.local` : `DATABASE_URL="sqlite:///%kernel.project_dir%/var/data.db"` pour démarrer simplement.
-
-## 4. Base de données
+## Scénario manuel
 
 ```bash
-php bin/console doctrine:database:create
-php bin/console make:migration      # requiert symfony/maker-bundle (dev)
-php bin/console doctrine:migrations:migrate
-```
-
-Tables attendues : `simulation`, `game_event`, `checkpoint`. Sur une grosse partie les colonnes JSON de `checkpoint` sont volumineuses : prévoir Postgres/MySQL si SQLite devient lent.
-
-## 5. Vérifier
-
-```bash
-vendor/bin/phpunit                  # 18 tests du moteur
-php bin/smoke.php 42                # partie complète en CLI
-symfony serve -d --port=8000
-# Défaut = Commander à 4, tu es J0 (human:auto). Pour 4 IA : {"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}
-curl -X POST localhost:8000/api/simulations -H 'Content-Type: application/json' -d '{"seed":42}'
-curl localhost:8000/api/simulations/1/events | head -c 400
-```
-
-## 6. Premier scénario de fork (à la main)
-
-```bash
-# 1. Trouver un point de bifurcation (PriorityGranted avec checkpoint=true) et prendre son seq, ex. 300
-curl -s localhost:8000/api/simulations/1/events | jq '[.[] | select(.type=="PriorityGranted" and .payload.checkpoint)][20].seq'
-
-# 2. Forker en prenant le joueur 1
-curl -X POST localhost:8000/api/simulations/1/fork -H 'Content-Type: application/json' \
-     -d '{"atEvent": 300, "controllers": {"1": "human:auto"}}'
-
-# 3. Lire la décision en attente, puis répondre
+curl -X POST localhost:8000/api/simulations -H 'Content-Type: application/json' -d '{"seed":42,"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}'
+curl -s localhost:8000/api/simulations/1/events | jq '[.[] | select(.type=="PriorityGranted" and .payload.checkpoint)][20].seq'   # ex. 152
+curl -X POST localhost:8000/api/simulations/1/fork -H 'Content-Type: application/json' -d '{"atEvent":152,"controllers":{"1":"human:auto"}}'
 curl localhost:8000/api/simulations/2/pending
-curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: application/json' \
-     -d '{"actionId": "pass:1"}'
+curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: application/json' -d '{"actionId":"pass:1"}'
 ```
 
-## Points d'attention connus
+## Mesures (seed 42, 4 IA)
 
-- `SimulationController` s'appuie sur la résolution automatique de `{id}` → entité (`doctrine/doctrine-bundle` + `symfony/doctrine-bridge`, fournis par `orm-pack`).
-- Le premier appel `POST /api/simulations` joue **toute** la partie de façon synchrone (≈ 5000 événements, ≈ 900 checkpoints en 4 IA ; en jouant J0, la simulation s'arrête dès ta première décision) : prévoir un timeout confortable ou, plus tard, un traitement asynchrone (Messenger).
-- Un `flush()` unique en fin de `run()` : volontairement simple, à optimiser (insertions par lots) si ça devient lent.
+| | SQLite (au départ) | MySQL, colonnes `JSON` natives | **MySQL, `json_text` + insertions par lots** (actuel) |
+|---|---|---|---|
+| `POST /api/simulations` (4935 événements, 897 checkpoints) | ~0,55 s | ~1,94 s | **~0,96 s à froid, ~0,68 s à chaud** |
+| Création de partie dans le service (`create()`, moteur ~0,09 s inclus) | n.m. | ~1,9 s | **0,6 à 0,8 s** |
+| Suite PHPUnit complète | ~6 s (28 tests) | ~17 s (28 tests) | **~9,6 s (35 tests)** |
+| Taille d'une partie en base | ~19 Mo | ~28 Mo | **~29 Mo** (checkpoints : 28,5 Mo) |
+| Pic mémoire PHP d'une création | n.m. | n.m. | **~100 Mo** (dont 65 Mo pour le moteur et ses 897 snapshots en mémoire) |
+
+Ce qui a fait gagner du temps (mesuré en isolation avant de coder) : les 897 checkpoints (~20 Mo de JSON) coûtaient ~1,2 s en colonne `JSON` contre ~0,6 s en `LONGTEXT` (MySQL validait et convertissait le JSON en binaire pour rien), et les 5 832 `INSERT` unitaires coûtaient ~0,37 s contre ~0,07 s en multi-lignes (un aller-retour réseau par ligne). Le temps d'écriture restant est dominé par le **volume** des checkpoints : le type `text` ne change pas la taille en base. La vraie réduction viendra des checkpoints épars (TODO de la section 5 de `docs/ROADMAP.md`).
+
+**Mémoire** : en mode debug, le profileur de Doctrine retient les paramètres des requêtes, donc le pic grimpe d'environ 20 Mo à chaque partie créée dans un même processus (script, boucle de tests). Sans debug, il reste stable. Une requête HTTP isolée n'est pas concernée. Garder `memory_limit` confortable (512 Mo pour le serveur de dev et PHPUnit ; le défaut de 128 Mo du CLI ne suffit pas à enchaîner plusieurs créations en debug).
+
+## Persistance : `json_text` et insertions par lots
+
+- Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.
+- `SimulationService::run()` écrit les événements et les checkpoints avec `BulkInserter` (INSERT multi-lignes : 500 événements ou 50 checkpoints par requête, hors UnitOfWork) dans une seule transaction (`wrapInTransaction`).
+- Après un changement de constructeur de service, le conteneur du mode test se reconstruit tout seul (`APP_DEBUG=1` dans `phpunit.xml.dist`) ; `SHELL_VERBOSITY=-1` limite le journal aux erreurs.
+
+## Pièges rencontrés lors de l'intégration
+
+- **Dossier synchronisé par iCloud (`~/Documents`)** : c'était la cause de tous les blocages. Installer `vendor/` y générait des copies de conflit (`Request 2.php`, `Kernel 3.php`…), et iCloud a même dupliqué des références dans `.git` (`refs/heads/dev 2`), ce qui cassait `git fetch`. Composer ne rendait jamais la main après « Generating autoload files ». Le dépôt a donc été déplacé hors d'iCloud, dans `~/GitHub/`. Ne pas le remettre sous `~/Documents` ou `~/Desktop`. (Le contournement `vendor.nosync` n'est plus utilisé.)
+- **Symfony Flex** : il avait l'air de bloquer, mais c'était iCloud. Hors iCloud il fonctionne et il est installé. Il épingle la famille Symfony (`extra.symfony.require: 7.4.*`), ce qui évite de retomber sur un mélange 7.4 / 8.x (`symfony/var-exporter` 8 est incompatible avec Doctrine). La config existait déjà : ses recettes ont ajouté `cache.yaml`, `routing.yaml`, `config/routes/`, `preload.php`, `symfony.lock`, `bin/phpunit`, des `.gitignore` de dossiers, et un bloc dans `.env`. Nettoyage fait après coup : bloc `.env` dupliqué retiré (il remettait un `DATABASE_URL` Postgres), `compose.yaml` / `compose.override.yaml` / `.env.dev` supprimés, script `assets:install` retiré. `DEFAULT_URI` (requis par `routing.yaml`) est dans `.env`.
+- Après chaque `composer require` / `update` : relire le diff de `.env`, supprimer `compose*.yaml` ajouté par une recette, et vérifier `composer show | grep ' 8\.'` (vide).
+- `make:migration` n'est pas installé : utiliser `doctrine:migrations:diff`. Les migrations sont écrites pour MySQL (SQL propre à MySQL) ; ne pas les rejouer sur une autre base.
+- `config/reference.php` est généré automatiquement par Symfony et change selon l'environnement : le versionner tel quel.
+- Le `memory_limit` du serveur doit rester confortable (le test d'API le fixe à 512 Mo).

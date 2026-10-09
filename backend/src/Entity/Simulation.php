@@ -36,11 +36,11 @@ class Simulation
     private string $status = self::RUNNING;
 
     /** GameState::toArray() courant (dernier état connu de la branche). */
-    #[ORM\Column(type: 'json')]
+    #[ORM\Column(type: 'json_text')]
     private array $state = [];
 
     /** DecisionRequest::toArray() quand status = waiting. */
-    #[ORM\Column(type: 'json', nullable: true)]
+    #[ORM\Column(type: 'json_text', nullable: true)]
     private ?array $pending = null;
 
     #[ORM\Column]

@@ -23,6 +23,21 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - **Titre de la PR** : toujours `{message de commit} [staging]` (ex. commit « Création du workflow git » → PR « Création du workflow git [staging] »). Pas besoin de le demander : il se déduit du message de commit.
 - Ne pas merger les PR soi-même sauf demande explicite.
 
+## Roadmap (à tenir à jour)
+
+- **Avant de commencer un travail et avant de conclure**, lire `docs/ROADMAP.md`.
+- **Cocher `[x]` seulement quand la vérification a réellement passé dans la session** (commande lancée, résultat constaté : tests, build, `curl`…) **ou qu'un TODO est terminé et vérifié.** Jamais sur une estimation ou une déclaration ; si une vérification échoue, laisser décoché et noter l'écart.
+- À chaque mise à jour : actualiser la ligne « Dernière mise à jour » en tête de la roadmap et, si la vérification concerne une partie du projet, la table « État de vérification » ci-dessous.
+- Un TODO découvert en cours de route est ajouté, décoché, dans la bonne section ; un TODO abandonné ou remplacé est retiré ou barré, avec la raison.
+- La mise à jour de la roadmap fait partie du **même commit** que le travail correspondant.
+
+## Pièges d'environnement (voir `docs/SYMFONY_SETUP.md`)
+
+- **Ne jamais cloner ni déplacer le dépôt sous `~/Documents` ou `~/Desktop`** (synchronisés par iCloud) : iCloud y crée des copies de conflit (`Request 2.php`, `dev 2` dans `.git`…) qui corrompent `vendor/` et `.git`, et Composer se bloque. Le dépôt vit dans `~/GitHub/`.
+- **Symfony Flex est installé** : il épingle la famille Symfony via `extra.symfony.require` (`7.4.*`). Ses recettes ne doivent pas écraser notre config : après un `composer require`, relire le diff de `.env` (une recette peut y ajouter un `DATABASE_URL` Postgres qui masquerait notre MySQL) et supprimer `compose*.yaml` si une recette en ajoute. Vérifier `composer show | grep ' 8\.'` (doit rester vide).
+
+- **Base MySQL** : le mot de passe vit dans `backend/.env.local` et `backend/.env.test.local` (ignorés par git). Ne jamais le mettre dans `.env` / `.env.test` (versionnés, valeur `CHANGEME`) ni dans un commit. Colonnes JSON en **`json_text`** (LONGTEXT), jamais le type `json` natif de MySQL (il réordonne les clés et ralentit l'écriture) ; événements et checkpoints écrits en masse par `BulkInserter`.
+
 ## Commandes
 
 ```bash
@@ -30,11 +45,14 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend
+# Backend (35 tests : moteur, API, type Doctrine ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
+php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
+cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
 
 # Frontend
 cd frontend && npm install && npm test && npm run dev
+cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API réelle ; captures dans frontend/recette/ (ignoré, vidé à chaque run)
 ```
 
 ## Ajouter un type d'événement (checklist)
@@ -53,14 +71,15 @@ cd frontend && npm install && npm test && npm run dev
 | Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
 | Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (passer toujours : 32 décisions ; tout jouer : 40) |
 | Reducer front vs état final PHP (fixture) | Oui : `vitest` (4 tests) passe |
-| Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés, jamais affichés dans un navigateur) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Syntaxe PHP uniquement** : jamais exécutée, pas de kernel/config/migrations |
+| Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`) et 6 tests du type `json_text` passent (35 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA : ~0,7 s, ~29 Mo en base (MySQL 9.3) |
+| Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
 
 Limites de comportement connues : sans combat, personne ne meurt de dégâts, donc tous les joueurs meurent de pioche vers le tour 131 et **J3 gagne toujours** (artefact de l'ordre de pioche). Le commandant n'est lancé qu'une fois par joueur (taxe et retour en zone de commandement jamais exercés en partie). Phases réduites à pioche / principale / fin.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md`. Priorité immédiate : intégrer le squelette dans une vraie app Symfony (`docs/SYMFONY_SETUP.md`) et tester l'API HTTP (`phpunit`, `npm test` et `vue-tsc` passent déjà), puis le combat pour donner des enjeux aux parties.
+Voir `docs/ROADMAP.md`. Priorité immédiate : tester le front dans un navigateur contre l'API réelle (créer, décider, forker), puis le combat pour donner des enjeux aux parties.
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 

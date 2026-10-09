@@ -53,4 +53,7 @@
 
 # MTG Sim : dépendances et caches (le .gitignore ci-dessus est un modèle Symfony racine-seulement)
 backend/vendor/
+backend/var/
+backend/.env.local
+backend/.env.*.local
 .phpunit.result.cache
