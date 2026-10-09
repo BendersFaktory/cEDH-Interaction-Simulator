@@ -8,6 +8,9 @@ const store = useSimulationStore()
 const groups = computed(() => {
   const actions = store.pending?.actions ?? []
   return [
+    { title: 'Attaquer', items: actions.filter((a) => a.type === 'attack') },
+    { title: 'Bloquer', items: actions.filter((a) => a.type === 'block') },
+    { title: 'Terminer la déclaration', items: actions.filter((a) => a.type === 'done') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },
     { title: 'Sorts', items: actions.filter((a) => a.type === 'cast') },
     { title: 'Priorité', items: actions.filter((a) => a.type === 'pass') },
@@ -19,7 +22,7 @@ const groups = computed(() => {
   <section v-if="store.pending" class="actions">
     <h3>À toi de jouer — J{{ store.pending.player }}</h3>
     <p class="muted">
-      Tour {{ store.pending.turn }}, {{ phaseLabel(store.pending.phase) }} · pile : {{ store.pending.stack.length }}
+      Tour {{ store.pending.turn }}, {{ phaseLabel(store.pending.phase) }}{{ store.pending.declaring === 'attackers' ? ' — déclaration des attaquants' : store.pending.declaring === 'blockers' ? ' — déclaration des bloqueurs' : '' }} · pile : {{ store.pending.stack.length }}
     </p>
     <div v-for="g in groups" :key="g.title">
       <h4>{{ g.title }}</h4>

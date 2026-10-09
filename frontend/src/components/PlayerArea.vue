@@ -16,6 +16,11 @@ defineProps<{ player: PlayerView; isActive: boolean; hasPriority: boolean; hasPa
       <span v-if="player.lost" class="badge lost">éliminé</span>
     </header>
 
+    <div v-if="Object.keys(player.commanderDamage).length" class="zone">
+      <h4>Dégâts de commandant reçus</h4>
+      <small v-for="(n, k) in player.commanderDamage" :key="k">{{ k }} : {{ n }}/21 </small>
+    </div>
+
     <div class="zone">
       <h4>Zone de commandement</h4>
       <div class="cards">

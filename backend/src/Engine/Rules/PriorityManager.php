@@ -73,7 +73,7 @@ final class PriorityManager
             $legal = $this->legal->for($s, $holder);
 
             if ($injected !== null) {
-                $action = $this->validate($injected, $holder, $legal);
+                $action = $this->legal->match($injected, $holder, $legal);
                 $injected = null;
             } else {
                 $action = $this->agents->get($s->controllers[$holder])->decide($s, $holder, $legal);
@@ -183,21 +183,5 @@ final class PriorityManager
         if ($s->player($p->holder)->lost) {
             $p->holder = $s->nextAlive($p->holder);
         }
-    }
-
-    /**
-     * @param list<Action> $legal
-     */
-    private function validate(Action $injected, int $holder, array $legal): Action
-    {
-        if ($injected->player() === $holder) {
-            foreach ($legal as $candidate) {
-                if ($candidate->id() === $injected->id()) {
-                    return $candidate;
-                }
-            }
-        }
-
-        throw new IllegalActionException(sprintf('Action illégale pour le joueur %d : %s', $holder, $injected->id()));
     }
 }

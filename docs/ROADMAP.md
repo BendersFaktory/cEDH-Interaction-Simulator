@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (phases complètes vérifiées). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (combat à 4 joueurs vérifié). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -15,17 +15,22 @@
 ## 1. Règles du jeu
 
 - [x] **Phases complètes** : untap, upkeep, pioche, main 1, début/fin de combat, main 2, fin, cleanup ; untap et cleanup sans priorité. *(Vérifié le 2026-10-10 : `smoke.php 42` déterministe (9861 événements, 1 terrain/tour, ordre des étapes correct), PHPUnit 45 tests dont `PhasesTest` (6) et `StateReconstructorTest` inchangé, `vue-tsc` + vitest, `npm run recette` sans problème.)*
-  - [ ] Étapes déclaration d'attaquants / bloqueurs / dégâts : à ajouter avec le combat (entre `BeginCombat` et `EndCombat`).
+  - [x] Étapes déclaration d'attaquants / bloqueurs / dégâts (entre `BeginCombat` et `EndCombat`) : faites avec le combat, sautées sans attaquant.
   - [ ] Défausse à 7 cartes au cleanup (nouvelle décision humaine, `CardDiscarded`).
   - [ ] Mesurer à nouveau taille en base / latence (`docs/SYMFONY_SETUP.md`) : ~2× plus d'événements et de rondes par partie.
   - [ ] Le tour 1 pioche (pas de saut de pioche) ; vérifier si on veut la règle Commander exacte.
-- [ ] **Combat à 4 joueurs** (priorité n°1) : phases de combat, déclarer attaquants (vers un joueur précis) et bloqueurs = nouvelles décisions pour `human` ; force/endurance, summoning sickness, `CombatResolver`. **Alimente les dégâts de commandant.**
+- [x] **Combat à 4 joueurs** : déclarer attaquants (vers un joueur précis) et bloqueurs = décisions séquentielles pour `human` ; force/endurance, mal d'invocation, `CombatManager` + `CombatResolver`, mort des créatures (SBA), commandant mort → zone de commandement. *(Vérifié le 2026-10-10 : `smoke.php 42` déterministe (3294 événements, partie finie au tour 38, 28 morts de créatures), 12 graines : commandants morts, relances avec taxe, 2 éliminations par `commander_damage` ; PHPUnit 56 tests dont `CombatTest` (11) ; `StateReconstructorTest` vert avec pauses humaines pendant déclaration ; `vue-tsc` + vitest 6 tests ; `npm run recette` : J0 déclare une attaque (scénario 8).)*
+  - [ ] IA d'attaque / blocage fine (menace, ne pas envoyer le commandant au casse-pipe, blocage multiple) : §3.
+  - [ ] Mots-clés (vol, initiative, piétinement, célérité...) et ordre d'assignation des dégâts choisi par l'attaquant.
+  - [ ] Stops configurables : `human:auto` s'arrête à chaque déclaration possible (§4).
+  - [ ] Mesurer taille en base / latence avec le combat (parties ~3× plus courtes en événements).
 - [ ] **Mana** : couleurs, pool, capacités de mana (ne passent pas par la pile), coûts hybrides/X.
 - [ ] **Déclencheurs** : file d'attente dans `GameState`, ordre APNAP, ciblage, `TriggerManager`.
 - [ ] **Capacités activées** (action légale + pile).
-- [ ] **Actions basées sur l'état** : créatures létales, légendes, jetons...
+- [ ] **Actions basées sur l'état** : ~~créatures létales~~ (faites avec le combat), légendes, jetons...
 - [x] Format **Commander à 4** (tranché) : 40 PV, zone de commandement, taxe de commandant, retour en zone de commandement, seuil de 21 dégâts de commandant (SBA).
-- [ ] Commander : **dégâts de commandant** (via le combat), mulligan, ordre du tour aléatoire, identité de couleurs, decks de 100 cartes.
+- [x] Commander : **dégâts de commandant** (via le combat, vérifié ci-dessus).
+- [ ] Commander : mulligan, ordre du tour aléatoire, identité de couleurs, decks de 100 cartes.
 
 ## 2. Cartes
 

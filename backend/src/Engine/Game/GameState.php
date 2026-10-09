@@ -24,6 +24,7 @@ final class GameState
     public int $eventSeq = 0;
     public bool $over = false;
     public ?int $winner = null;
+    public CombatState $combat;
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -41,6 +42,7 @@ final class GameState
         ksort($this->players);
         $this->activePlayer = (int) array_key_first($this->players);
         $this->priority = new PriorityState($this->activePlayer);
+        $this->combat = new CombatState();
     }
 
     public function player(int $id): PlayerState
@@ -148,6 +150,7 @@ final class GameState
             'phase' => $this->phase->value,
             'stepStarted' => $this->stepStarted,
             'priority' => $this->priority->toArray(),
+            'combat' => $this->combat->toArray(),
             'stack' => array_map(static fn (StackItem $i) => $i->toArray(), $this->stack),
             'landsPlayed' => $this->landsPlayed,
             'nextStackId' => $this->nextStackId,
@@ -178,6 +181,7 @@ final class GameState
         $s->phase = Phase::from($d['phase']);
         $s->stepStarted = (bool) $d['stepStarted'];
         $s->priority = PriorityState::fromArray($d['priority']);
+        $s->combat = CombatState::fromArray($d['combat'] ?? []);
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];

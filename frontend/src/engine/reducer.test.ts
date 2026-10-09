@@ -24,6 +24,7 @@ describe('reducer — test de contrat avec le moteur PHP', () => {
         tappedLands: p.battlefield.filter((c) => c.tapped).length,
         graveyard: p.graveyard.length,
         command: p.command.length,
+        commanderDamage: p.commanderDamage,
       }).toEqual(expected)
     }
   })
@@ -44,5 +45,30 @@ describe('reducer — test de contrat avec le moteur PHP', () => {
     const resolved = events.find((e) => e.type === 'SpellResolved' && e.payload.stackId === cast.payload.stackId)!
     expect(replay(events, cast.seq).stack.map((i) => i.id)).toContain(cast.payload.stackId)
     expect(replay(events, resolved.seq).stack.map((i) => i.id)).not.toContain(cast.payload.stackId)
+  })
+})
+
+describe('reducer — combat', () => {
+  it('les créatures mortes quittent le champ de bataille, l\'attaque est effacée en fin de combat', () => {
+    const attacker = events.find((e) => e.type === 'AttackerDeclared')!
+    const after = replay(events, attacker.seq)
+    const card = after.players[attacker.payload.player].battlefield.find((c) => c.id === attacker.payload.card)!
+    expect(card.attacking).toBe(attacker.payload.defender)
+    expect(card.tapped).toBe(true)
+
+    const ended = events.find((e) => e.type === 'CombatEnded' && e.seq > attacker.seq)!
+    const over = replay(events, ended.seq)
+    for (const pl of Object.values(over.players)) {
+      expect(pl.battlefield.some((c) => c.attacking !== undefined || c.blocking !== undefined)).toBe(false)
+    }
+  })
+
+  it('une créature morte est dans un cimetière ou en zone de commandement, jamais sur le champ de bataille', () => {
+    const died = events.find((e) => e.type === 'CreatureDied')!
+    const view = replay(events, died.seq)
+    const pl = view.players[died.payload.player]
+    expect(pl.battlefield.some((c) => c.id === died.payload.card.id)).toBe(false)
+    const zone = died.payload.destination === 'command' ? pl.command : pl.graveyard
+    expect(zone.some((c) => c.id === died.payload.card.id)).toBe(true)
   })
 })

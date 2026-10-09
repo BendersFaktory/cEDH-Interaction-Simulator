@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Rules\CombatManager;
 use App\Engine\Rules\StateBasedActions;
 
-/** Enchaîne les étapes et les tours. TODO: défausse à 7 au cleanup, étapes de combat détaillées. */
+/** Enchaîne les étapes et les tours. TODO: défausse à 7 au cleanup. */
 final class TurnManager
 {
-    public function __construct(private readonly StateBasedActions $sba)
-    {
+    public function __construct(
+        private readonly StateBasedActions $sba,
+        private readonly CombatManager $combat,
+    ) {
     }
 
     /** Effets d'entrée dans l'étape courante, puis ouverture de la première ronde de priorité. */
@@ -22,6 +25,16 @@ final class TurnManager
             $untapped = $s->player($s->activePlayer)->untapAll();
             if ($untapped !== []) {
                 $s->emit('PermanentsUntapped', ['player' => $s->activePlayer, 'cards' => $untapped]);
+            }
+        }
+
+        $this->combat->beginStep($s);
+
+        if ($s->phase === Phase::Cleanup) {
+            foreach ($s->players as $p) {
+                foreach ($p->battlefield as $card) {
+                    $card->damage = 0;
+                }
             }
         }
 
@@ -44,6 +57,9 @@ final class TurnManager
     public function endStep(GameState $s): void
     {
         $next = $s->phase->next();
+        while ($next !== null && $this->combat->skips($next, $s)) {
+            $next = $next->next();
+        }
         if ($next !== null) {
             $s->phase = $next;
             $s->stepStarted = false;

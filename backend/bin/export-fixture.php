@@ -41,6 +41,7 @@ foreach ($state->players as $p) {
         'tappedLands' => count(array_filter($p->battlefield, static fn ($c) => $c->tapped)),
         'graveyard' => count($p->graveyard),
         'command' => count($p->command),
+        'commanderDamage' => (object) $p->commanderDamage,
     ];
 }
 

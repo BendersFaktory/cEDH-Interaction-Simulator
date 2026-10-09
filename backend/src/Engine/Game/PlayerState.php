@@ -76,6 +76,19 @@ final class PlayerState
         return null;
     }
 
+    public function takeFromBattlefield(string $cardId): ?CardInstance
+    {
+        foreach ($this->battlefield as $i => $card) {
+            if ($card->id === $cardId) {
+                array_splice($this->battlefield, $i, 1);
+
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
     public function takeFromCommand(string $cardId): ?CardInstance
     {
         foreach ($this->command as $i => $card) {

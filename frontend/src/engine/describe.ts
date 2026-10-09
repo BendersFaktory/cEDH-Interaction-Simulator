@@ -35,7 +35,17 @@ export function describeEvent(e: GameEvent): string {
     case 'SpellFizzled':
       return 'Le sort n\'a plus de cible valide'
     case 'DamageDealt':
-      return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)`
+      return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)${p.commanderDamage ? ` — dégâts de commandant : ${p.commanderDamage.total}/21` : ''}`
+    case 'AttackerDeclared':
+      return `J${p.player} attaque J${p.defender} avec ${p.card}`
+    case 'BlockerDeclared':
+      return `J${p.player} bloque ${p.attacker} avec ${p.blocker}`
+    case 'CreatureDamaged':
+      return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
+    case 'CreatureDied':
+      return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'CombatEnded':
+      return 'Fin du combat'
     case 'PlayerLost':
       return `J${p.player} est éliminé (${p.reason})`
     case 'GameOver':

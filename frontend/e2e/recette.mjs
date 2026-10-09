@@ -116,6 +116,32 @@ async function run() {
   await page.fill('input[type=number] >> nth=1', '99999'); await page.click('text=Ouvrir'); await page.waitForTimeout(800)
   log('7 id inexistant, erreur affichée:', await page.locator('.error').textContent().catch(()=>'(aucune)')); await shot('7-erreur')
 
+  // 8 : combat côté humain (J0 vs 3 IA, seed 7) : jouer, lancer des créatures, puis déclarer une attaque (et bloquer si l'IA attaque J0)
+  await page.check('text=Je joue J0 >> input')
+  await page.fill('input[placeholder="aléatoire"]', '7')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForSelector('.actions', { timeout: 30000 })
+  const first = (title) => page.locator(`.actions h4:has-text("${title}") ~ button`).first()
+  let attacked = false, sawBlock = false
+  for (let i = 0; i < 400 && !attacked; i++) {
+    if (!(await page.locator('.actions').count())) break
+    const order = ['Attaquer', 'Bloquer', 'Terrains', 'Sorts', 'Terminer la déclaration', 'Priorité']
+    for (const title of order) {
+      // Sorts : on ne lance que des créatures (le Bolt/Contresort ne servent pas ce scénario).
+      const b = title === 'Sorts' ? page.locator('.actions h4:has-text("Sorts") ~ button:is(:has-text("Grizzly"), :has-text("Commandant"))').first() : first(title)
+      if (!(await b.count())) continue
+      if (title === 'Bloquer') sawBlock = true
+      if (title === 'Attaquer') attacked = true
+      await b.click()
+      break
+    }
+    await page.waitForTimeout(150)
+  }
+  log('8 attaque déclarée par J0:', attacked, '| a pu bloquer:', sawBlock, '|', await info())
+  if (!attacked) problems.push('recette combat : J0 n\'a jamais pu déclarer d\'attaque en 400 décisions')
+  await page.waitForTimeout(500)
+  log('8 journal :', (await page.locator('text=/J0 attaque J\\d/').count()) > 0 ? 'AttackerDeclared affiché' : 'absent'); await shot('8-combat')
+
   // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
   const unexpected = problems.filter((p) => !/404/.test(p))
   log('\nPROBLÈMES inattendus:', unexpected.length ? '\n' + unexpected.join('\n') : 'aucun')

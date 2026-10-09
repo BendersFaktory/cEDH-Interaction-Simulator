@@ -33,6 +33,17 @@ final class ScenarioBuilder
         return $this;
     }
 
+    /** @var array<int, list<CardInstance>> */
+    private array $creatures = [];
+
+    /** Pose une créature sur le champ de bataille (arrivée au tour 0 : elle peut attaquer au tour 1). */
+    public function creature(int $player, string $id, int $power, int $toughness, bool $commander = false, int $enteredTurn = 0): self
+    {
+        $this->creatures[$player][] = new CardInstance($id, $commander ? 'Test Commander' : 'Test Creature', CardInstance::CREATURE, 2, null, 0, false, $commander, $power, $toughness, 0, $enteredTurn);
+
+        return $this;
+    }
+
     private int $life = 20;
 
     /** PV de départ de tous les joueurs (20 par défaut pour les anciens scénarios, 40 pour Commander). */
@@ -70,6 +81,9 @@ final class ScenarioBuilder
             }
             for ($i = 0; $i < ($this->lands[$id] ?? 0); $i++) {
                 $p->battlefield[] = new CardInstance("p{$id}_land$i", 'Land', CardInstance::LAND);
+            }
+            foreach ($this->creatures[$id] ?? [] as $creature) {
+                $p->battlefield[] = $creature;
             }
             // Bibliothèque factice pour éviter toute élimination par pioche pendant le test.
             for ($i = 0; $i < 10; $i++) {

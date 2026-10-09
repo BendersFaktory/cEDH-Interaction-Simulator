@@ -26,6 +26,7 @@ final class DecisionRequest
             'turn' => $s->turn,
             'phase' => $s->phase->value,
             'activePlayer' => $s->activePlayer,
+            'declaring' => $s->combat->declaring,
             'priority' => $s->priority->toArray(),
             'stack' => array_map(static fn ($i) => $i->toArray(), $s->stack),
             'actions' => array_map(

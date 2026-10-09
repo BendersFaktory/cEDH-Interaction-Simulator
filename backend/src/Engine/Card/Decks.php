@@ -20,11 +20,11 @@ final class Decks
     public static function commanderDemo(int $playerId, int $librarySize = 39): array
     {
         $n = 0;
-        $make = static function (string $name, string $kind, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false) use ($playerId, &$n): CardInstance {
-            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $kind, $cost, $effect, $amount, false, $commander);
+        $make = static function (string $name, string $kind, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0) use ($playerId, &$n): CardInstance {
+            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $kind, $cost, $effect, $amount, false, $commander, $power, $toughness);
         };
 
-        $commander = $make("Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, true);
+        $commander = $make("Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, true, 3, 3);
 
         $library = [];
         for ($i = 0; $i < 14; $i++) {
@@ -37,7 +37,7 @@ final class Decks
             $library[] = $make('Counterspell', CardInstance::INSTANT, 2, 'counter');
         }
         while (count($library) < $librarySize) {
-            $library[] = $make('Grizzly Bears', CardInstance::CREATURE, 2);
+            $library[] = $make('Grizzly Bears', CardInstance::CREATURE, 2, null, 0, false, 2, 2);
         }
 
         return ['commander' => $commander, 'library' => array_slice($library, 0, $librarySize)];

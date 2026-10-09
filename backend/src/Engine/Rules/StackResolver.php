@@ -19,6 +19,7 @@ final class StackResolver
 
         // Permanent -> champ de bataille ; sinon cimetière (ou zone de commandement pour un commandant).
         if ($card->kind === 'creature') {
+            $card->enteredTurn = $s->turn;
             $s->player($item->controller)->battlefield[] = $card;
             $destination = 'battlefield';
         } else {

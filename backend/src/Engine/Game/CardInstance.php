@@ -25,12 +25,21 @@ final class CardInstance
         public readonly int $amount = 0,
         public bool $tapped = false,
         public readonly bool $commander = false,
+        public readonly int $power = 0,
+        public readonly int $toughness = 0,
+        public int $damage = 0,        // dégâts marqués ce tour (effacés au cleanup)
+        public int $enteredTurn = 0,   // tour d'arrivée sur le champ de bataille (mal d'invocation)
     ) {
     }
 
     public function isLand(): bool
     {
         return $this->kind === self::LAND;
+    }
+
+    public function isCreature(): bool
+    {
+        return $this->kind === self::CREATURE;
     }
 
     public function isInstantSpeed(): bool
@@ -49,12 +58,14 @@ final class CardInstance
             'effect' => $this->effect,
             'amount' => $this->amount,
             'commander' => $this->commander,
+            'power' => $this->power,
+            'toughness' => $this->toughness,
         ];
     }
 
     public function toArray(): array
     {
-        return $this->toPublic() + ['tapped' => $this->tapped];
+        return $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn];
     }
 
     public static function fromArray(array $d): self
@@ -68,6 +79,10 @@ final class CardInstance
             (int) ($d['amount'] ?? 0),
             (bool) ($d['tapped'] ?? false),
             (bool) ($d['commander'] ?? false),
+            (int) ($d['power'] ?? 0),
+            (int) ($d['toughness'] ?? 0),
+            (int) ($d['damage'] ?? 0),
+            (int) ($d['enteredTurn'] ?? 0),
         );
     }
 }
