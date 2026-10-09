@@ -25,7 +25,7 @@ class GameEventRecord
         private int $seq,
         #[ORM\Column(length: 48)]
         private string $type,
-        #[ORM\Column(type: 'json')]
+        #[ORM\Column(type: 'json_text')]
         private array $payload,
         #[ORM\Column]
         private bool $verbose,

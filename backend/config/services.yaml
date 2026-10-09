@@ -9,4 +9,5 @@ services:
         exclude:
             - '../src/Engine/'
             - '../src/Entity/'
+            - '../src/Doctrine/'
             - '../src/Kernel.php'

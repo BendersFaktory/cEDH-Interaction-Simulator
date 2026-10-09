@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace App\Tests\Api;
 
+use App\Engine\Agent\AgentRegistry;
+use App\Engine\Game\GameEngine;
+use App\Engine\Game\GameFactory;
+use App\Engine\Snapshot\InMemoryCheckpoints;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 /**
- * Teste la couche Symfony de bout en bout (contrôleur -> service -> moteur -> Doctrine/SQLite),
+ * Teste la couche Symfony de bout en bout (contrôleur -> service -> moteur -> Doctrine/MySQL),
  * avec le même flux que le front (frontend/src/api/client.ts).
  */
 final class SimulationApiTest extends WebTestCase
@@ -96,9 +100,27 @@ final class SimulationApiTest extends WebTestCase
 
         [$status, $pending] = $this->call('GET', self::BASE . "/{$sim['id']}/pending");
         self::assertSame(200, $status);
-        // assertEquals : MySQL normalise l'ordre des clés des colonnes JSON, or l'ordre des clés d'un objet JSON
-        // n'a pas de sens (les listes, comme `actions`, gardent bien leur ordre).
-        self::assertEquals($sim['pending'], $pending);
+        self::assertSame($sim['pending'], $pending, 'Colonnes json_text : le texte est stocké tel quel, clés dans le même ordre');
+    }
+
+    public function testLeJournalDeLaBaseEstExactementCelDuMoteurClesDansLOrdre(): void
+    {
+        $sim = $this->createGame(42, self::FOUR_AI);
+
+        // Référence : la même partie jouée directement par le moteur, sans passer par l'API ni la base.
+        $state = GameFactory::create(42, array_fill(0, 4, 'ai:heuristic'));
+        $result = (new GameEngine(new AgentRegistry(), new InMemoryCheckpoints()))->advance($state);
+        $expected = [];
+        foreach ($result->events as $e) {
+            $expected[] = ['seq' => $e->seq, 'type' => $e->type, 'payload' => $e->payload, 'verbose' => $e->verbose];
+        }
+
+        // assertSame (et non assertEquals) : ni perte, ni doublon, ni changement de l'ordre des clés
+        // après l'insertion par lots et l'aller-retour dans la colonne json_text.
+        self::assertSame(
+            json_decode(json_encode($expected, JSON_THROW_ON_ERROR), true),
+            $this->events($sim['id']),
+        );
     }
 
     public function testDecisionsValidesInvalidesEtSurPartieTerminee(): void

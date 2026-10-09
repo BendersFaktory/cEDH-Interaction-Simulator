@@ -35,7 +35,7 @@ Le front (`cd frontend && npm run dev`) relaie `/api` vers le port 8000 (voir `f
 ## Vérifications
 
 ```bash
-vendor/bin/phpunit                          # 28 tests : suites "engine" (18) et "api" (10)
+vendor/bin/phpunit                          # 35 tests : suites "engine" (18), "api" (11) et "doctrine" (6)
 vendor/bin/phpunit --testsuite api          # API seule (contrôleur -> service -> moteur -> Doctrine/MySQL)
 php bin/console lint:container
 php bin/console doctrine:schema:validate
@@ -71,15 +71,23 @@ curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: applic
 
 ## Mesures (seed 42, 4 IA)
 
-| | SQLite (avant) | MySQL 9.3 (maintenant) |
-|---|---|---|
-| `POST /api/simulations` (4935 événements, 897 checkpoints) | ~0,55 s | **~1,9 s** |
-| Taille d'une partie | ~19 Mo | **~28 Mo** (les checkpoints dominent : ~32 Ko chacun) |
-| Suite PHPUnit complète (28 tests) | ~6 s | **~17 s** |
+| | SQLite (au départ) | MySQL, colonnes `JSON` natives | **MySQL, `json_text` + insertions par lots** (actuel) |
+|---|---|---|---|
+| `POST /api/simulations` (4935 événements, 897 checkpoints) | ~0,55 s | ~1,94 s | **~0,96 s à froid, ~0,68 s à chaud** |
+| Création de partie dans le service (`create()`, moteur ~0,09 s inclus) | n.m. | ~1,9 s | **0,6 à 0,8 s** |
+| Suite PHPUnit complète | ~6 s (28 tests) | ~17 s (28 tests) | **~9,6 s (35 tests)** |
+| Taille d'une partie en base | ~19 Mo | ~28 Mo | **~29 Mo** (checkpoints : 28,5 Mo) |
+| Pic mémoire PHP d'une création | n.m. | n.m. | **~100 Mo** (dont 65 Mo pour le moteur et ses 897 snapshots en mémoire) |
 
-Un seul `flush()` en fin de `run()` : volontairement simple, sans problème à cette taille (`max_allowed_packet` = 64 Mo, une ligne `checkpoint` ≈ 32 Ko). À optimiser (insertions par lots, moins de checkpoints) si le volume grossit.
+Ce qui a fait gagner du temps (mesuré en isolation avant de coder) : les 897 checkpoints (~20 Mo de JSON) coûtaient ~1,2 s en colonne `JSON` contre ~0,6 s en `LONGTEXT` (MySQL validait et convertissait le JSON en binaire pour rien), et les 5 832 `INSERT` unitaires coûtaient ~0,37 s contre ~0,07 s en multi-lignes (un aller-retour réseau par ligne). Le temps d'écriture restant est dominé par le **volume** des checkpoints : le type `text` ne change pas la taille en base. La vraie réduction viendra des checkpoints épars (TODO de la section 5 de `docs/ROADMAP.md`).
 
-**Colonnes `JSON` natives de MySQL** : MySQL normalise l'ordre des clés d'un objet. Une valeur relue depuis la base peut donc avoir ses clés dans un autre ordre que celle renvoyée directement par le moteur (ex. `POST` vs `GET /pending`). C'est sans conséquence (l'ordre des clés d'un objet JSON n'a pas de sens, les listes gardent leur ordre, et le front lit par nom) mais les tests doivent comparer avec `assertEquals`, pas `assertSame`. `GameState::fromArray()` n'en dépend pas : le test « fork sans changement = même fin de partie » le confirme.
+**Mémoire** : en mode debug, le profileur de Doctrine retient les paramètres des requêtes, donc le pic grimpe d'environ 20 Mo à chaque partie créée dans un même processus (script, boucle de tests). Sans debug, il reste stable. Une requête HTTP isolée n'est pas concernée. Garder `memory_limit` confortable (512 Mo pour le serveur de dev et PHPUnit ; le défaut de 128 Mo du CLI ne suffit pas à enchaîner plusieurs créations en debug).
+
+## Persistance : `json_text` et insertions par lots
+
+- Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.
+- `SimulationService::run()` écrit les événements et les checkpoints avec `BulkInserter` (INSERT multi-lignes : 500 événements ou 50 checkpoints par requête, hors UnitOfWork) dans une seule transaction (`wrapInTransaction`).
+- Après un changement de constructeur de service, le conteneur du mode test se reconstruit tout seul (`APP_DEBUG=1` dans `phpunit.xml.dist`) ; `SHELL_VERBOSITY=-1` limite le journal aux erreurs.
 
 ## Pièges rencontrés lors de l'intégration
 

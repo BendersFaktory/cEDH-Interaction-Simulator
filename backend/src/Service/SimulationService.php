@@ -22,8 +22,10 @@ use Doctrine\ORM\EntityManagerInterface;
  */
 class SimulationService
 {
-    public function __construct(private readonly EntityManagerInterface $em)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $em,
+        private readonly BulkInserter $bulk,
+    ) {
     }
 
     /** @param array<int, string> $controllers id joueur => clé d'agent */
@@ -129,17 +131,20 @@ class SimulationService
         $checkpoints = new InMemoryCheckpoints();
         $result = (new GameEngine(new AgentRegistry(), $checkpoints))->advance($state, $decision);
 
-        foreach ($result->events as $e) {
-            $this->em->persist(new GameEventRecord($sim, $e->seq, $e->type, $e->payload, $e->verbose));
-        }
-        foreach ($checkpoints->states as $seq => $snapshot) {
-            $this->em->persist(new Checkpoint($sim, $seq, $snapshot));
-        }
+        // Une seule transaction (tout ou rien). Les événements et checkpoints sont écrits en masse, hors
+        // UnitOfWork (des milliers d'entités + un INSERT par ligne seraient très lents sur MySQL).
+        $this->em->wrapInTransaction(function () use ($sim, $state, $result, $checkpoints): void {
+            $this->em->persist($sim);
+            $this->em->flush(); // obtient l'id de la simulation
 
-        $sim->setState($state->toArray());
-        $sim->setPending($result->pending?->toArray());
-        $sim->setStatus($result->over ? Simulation::OVER : ($result->pending !== null ? Simulation::WAITING : Simulation::RUNNING));
-        $this->em->flush();
+            $this->bulk->insertEvents((int) $sim->getId(), $result->events);
+            $this->bulk->insertCheckpoints((int) $sim->getId(), $checkpoints->states);
+
+            $sim->setState($state->toArray());
+            $sim->setPending($result->pending?->toArray());
+            $sim->setStatus($result->over ? Simulation::OVER : ($result->pending !== null ? Simulation::WAITING : Simulation::RUNNING));
+            $this->em->flush();
+        });
 
         return $sim;
     }
