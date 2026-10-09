@@ -45,7 +45,7 @@ Avant de conclure un changement : `vendor/bin/phpunit`, `npm test`, `npm run typ
 - Code, commentaires et docs en français, comme le reste du dépôt ; imiter le style des fichiers voisins.
 - PHP : `declare(strict_types=1)`, classes `final` par défaut, PSR-4 (`App\` -> `backend/src`, `App\Tests\` -> `backend/tests`).
 - Ne pas committer `backend/vendor/`, `node_modules/`, `dist/`. Les lock files (`composer.lock`, `package-lock.json`) sont versionnés.
-- Pas de commit ni de push sans demande explicite.
+- Workflow Git : travailler uniquement sur `dev` (vérifier avec `git branch --show-current` avant toute modification), PR `dev` → `staging` à chaque commit, `master` réservée à l'utilisateur. Message de commit à demander s'il n'est pas fourni ; titre de PR toujours `{message de commit} [staging]`. Détail dans la section « Workflow Git » de [CLAUDE.md](CLAUDE.md).
 
 ## Où en est le projet
 
