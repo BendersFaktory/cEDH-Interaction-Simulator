@@ -35,19 +35,23 @@ cd frontend && npm install && npm test && npm run dev
 3. `frontend/src/engine/reducer.ts` (+ `describe.ts` pour le journal).
 4. Régénérer la fixture et relancer `npm test` (test de contrat PHP ↔ reducer).
 
-## État de vérification (à jour à la création du squelette)
+## État de vérification (dernière vérification : 2026-10-09)
 
 | Partie | Vérifié ? |
 |---|---|
-| Moteur PHP : syntaxe + partie complète via `bin/smoke.php` | Oui |
-| 18 tests (`PriorityRoundTest` + `CommanderTest`) | Passent avec un mini-runner qui imite PHPUnit ; **jamais lancés avec le vrai PHPUnit** (Packagist inaccessible depuis l'environnement de génération) |
-| Reducer front vs état final PHP (fixture) | Oui, via Node (type stripping), mêmes assertions que `reducer.test.ts` |
+| Moteur PHP : partie complète via `bin/smoke.php` | Oui |
+| Tests PHP : 18 tests / 70 assertions (`PriorityRoundTest` + `CommanderTest`) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
+| Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
+| Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (passer toujours : 32 décisions ; tout jouer : 40) |
+| Reducer front vs état final PHP (fixture) | Oui : `vitest` (4 tests) passe |
+| Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés, jamais affichés dans un navigateur) |
 | Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Syntaxe PHP uniquement** : jamais exécutée, pas de kernel/config/migrations |
-| Front Vue (composants, store) | **Jamais compilé** : `npm install` impossible à la génération → `vue-tsc` et `vitest` à lancer en premier |
+
+Limites de comportement connues : sans combat, personne ne meurt de dégâts, donc tous les joueurs meurent de pioche vers le tour 131 et **J3 gagne toujours** (artefact de l'ordre de pioche). Le commandant n'est lancé qu'une fois par joueur (taxe et retour en zone de commandement jamais exercés en partie). Phases réduites à pioche / principale / fin.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md`. Priorité immédiate : intégrer le squelette dans une vraie app Symfony (`docs/SYMFONY_SETUP.md`), lancer `phpunit` / `npm test` / `vue-tsc`, corriger ce qui casse.
+Voir `docs/ROADMAP.md`. Priorité immédiate : intégrer le squelette dans une vraie app Symfony (`docs/SYMFONY_SETUP.md`) et tester l'API HTTP (`phpunit`, `npm test` et `vue-tsc` passent déjà), puis le combat pour donner des enjeux aux parties.
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 

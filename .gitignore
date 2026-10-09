@@ -50,3 +50,7 @@
 
 # Embedded web-server pid file
 /.web-server-pid
+
+# MTG Sim : dépendances et caches (le .gitignore ci-dessus est un modèle Symfony racine-seulement)
+backend/vendor/
+.phpunit.result.cache
