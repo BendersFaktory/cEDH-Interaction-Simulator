@@ -7,7 +7,7 @@ namespace App\Engine\Game;
 use App\Engine\Rules\CombatManager;
 use App\Engine\Rules\StateBasedActions;
 
-/** Enchaîne les étapes et les tours. TODO: défausse à 7 au cleanup. */
+/** Enchaîne les étapes et les tours. */
 final class TurnManager
 {
     public function __construct(
@@ -38,7 +38,8 @@ final class TurnManager
             }
         }
 
-        if ($s->phase === Phase::Draw && !$s->drawCard($s->activePlayer)) {
+        // CR 103.8 : seul le premier joueur d'une partie à 2 saute sa pioche ; en multijoueur, tout le monde pioche dès le tour 1.
+        if ($s->phase === Phase::Draw &&!$s->drawCard($s->activePlayer)) {
             $this->sba->eliminate($s, $s->activePlayer, 'decked');
         }
 

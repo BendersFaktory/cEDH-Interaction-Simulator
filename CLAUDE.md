@@ -48,7 +48,7 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend (63 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
+# Backend (64 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
 php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
 cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
@@ -70,19 +70,19 @@ cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API r�
 | Partie | Vérifié ? |
 |---|---|
 | Moteur PHP : partie complète via `bin/smoke.php` | Oui |
-| Tests PHP : 63 tests (moteur dont `PhasesTest`, `CombatTest` et `DiscardTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
+| Tests PHP : 64 tests (moteur dont `PhasesTest`, `CombatTest` et `DiscardTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
 | Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
 | Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (recette : `npm run recette`) |
 | Reducer front vs état final PHP (fixture) | Oui : `vitest` (7 tests) passe |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (63 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (avant les phases complètes) : ~0,2 s, ~2,8 Mo en base (130 ancres, MySQL 9.3) ; mesures à refaire avec les 9 étapes par tour |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (64 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (avant les phases complètes) : ~0,2 s, ~2,8 Mo en base (130 ancres, MySQL 9.3) ; mesures à refaire avec les 9 étapes par tour |
 | Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
 
 Limites de comportement connues : l'IA attaque avec tout sur l'adversaire le plus faible et la partie se termine vers le tour 35-40 (seed 42 : J2 gagne). Taxe de commandant et retour en zone de commandement sont maintenant exercés en partie (vérifié sur 12 graines). Combat minimal : pas de mots-clés, un seul bloqueur côté IA, ordre d'assignation des dégâts = ordre de déclaration ; défausse à 7 : choix simple côté IA.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs et défausse à 7 sont faits. **Priorité immédiate : le mana** (couleurs, pool, capacités de mana, coûts hybrides/X), puis les déclencheurs et capacités activées. En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : règle de pioche du tour 1 ; nouvelle mesure de taille/latence en base.
+Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs et défausse à 7 sont faits. **Priorité immédiate : le mana** (couleurs, pool, capacités de mana, coûts hybrides/X), puis les déclencheurs et capacités activées. En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : nouvelle mesure de taille/latence en base.
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 

@@ -37,6 +37,31 @@ final class PhasesTest extends TestCase
         );
     }
 
+    /** Commander à 4 (CR 103.8) : seul le 1er joueur d'une partie à 2 saute sa pioche ; ici tout le monde pioche. */
+    public function testEveryPlayerDrawsOnTheirFirstTurn(): void
+    {
+        $s = GameFactory::create(3, self::FOUR_PASS);
+        $result = (new GameEngine(new AgentRegistry()))->advance($s);
+
+        $turn = 0;
+        $phase = '';
+        $drawers = [];
+        foreach ($result->events as $e) {
+            if ($e->type === 'PhaseChanged') {
+                $turn = $e->payload['turn'];
+                $phase = $e->payload['phase'];
+            } elseif ($e->type === 'CardDrawn' && $phase === 'draw' && $turn <= 4) {
+                $drawers[$turn][] = $e->payload['player'];
+            }
+        }
+
+        $this->assertCount(4, $drawers);
+        foreach ($drawers as $players) {
+            $this->assertCount(1, $players);
+        }
+        $this->assertCount(4, array_unique(array_merge(...array_values($drawers))));
+    }
+
     public function testUntapAndCleanupNeverOpenAPriorityRound(): void
     {
         $s = GameFactory::create(3, self::FOUR_PASS);
