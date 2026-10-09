@@ -7,7 +7,9 @@
 - [x] Intégrer dans une app Symfony (`docs/SYMFONY_SETUP.md`), créer les migrations. *(Symfony 7.4 + Flex, base MySQL 9.3, migrations versionnées, `doctrine:schema:validate` et `lint:container` OK, scénario `curl` création/décision/fork vérifié.)*
 - [x] Lancer `vendor/bin/phpunit` avec le vrai PHPUnit (les tests n'ont tourné qu'avec un mini-runner). *(PHPUnit 11.5 : 35 tests, 182 assertions.)*
 - [x] `cd frontend && npm install && npm run typecheck && npm test` ; corriger les erreurs de compilation éventuelles (le front n'a jamais été compilé). *(vitest 4 tests, `vue-tsc` et `vite build` OK.)*
-- [ ] Essayer un fork complet de bout en bout dans l'UI. *(Reste à faire : l'API est vérifiée par tests et `curl`, mais le front n'a jamais été ouvert dans un navigateur contre l'API réelle.)*
+- [x] Essayer un fork complet de bout en bout dans l'UI. *(Vérifié le 2026-10-09 dans Chrome (Playwright, `channel: chrome`) contre l'API réelle : partie J0 humaine (terrain + passes), navigation/lecture, partie 4 IA jusqu'à « Victoire de J3 » (4935 événements), fork depuis #1196 en reprenant J1 (fork #17 : décision possible, journal poursuivi), chargement d'une partie existante, erreur 404 affichée proprement. Aucune erreur console hors le 404 attendu. Script désormais versionné : `npm run recette`.)*
+- [x] Parcours versionné : `cd frontend && npm run recette` (Playwright + Chrome, démarre API et Vite si besoin, captures dans `frontend/recette/`, ignoré par git et vidé à chaque exécution). *(Vérifié le 2026-10-09 : tous les scénarios passent, aucun problème inattendu, serveurs arrêtés en fin de script.)*
+- [ ] Lancer la recette en CI (aujourd'hui à la demande, en local seulement).
 - [x] Ajouter des tests Symfony (`WebTestCase`) pour : création, fork, décision illégale (422), décision sans attente (409). *(`backend/tests/Api/SimulationApiTest.php`, 11 tests.)*
 
 ## 1. Règles du jeu

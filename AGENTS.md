@@ -55,4 +55,4 @@ Relire `docs/ROADMAP.md` avant de commencer et avant de conclure. Ne cocher `[x]
 
 ## Où en est le projet
 
-Moteur, couche Symfony sur MySQL (35 tests, scénario curl), reducer et build front sont vérifiés. Le front n'a pas encore été ouvert dans un navigateur contre l'API réelle. Pas encore de combat : les parties se terminent par pioche vide. Voir `docs/ROADMAP.md`.
+Moteur, couche Symfony sur MySQL (35 tests, scénario curl), reducer et build front sont vérifiés. Le front a été vérifié dans Chrome contre l'API réelle (création, décision, partie 4 IA, fork), rejouable avec `cd frontend && npm run recette` (captures dans `frontend/recette/`, ignoré par git). Pas encore de combat : les parties se terminent par pioche vide. Voir `docs/ROADMAP.md`.

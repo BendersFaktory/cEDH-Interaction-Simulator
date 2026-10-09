@@ -52,6 +52,7 @@ cd backend && php -S 127.0.0.1:8000 -t public                           # API po
 
 # Frontend
 cd frontend && npm install && npm test && npm run dev
+cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API réelle ; captures dans frontend/recette/ (ignoré, vidé à chaque run)
 ```
 
 ## Ajouter un type d'événement (checklist)
@@ -70,9 +71,9 @@ cd frontend && npm install && npm test && npm run dev
 | Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
 | Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (passer toujours : 32 décisions ; tout jouer : 40) |
 | Reducer front vs état final PHP (fixture) | Oui : `vitest` (4 tests) passe |
-| Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés, jamais affichés dans un navigateur) |
+| Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
 | Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`) et 6 tests du type `json_text` passent (35 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA : ~0,7 s, ~29 Mo en base (MySQL 9.3) |
-| Front branché sur l'API réelle dans un navigateur | **Non** : jamais ouvert dans un navigateur |
+| Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
 
 Limites de comportement connues : sans combat, personne ne meurt de dégâts, donc tous les joueurs meurent de pioche vers le tour 131 et **J3 gagne toujours** (artefact de l'ordre de pioche). Le commandant n'est lancé qu'une fois par joueur (taxe et retour en zone de commandement jamais exercés en partie). Phases réduites à pioche / principale / fin.
 
