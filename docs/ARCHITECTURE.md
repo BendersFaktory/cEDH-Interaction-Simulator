@@ -49,12 +49,12 @@ Deux agents humains :
 
 ## Snapshots et fork
 
-- `CheckpointListener::onCheckpoint()` est appelé juste après chaque `PriorityGranted`. `SimulationService` stocke alors `GameState::toArray()` dans `Checkpoint`.
-- **Fork** : trouver le checkpoint le plus proche ≤ `atEvent` (en remontant la chaîne des parents), restaurer le `GameState`, remplacer des clés dans `controllers` (ex. `[1 => 'human:auto']`), créer une `Simulation` fille (`parent`, `forkEventSeq`) et relancer `advance`.
+- `CheckpointListener::onCheckpoint()` est appelé par le moteur juste après chaque `PriorityGranted` marqué `checkpoint`. Le moteur ne change pas, mais `SimulationService` ne persiste qu'une **ancre** (`GameState::toArray()` dans `Checkpoint`) : `SparseCheckpoints` en garde une par tour (paramètre `app.checkpoint_every_n_turns`), plus une à chaque pause humaine (colonne `decision` = `actionId` à rejouer, posée par `decide()`) et une au point de bifurcation d'un fork (état avec `controllers` surchargés).- **Reconstruction** : `StateReconstructor::at($sim, $seq)` prend l'ancre la plus proche ≤ `seq` (en remontant la chaîne des parents), restaure le `GameState`, rejoue `advance` (avec la `decision` de l'ancre) et s'arrête au dernier checkpoint ≤ `seq` (un listener lève `ReplayStop` dès que la cible est dépassée ; `DecisionRequired` clôt aussi le rejeu). Le rejeu ne persiste rien.
+- **Fork** : reconstruire le checkpoint ≤ `atEvent`, remplacer des clés dans `controllers` (ex. `[1 => 'human:auto']`), créer une `Simulation` fille (`parent`, `forkEventSeq`) et relancer `advance`.
 - **Journal d'une branche** = événements de ses ancêtres jusqu'à `forkEventSeq` + les siens. Le numéro `seq` est unique le long de la chaîne.
 - Pourquoi ça marche : état 100 % sérialisable, RNG dans l'état (`Rng`, xorshift32), agents sans état.
 
-Volume actuel : ~900 checkpoints pour une partie de démo à 4 joueurs (les octrois intermédiaires sur pile vide n'en ont pas ; `PriorityGranted.payload.checkpoint` le dit au front). Si on demande un fork à un instant sans checkpoint, le serveur recolle au précédent : comme le moteur est déterministe, la reprise est identique. Alternative prévue dans la roadmap : un checkpoint par tour + re-simulation jusqu'au point voulu.
+Volume actuel : ~130 ancres (2,6 Mo) pour une partie 4 IA, contre 897 snapshots (28,5 Mo) en stockage dense. Les octrois sans `checkpoint` n'ont pas de point de bifurcation ; si on demande un instant sans checkpoint, la reconstruction recolle au précédent (le moteur est déterministe, la reprise est identique). Une évolution du format de `GameState` invalide les ancres anciennes (en dev : recréer les parties).
 
 ## Front
 

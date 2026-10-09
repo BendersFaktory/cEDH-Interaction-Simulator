@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-09 (recette en CI vérifiée). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-09 (checkpoints épars vérifiés). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -48,17 +48,17 @@
 ## 5. Technique
 
 - [x] Colonnes `json_text` (LONGTEXT) + insertions par lots (`BulkInserter`) : création d'une partie 4 IA de ~1,9 s à ~0,7 s (MySQL).
-- [ ] **Checkpoints épars + re-simulation déterministe** (gain : ~29 Mo → ~2-3 Mo et écriture ~0,6 s → < 0,2 s par partie 4 IA ; le moteur rejoue une partie en 0,09 s, stocker 897 snapshots de ~25 Ko est un mauvais compromis ; mesures dans `docs/SYMFONY_SETUP.md`) :
-  - [ ] Listener applicatif `SparseCheckpoints` : ancre au changement de tour (paramètre N) ; le moteur et les flags `checkpoint` des événements restent inchangés.
-  - [ ] Ancre forcée à chaque pause humaine + colonne `Checkpoint.decision` (`actionId`) renseignée par `SimulationService::decide()` (sans elle, on ne peut pas rejouer à travers une décision humaine).
-  - [ ] Ancre au point de bifurcation d'un fork (état avec `controllers` surchargés).
-  - [ ] `StateReconstructor::at($sim, $seq)` : ancre ≤ seq, `fromArray`, `advance` avec arrêt à `eventSeq === $seq` ; remontée chez l'ancêtre ; refus (409) si `seq` n'est pas un checkpoint.
-  - [ ] Brancher `fork()` et `stateAt()` sur le reconstructeur ; supprimer l'écriture d'un snapshot par priorité.
-  - [ ] **Test d'acceptation décisif** : pour chaque checkpoint d'une partie 4 IA (seed 42) et d'une partie avec décisions humaines, l'état reconstruit est **identique** (`toArray()`, RNG compris) à l'ancien snapshot dense (garder `InMemoryCheckpoints` comme référence).
-  - [ ] Tests d'API existants (fork identique, `/state`, erreurs) toujours verts ; fork depuis une branche déjà forkée.
-  - [ ] Mesurer : taille en base, durée de `POST`, latence d'un `fork` / `state` (reconstruction ≤ un tour, attendu quelques ms) ; régler N.
-  - [ ] Documenter dans `docs/ARCHITECTURE.md` et `docs/SYMFONY_SETUP.md` ; supprimer le TODO de `backend/src/Entity/Checkpoint.php`.
-  - *Risques* : décisions humaines manquantes dans le journal de rejeu (d'où l'ancre à chaque pause) ; une évolution du format de `GameState` invalide les ancres anciennes (versionner l'état).
+- [x] **Checkpoints épars + re-simulation déterministe** *(vérifié le 2026-10-09 : 39 tests PHPUnit verts, `schema:validate` OK, `npm run recette` sans problème ; 897 → 130 lignes, 28,5 → 2,6 Mo, `POST` ~0,68 → ~0,2 s, `fork` ~20-25 ms, mesures dans `docs/SYMFONY_SETUP.md`)* :
+  - [x] Listener applicatif `SparseCheckpoints` : ancre au changement de tour (paramètre `app.checkpoint_every_n_turns`, N = 1) ; le moteur et les flags `checkpoint` des événements restent inchangés.
+  - [x] Ancre forcée à chaque pause humaine + colonne `Checkpoint.decision` (`actionId`) renseignée par `SimulationService::decide()`.
+  - [x] Ancre au point de bifurcation d'un fork (état avec `controllers` surchargés).
+  - [x] `StateReconstructor::at($sim, $seq)` : ancre ≤ seq, `fromArray`, `advance` avec arrêt (`ReplayStop`) ; remontée chez l'ancêtre. *Écart avec le plan initial : un `seq` hors checkpoint renvoie le checkpoint précédent (comportement historique) au lieu d'un 409 ; 409 seulement s'il n'y a aucun checkpoint avant.*
+  - [x] `fork()` et `stateAt()` branchés sur le reconstructeur ; plus d'écriture d'un snapshot par priorité.
+  - [x] **Test d'acceptation décisif** (`tests/Service/StateReconstructorTest.php`) : pour chaque checkpoint d'une partie 4 IA (seed 42), d'une partie avec 80 décisions humaines et d'un fork de fork, l'état reconstruit est **identique** (JSON de `toArray()`, RNG compris) au snapshot dense (`InMemoryCheckpoints` en référence).
+  - [x] Tests d'API existants toujours verts ; fork depuis une branche déjà forkée couvert par le test d'acceptation.
+  - [x] Mesures : taille en base, durée de `POST`, latence `fork` / `state` ; N = 1 conservé (reconstruction ≤ un tour, quelques ms).
+  - [x] Documenté dans `docs/ARCHITECTURE.md` et `docs/SYMFONY_SETUP.md` ; TODO de `Checkpoint.php` supprimé.
+  - *Risques restants* : une évolution du format de `GameState` invalide les ancres anciennes (versionner l'état) ; en dev, recréer les parties créées avant cette migration.
 - [ ] Exécution asynchrone des grosses simulations (Symfony Messenger) + progression.
 - [ ] Tests de propriété sur le moteur : invariants (nombre total de cartes constant, pile vide en fin d'étape, déterminisme sur N seeds).
 - [ ] CI : phpunit + phpstan + `vue-tsc` + `vitest`.

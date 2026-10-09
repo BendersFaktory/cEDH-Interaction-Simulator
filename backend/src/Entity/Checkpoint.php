@@ -7,9 +7,9 @@ namespace App\Entity;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
- * Snapshot complet du GameState juste après un PriorityGranted : les seuls points où l'on peut forker.
- * Stratégie actuelle : un checkpoint par octroi de priorité (simple, mais volumineux).
- * TODO: ne garder qu'un checkpoint par tour et re-simuler (le moteur est déterministe) jusqu'au point voulu.
+ * Ancre : snapshot complet du GameState, point de départ d'un rejeu déterministe (StateReconstructor).
+ * Une ancre par tour (SparseCheckpoints), une à chaque décision humaine (avec `decision`) et une au point
+ * de bifurcation d'un fork ; les checkpoints intermédiaires (PriorityGranted checkpoint=true) sont reconstruits.
  */
 #[ORM\Entity]
 #[ORM\Table(name: 'checkpoint')]
@@ -29,12 +29,20 @@ class Checkpoint
         private int $eventSeq,
         #[ORM\Column(type: 'json_text')]
         private array $state,
+        /** actionId à injecter pour reprendre depuis cette ancre (pause humaine), null sinon. */
+        #[ORM\Column(length: 255, nullable: true)]
+        private ?string $decision = null,
     ) {
     }
 
     public function getEventSeq(): int
     {
         return $this->eventSeq;
+    }
+
+    public function getDecision(): ?string
+    {
+        return $this->decision;
     }
 
     public function getState(): array
