@@ -82,8 +82,14 @@ async function run() {
   await page.uncheck('text=Je joue J0 >> input')
   await page.fill('input[placeholder="aléatoire"]', '42')
   const oldId = (await info()).match(/#(\d+)/)[1]
+  const oldTotal = (await prog()).match(/\/ (\d+)/)[1]
   await page.click('text=Nouvelle partie Commander')
-  await page.waitForFunction((o) => { const m = (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/); return m && m[1] !== o }, oldId, { timeout: 30000 })
+  // L'id change avant que les événements soient chargés : attendre aussi un nouveau total (sinon on lit celui de la partie précédente).
+  await page.waitForFunction(([o, t]) => {
+    const m = (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)
+    const n = (document.querySelector('.playback small')?.textContent ?? '').match(/\/ (\d+)/)
+    return m && m[1] !== o && n && n[1] !== t
+  }, [oldId, oldTotal], { timeout: 30000 })
   log('5 info:', await info(), '|', await prog())
   await page.selectOption('.playback select', '10')
   await page.click('button[title="Lecture"]')
