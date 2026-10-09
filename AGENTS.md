@@ -4,15 +4,16 @@ Instructions pour les agents de code (Claude Code, Codex, Cursor, etc.) travaill
 
 ## Projet
 
-Simulateur Magic: The Gathering **Commander à 4 joueurs** : un siège humain (J0, agent `human:auto`) face à 3 IA, avec pause, retour à un point de priorité et fork. Stack : moteur PHP pur (`backend/src/Engine/`), couche Symfony (`backend/src/{Controller,Entity,Service}`, non exécutée), front Vue 3 / Pinia (`frontend/`).
+Simulateur Magic: The Gathering **Commander à 4 joueurs** : un siège humain (J0, agent `human:auto`) face à 3 IA, avec pause, retour à un point de priorité et fork. Stack : moteur PHP pur (`backend/src/Engine/`), couche Symfony 7.4 (`backend/src/{Controller,Entity,Service}`, testée par `backend/tests/Api/`), front Vue 3 / Pinia (`frontend/`).
 
 ## Commandes
 
 ```bash
 # Moteur (sans composer)
 php backend/bin/smoke.php 42        # partie complète à 4 IA
-# Backend
+# Backend (28 tests : moteur + API ; vendor est un lien vers vendor.nosync, cf. CLAUDE.md)
 cd backend && composer install && vendor/bin/phpunit
+cd backend && php bin/console doctrine:migrations:migrate --no-interaction && php -S 127.0.0.1:8000 -t public
 # Frontend
 cd frontend && npm install && npm test && npm run typecheck && npm run build
 # Fixture du contrat PHP <-> reducer (à régénérer si le format d'événements change)
@@ -49,4 +50,4 @@ Avant de conclure un changement : `vendor/bin/phpunit`, `npm test`, `npm run typ
 
 ## Où en est le projet
 
-Moteur, tests PHP, reducer et build front sont vérifiés. La couche Symfony n'a jamais tourné. Pas encore de combat : les parties se terminent par pioche vide. Voir `docs/ROADMAP.md`.
+Moteur, couche Symfony (tests d'API, scénario curl), reducer et build front sont vérifiés. Le front n'a pas encore été ouvert dans un navigateur contre l'API réelle. Pas encore de combat : les parties se terminent par pioche vide. Voir `docs/ROADMAP.md`.

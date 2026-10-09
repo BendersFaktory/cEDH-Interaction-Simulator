@@ -1,97 +1,71 @@
-# Intégrer le squelette dans une vraie app Symfony
+# Symfony : état réel de l'intégration
 
-`backend/` contient le moteur, la glue Symfony et les tests, mais pas de kernel ni de config. Le plus sûr est de partir d'une app Symfony neuve et d'y copier le code.
+`backend/` est désormais une **vraie app Symfony 7.4** (kernel, config, migrations, tests d'API), vérifiée le 2026-10-09. Le moteur `src/Engine/` reste du PHP pur, exclu de l'autowiring.
 
-> Ces étapes n'ont pas pu être exécutées lors de la génération du squelette (accès à Packagist bloqué). Elles sont standard, mais à valider au premier lancement.
-
-## 1. Créer l'app
+## Démarrage
 
 ```bash
-symfony new backend-app --version="7.*"        # ou: composer create-project symfony/skeleton backend-app
-cd backend-app
-composer require symfony/orm-pack
-composer require --dev phpunit/phpunit symfony/test-pack
+cd backend
+composer install
+php bin/console doctrine:migrations:migrate --no-interaction   # crée var/data.db (SQLite)
+php -S 127.0.0.1:8000 -t public                                 # ou: symfony serve -d --port=8000
 ```
 
-## 2. Copier le code
+Le front (`cd frontend && npm run dev`) relaie `/api` vers le port 8000 (voir `frontend/vite.config.ts`).
+
+## Vérifications
 
 ```bash
-cp -r ../backend/src/*   src/
-cp -r ../backend/tests/* tests/
-cp -r ../backend/bin/smoke.php ../backend/bin/export-fixture.php bin/
+vendor/bin/phpunit                          # 28 tests : suites "engine" (18) et "api" (10)
+vendor/bin/phpunit --testsuite api          # API seule (contrôleur -> service -> moteur -> Doctrine/SQLite)
+php bin/console lint:container
+php bin/console doctrine:schema:validate
+php bin/console debug:router                # 7 routes sous /api/simulations
 ```
 
-(Conserve le `Kernel.php` généré par Symfony.)
+Les tests d'API (`tests/Api/SimulationApiTest.php`) utilisent `var/test.db` (`.env.test`), recréée à chaque test.
 
-## 3. Configuration
+## Routes
 
-`config/services.yaml` — le moteur n'est pas un ensemble de services, on l'exclut de l'autowiring :
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| POST | `/api/simulations` | Crée et joue une partie (corps : `seed`, `controllers`) |
+| GET | `/api/simulations/{id}` | Vue de la simulation |
+| GET | `/api/simulations/{id}/events?after=N` | Journal (ancêtres jusqu'à la bifurcation + propres événements) |
+| GET | `/api/simulations/{id}/state?at=N` | État du checkpoint le plus proche (<= N) |
+| GET | `/api/simulations/{id}/pending` | Décision en attente (`actions`) |
+| POST | `/api/simulations/{id}/fork` | Bifurque (corps : `atEvent`, `controllers`) |
+| POST | `/api/simulations/{id}/decisions` | Répond à la décision en attente (`actionId`) |
 
-```yaml
-services:
-    _defaults:
-        autowire: true
-        autoconfigure: true
+Défaut = Commander à 4, J0 en `human:auto`. Pour 4 IA : `{"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}`.
+Erreurs : 409 (état incompatible : aucune décision attendue, aucun checkpoint), 422 (action, agent ou joueur inconnu), 404 (simulation absente), 400 (JSON invalide).
 
-    App\:
-        resource: '../src/'
-        exclude:
-            - '../src/Engine/'
-            - '../src/Entity/'
-            - '../src/Kernel.php'
-```
-
-`config/routes.yaml` :
-
-```yaml
-controllers:
-    resource: ../src/Controller/
-    type: attribute
-```
-
-`config/packages/doctrine.yaml` : le mapping par attributs sur `src/Entity` est celui par défaut du recipe.
-
-`.env.local` : `DATABASE_URL="sqlite:///%kernel.project_dir%/var/data.db"` pour démarrer simplement.
-
-## 4. Base de données
+## Scénario manuel
 
 ```bash
-php bin/console doctrine:database:create
-php bin/console make:migration      # requiert symfony/maker-bundle (dev)
-php bin/console doctrine:migrations:migrate
-```
-
-Tables attendues : `simulation`, `game_event`, `checkpoint`. Sur une grosse partie les colonnes JSON de `checkpoint` sont volumineuses : prévoir Postgres/MySQL si SQLite devient lent.
-
-## 5. Vérifier
-
-```bash
-vendor/bin/phpunit                  # 18 tests du moteur
-php bin/smoke.php 42                # partie complète en CLI
-symfony serve -d --port=8000
-# Défaut = Commander à 4, tu es J0 (human:auto). Pour 4 IA : {"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}
-curl -X POST localhost:8000/api/simulations -H 'Content-Type: application/json' -d '{"seed":42}'
-curl localhost:8000/api/simulations/1/events | head -c 400
-```
-
-## 6. Premier scénario de fork (à la main)
-
-```bash
-# 1. Trouver un point de bifurcation (PriorityGranted avec checkpoint=true) et prendre son seq, ex. 300
-curl -s localhost:8000/api/simulations/1/events | jq '[.[] | select(.type=="PriorityGranted" and .payload.checkpoint)][20].seq'
-
-# 2. Forker en prenant le joueur 1
-curl -X POST localhost:8000/api/simulations/1/fork -H 'Content-Type: application/json' \
-     -d '{"atEvent": 300, "controllers": {"1": "human:auto"}}'
-
-# 3. Lire la décision en attente, puis répondre
+curl -X POST localhost:8000/api/simulations -H 'Content-Type: application/json' -d '{"seed":42,"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}'
+curl -s localhost:8000/api/simulations/1/events | jq '[.[] | select(.type=="PriorityGranted" and .payload.checkpoint)][20].seq'   # ex. 152
+curl -X POST localhost:8000/api/simulations/1/fork -H 'Content-Type: application/json' -d '{"atEvent":152,"controllers":{"1":"human:auto"}}'
 curl localhost:8000/api/simulations/2/pending
-curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: application/json' \
-     -d '{"actionId": "pass:1"}'
+curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: application/json' -d '{"actionId":"pass:1"}'
 ```
 
-## Points d'attention connus
+## Mesures (seed 42, 4 IA, SQLite)
 
-- `SimulationController` s'appuie sur la résolution automatique de `{id}` → entité (`doctrine/doctrine-bundle` + `symfony/doctrine-bridge`, fournis par `orm-pack`).
-- Le premier appel `POST /api/simulations` joue **toute** la partie de façon synchrone (≈ 5000 événements, ≈ 900 checkpoints en 4 IA ; en jouant J0, la simulation s'arrête dès ta première décision) : prévoir un timeout confortable ou, plus tard, un traitement asynchrone (Messenger).
-- Un `flush()` unique en fin de `run()` : volontairement simple, à optimiser (insertions par lots) si ça devient lent.
+- `POST /api/simulations` : **~0,55 s** pour 4935 événements et 897 checkpoints.
+- `var/data.db` : **~19 Mo** pour une seule partie complète (les checkpoints dominent). SQLite suffit en développement ; prévoir Postgres/MySQL et la réduction des checkpoints (re-simuler depuis le dernier) avant d'accumuler beaucoup de parties.
+- Un seul `flush()` en fin de `run()` : volontairement simple, sans problème de mémoire à cette taille.
+
+## Pièges rencontrés lors de l'intégration
+
+- **Dossier synchronisé par iCloud (`~/Documents`)** : l'installation de `vendor/` y génère des copies de conflit (`Request 2.php`, `Kernel 3.php`…) et fait bloquer Composer (« Generating autoload files » qui ne rend jamais la main). Contournement : `vendor` est un lien symbolique vers **`vendor.nosync/`**, que iCloud ignore :
+
+  ```bash
+  cd backend && rm -rf vendor && mkdir vendor.nosync && ln -s vendor.nosync vendor && composer install
+  ```
+
+  Même précaution pour `node_modules` si des doublons apparaissent. Idéalement, cloner le dépôt hors d'un dossier iCloud.
+- **Symfony Flex bloque** (téléchargement parallèle des recettes depuis GitHub qui ne se termine pas). Le projet n'utilise donc **pas Flex** : la config (`config/`, `bin/console`, `public/index.php`, `src/Kernel.php`, `.env`) est versionnée à la main. Ne pas ajouter `symfony/flex`.
+- **Sans Flex, la famille Symfony n'est pas épinglée** : `composer.json` fixe explicitement tous les paquets `symfony/*` en `^7.4`. Sans cela, Composer en résout une partie en 8.x et `lint:container` échoue (`symfony/var-exporter` 8 incompatible avec Doctrine). Vérifier avec `composer show | grep ' 8\.'` après chaque mise à jour.
+- `doctrine:database:create` n'est pas supporté pour SQLite (le fichier est créé par la migration) ; `make:migration` n'est pas installé : utiliser `doctrine:migrations:diff`.
+- Le `memory_limit` du serveur doit rester confortable (le test d'API le fixe à 512 Mo).

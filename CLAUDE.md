@@ -23,6 +23,12 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - **Titre de la PR** : toujours `{message de commit} [staging]` (ex. commit « Création du workflow git » → PR « Création du workflow git [staging] »). Pas besoin de le demander : il se déduit du message de commit.
 - Ne pas merger les PR soi-même sauf demande explicite.
 
+## Pièges d'environnement (voir `docs/SYMFONY_SETUP.md`)
+
+- Le dépôt vit sous `~/Documents` (iCloud) : `backend/vendor` est un **lien symbolique vers `vendor.nosync/`**, sans quoi iCloud crée des copies `* 2.php` et Composer se bloque. Ne pas remplacer ce lien par un vrai dossier.
+- **Pas de `symfony/flex`** (il bloque au téléchargement des recettes) : config Symfony écrite à la main, et paquets `symfony/*` épinglés en `^7.4` dans `composer.json` (vérifier `composer show | grep ' 8\.'` après une mise à jour).
+- Composer peut ne pas rendre la main sur ce poste : le lancer en arrière-plan avec un journal plutôt qu'en direct.
+
 ## Commandes
 
 ```bash
@@ -30,8 +36,10 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend
+# Backend (28 tests : moteur + API)
 cd backend && composer install && vendor/bin/phpunit
+php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée backend/var/data.db
+cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
 
 # Frontend
 cd frontend && npm install && npm test && npm run dev
@@ -54,13 +62,14 @@ cd frontend && npm install && npm test && npm run dev
 | Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (passer toujours : 32 décisions ; tout jouer : 40) |
 | Reducer front vs état final PHP (fixture) | Oui : `vitest` (4 tests) passe |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés, jamais affichés dans un navigateur) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Syntaxe PHP uniquement** : jamais exécutée, pas de kernel/config/migrations |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration SQLite). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 10 tests d'API (`tests/Api/`) passent, scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA : ~0,55 s, ~19 Mo en base |
+| Front branché sur l'API réelle dans un navigateur | **Non** : jamais ouvert dans un navigateur |
 
 Limites de comportement connues : sans combat, personne ne meurt de dégâts, donc tous les joueurs meurent de pioche vers le tour 131 et **J3 gagne toujours** (artefact de l'ordre de pioche). Le commandant n'est lancé qu'une fois par joueur (taxe et retour en zone de commandement jamais exercés en partie). Phases réduites à pioche / principale / fin.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md`. Priorité immédiate : intégrer le squelette dans une vraie app Symfony (`docs/SYMFONY_SETUP.md`) et tester l'API HTTP (`phpunit`, `npm test` et `vue-tsc` passent déjà), puis le combat pour donner des enjeux aux parties.
+Voir `docs/ROADMAP.md`. Priorité immédiate : tester le front dans un navigateur contre l'API réelle (créer, décider, forker), puis le combat pour donner des enjeux aux parties.
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 
