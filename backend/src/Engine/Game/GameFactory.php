@@ -1,0 +1,57 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Engine\Game;
+
+use App\Engine\Card\Decks;
+
+final class GameFactory
+{
+    /**
+     * Crée une partie Commander (40 PV, commandant en zone de commandement, main de 7).
+     * TODO: mulligan, pioche de départ configurable, ordre du tour tiré au sort (via $rng).
+     *
+     * @param array<int, string> $controllers id joueur => clé d'agent.
+     *        Exemple « tu joues J0 contre 3 IA » : [0 => 'human:auto', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic']
+     * @param (callable(int): array{commander: CardInstance, library: list<CardInstance>})|null $deckBuilder
+     */
+    public static function create(int $seed, array $controllers, ?callable $deckBuilder = null, int $startingLife = 40): GameState
+    {
+        if (count($controllers) < 2) {
+            throw new \InvalidArgumentException('Il faut au moins 2 joueurs.');
+        }
+
+        $deckBuilder ??= [Decks::class, 'commanderDemo'];
+        $rng = new Rng($seed);
+
+        $players = [];
+        foreach (array_keys($controllers) as $id) {
+            $deck = $deckBuilder($id);
+            $player = new PlayerState($id, $startingLife, $rng->shuffle($deck['library']));
+            $player->command[] = $deck['commander'];
+            $players[$id] = $player;
+        }
+
+        $s = new GameState($players, $rng, $controllers);
+        $s->emit('GameStarted', [
+            'seed' => $seed,
+            'format' => 'commander',
+            'players' => array_map(static fn (PlayerState $p) => [
+                'id' => $p->id,
+                'life' => $p->life,
+                'library' => count($p->library),
+                'controller' => $controllers[$p->id],
+                'command' => array_map(static fn (CardInstance $c) => $c->toPublic(), $p->command),
+            ], array_values($s->players)),
+        ]);
+
+        foreach (array_keys($s->players) as $id) {
+            for ($i = 0; $i < 7; $i++) {
+                $s->drawCard($id);
+            }
+        }
+
+        return $s;
+    }
+}
