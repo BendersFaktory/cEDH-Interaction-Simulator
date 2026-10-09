@@ -14,6 +14,15 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 7. **Le front est « bête »** : il applique les événements (`src/engine/reducer.ts`), aucune règle de jeu. Les payloads d'événements portent des **valeurs absolues** (ex. PV résultants) pour que le reducer reste trivial.
 8. **Ne jamais faire confiance au client** : `POST /decisions` envoie un `actionId`, le serveur recalcule les actions légales et retrouve l'action.
 
+## Workflow Git (branches)
+
+- `dev` : branche de travail. `staging` : intégration (cible des PR). `master` : **réservée à l'utilisateur**, gérée entièrement à la main. Ne jamais y committer, merger, pousser ni ouvrir de PR vers elle.
+- **Avant toute modification de fichier**, vérifier la branche : `git branch --show-current`. Si ce n'est pas `dev`, faire `git switch dev` (si l'arbre est sale ou si la bascule échoue, s'arrêter et demander). Ne jamais modifier de fichier sur `master` ou `staging`.
+- **À chaque commit sur `dev`** : pousser `dev` et créer en même temps une PR `dev` → `staging` (`gh pr create --base staging --head dev`). Si une PR `dev` → `staging` est déjà ouverte, le push l'alimente : ne pas en créer une seconde, le signaler à l'utilisateur.
+- **Message de commit** : si l'utilisateur ne l'a pas fourni, le lui demander explicitement à chaque fois, avant de committer. Ne jamais l'inventer ni réutiliser un message précédent.
+- **Titre de la PR** : toujours `{message de commit} [staging]` (ex. commit « Création du workflow git » → PR « Création du workflow git [staging] »). Pas besoin de le demander : il se déduit du message de commit.
+- Ne pas merger les PR soi-même sauf demande explicite.
+
 ## Commandes
 
 ```bash
