@@ -1,0 +1,63 @@
+name: Recette
+
+# Parcours Chrome (Playwright) contre l'API réelle + MySQL. Équivalent CI de `npm run recette`.
+on:
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+
+jobs:
+  recette:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:9.3
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: mtg_sim
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      # Les variables d'environnement priment sur .env : pas de mot de passe versionné.
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/mtg_sim?serverVersion=9.3.0&charset=utf8mb4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Dépendances backend
+        run: composer install --no-interaction --prefer-dist
+        working-directory: backend
+
+      - name: Migrations
+        run: php bin/console doctrine:migrations:migrate --no-interaction
+        working-directory: backend
+
+      - name: Dépendances frontend
+        run: npm ci
+        working-directory: frontend
+
+      # Chrome est préinstallé sur ubuntu-latest (le script utilise `channel: 'chrome'`).
+      - name: Recette
+        run: npm run recette
+        working-directory: frontend
+
+      - name: Captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recette-captures
+          path: frontend/recette/
+          if-no-files-found: ignore
