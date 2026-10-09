@@ -6,7 +6,7 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 |---|---|---|---|
 | `GameStarted` | non | `seed`, `format` (`commander`), `players: [{id, life, library, controller, command: [PublicCard]}]` | Crée les joueurs et leur zone de commandement |
 | `CardDrawn` | non | `player`, `card`, `library` (taille restante) | Carte en main, bibliothèque = `library` |
-| `PhaseChanged` | non | `turn`, `phase` (`draw`\|`main`\|`end`), `activePlayer` | Met à jour tour/phase, efface la priorité |
+| `PhaseChanged` | non | `turn`, `phase` (`untap`\|`upkeep`\|`draw`\|`main1`\|`begin_combat`\|`end_combat`\|`main2`\|`end`\|`cleanup`), `activePlayer` | Met à jour tour/phase, efface la priorité. `untap` et `cleanup` n'ouvrent aucune ronde de priorité |
 | `PermanentsUntapped` | non | `player`, `cards: [id]` | Dégage les permanents listés |
 | `PriorityGranted` | **oui** | `holder`, `passed: [id]`, `stackSize`, `checkpoint` (bool) | Détenteur de la priorité. **Point de bifurcation uniquement si `checkpoint` = true** (début de ronde ou pile non vide) |
 | `PriorityPassed` | **oui** | `player` | Marque le joueur comme ayant passé |

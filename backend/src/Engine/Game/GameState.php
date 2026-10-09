@@ -14,7 +14,7 @@ final class GameState
 {
     public int $turn = 1;
     public int $activePlayer;
-    public Phase $phase = Phase::Draw;
+    public Phase $phase = Phase::Untap;
     public bool $stepStarted = false;
     public PriorityState $priority;
     /** @var list<StackItem> dernier élément = dessus de la pile */

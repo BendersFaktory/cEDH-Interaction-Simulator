@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSimulationStore } from '../stores/simulation'
+import { phaseLabel } from '../engine/phases'
 
 const store = useSimulationStore()
 
@@ -18,7 +19,7 @@ const groups = computed(() => {
   <section v-if="store.pending" class="actions">
     <h3>À toi de jouer — J{{ store.pending.player }}</h3>
     <p class="muted">
-      Tour {{ store.pending.turn }}, {{ store.pending.phase }} · pile : {{ store.pending.stack.length }}
+      Tour {{ store.pending.turn }}, {{ phaseLabel(store.pending.phase) }} · pile : {{ store.pending.stack.length }}
     </p>
     <div v-for="g in groups" :key="g.title">
       <h4>{{ g.title }}</h4>

@@ -10,7 +10,6 @@ use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
-use App\Engine\Game\Phase;
 
 /**
  * Calcule les actions légales d'un joueur À CET INSTANT (état du GameState fait foi).
@@ -25,7 +24,7 @@ final class LegalActionGenerator
         $p = $s->player($playerId);
         $actions = [new PassPriority($playerId)];
 
-        $sorcerySpeed = $playerId === $s->activePlayer && $s->phase === Phase::Main && $s->stack === [];
+        $sorcerySpeed = $playerId === $s->activePlayer && $s->phase->isMain() && $s->stack === [];
 
         // Terrain : action spéciale, une par tour, timing sorcery.
         if ($sorcerySpeed && $s->landsPlayed < 1) {

@@ -1,6 +1,6 @@
 import type { GameEvent } from '../types/engine'
 
-const phaseLabel: Record<string, string> = { draw: 'Pioche', main: 'Principale', end: 'Fin de tour' }
+import { phaseLabel } from './phases'
 
 const target = (t: string): string =>
   t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`
@@ -14,7 +14,7 @@ export function describeEvent(e: GameEvent): string {
     case 'CardDrawn':
       return `J${p.player} pioche ${p.card.name}`
     case 'PhaseChanged':
-      return `Tour ${p.turn} — J${p.activePlayer} — ${phaseLabel[p.phase] ?? p.phase}`
+      return `Tour ${p.turn} — J${p.activePlayer} — ${phaseLabel(p.phase)}`
     case 'PermanentsUntapped':
       return `J${p.player} dégage ses permanents`
     case 'PriorityGranted':

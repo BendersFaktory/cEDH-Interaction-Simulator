@@ -79,7 +79,7 @@ final class ScenarioBuilder
         }
 
         $s = new GameState($players, new Rng(1), $controllers);
-        $s->phase = Phase::Main;
+        $s->phase = Phase::Main1;
         $s->stepStarted = true;
         $s->priority = new PriorityState(0);
 

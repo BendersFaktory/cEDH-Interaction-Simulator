@@ -56,7 +56,9 @@ final class GameEngine
                 if (!$s->stepStarted) {
                     $this->turns->beginStep($s);
                 }
-                $this->priority->runRound($s, $injected);
+                if ($s->phase->hasPriority()) {
+                    $this->priority->runRound($s, $injected);
+                }
                 if ($s->over) {
                     break;
                 }

@@ -13,7 +13,7 @@ use App\Engine\Game\GameState;
  * IA de départ, volontairement simple :
  *  1. contre le sort adverse au dessus de la pile s'il le peut ;
  *  2. joue un terrain ;
- *  3. à son tour, pile vide : lance un sort au hasard (jamais sur soi-même) ;
+ *  3. à son tour, en phase principale, pile vide : lance un sort au hasard (jamais sur soi-même) ;
  *  4. sinon passe.
  * TODO: évaluateur de menace (ne pas contrer n'importe quoi), gestion du mana, etc.
  */
@@ -38,7 +38,7 @@ final class HeuristicAgent implements PlayerAgent
             }
         }
 
-        if ($top === null && $state->activePlayer === $playerId) {
+        if ($top === null && $state->activePlayer === $playerId && $state->phase->isMain()) {
             $casts = [];
             foreach ($legal as $action) {
                 if ($action instanceof CastSpell
