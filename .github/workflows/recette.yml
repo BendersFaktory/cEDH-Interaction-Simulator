@@ -49,15 +49,6 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Diagnostic API
-        run: |
-          php -d memory_limit=512M -S 127.0.0.1:8000 -t public > /tmp/api.log 2>&1 &
-          sleep 3
-          curl -si http://127.0.0.1:8000/api/simulations/0 | head -20 || true
-          cat /tmp/api.log
-          kill %1
-        working-directory: backend
-
       # Chrome est préinstallé sur ubuntu-latest (le script utilise `channel: 'chrome'`).
       - name: Recette
         run: npm run recette

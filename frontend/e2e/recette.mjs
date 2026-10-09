@@ -25,7 +25,7 @@ const start = async (name, url, cmd, args, cwd) => {
 const stopAll = () => started.forEach((p) => p.kill())
 
 try {
-  await start('API', 'http://127.0.0.1:8000/api/simulations/0', 'php', ['-d', 'memory_limit=512M', '-S', '127.0.0.1:8000', '-t', 'public'], BACK)
+  await start('API', 'http://127.0.0.1:8000/api/simulations/0', 'php', ['-d', 'memory_limit=512M', '-d', 'variables_order=EGPCS', '-S', '127.0.0.1:8000', '-t', 'public'], BACK)
   await start('Vite', 'http://localhost:5173/', 'npx', ['vite', '--port', '5173', '--strictPort'], FRONT)
   await run()
 } catch (e) {
