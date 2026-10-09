@@ -1,12 +1,16 @@
 # Roadmap
 
+> Dernière mise à jour : 2026-10-09 (recette en CI vérifiée). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+
 ## 0. Valider le squelette (premier jour)
 
-- [ ] Intégrer dans une app Symfony (`docs/SYMFONY_SETUP.md`), créer les migrations.
-- [ ] Lancer `vendor/bin/phpunit` avec le vrai PHPUnit (les tests n'ont tourné qu'avec un mini-runner).
-- [ ] `cd frontend && npm install && npm run typecheck && npm test` ; corriger les erreurs de compilation éventuelles (le front n'a jamais été compilé).
-- [ ] Essayer un fork complet de bout en bout dans l'UI.
-- [ ] Ajouter des tests Symfony (`WebTestCase`) pour : création, fork, décision illégale (422), décision sans attente (409).
+- [x] Intégrer dans une app Symfony (`docs/SYMFONY_SETUP.md`), créer les migrations. *(Symfony 7.4 + Flex, base MySQL 9.3, migrations versionnées, `doctrine:schema:validate` et `lint:container` OK, scénario `curl` création/décision/fork vérifié.)*
+- [x] Lancer `vendor/bin/phpunit` avec le vrai PHPUnit (les tests n'ont tourné qu'avec un mini-runner). *(PHPUnit 11.5 : 35 tests, 182 assertions.)*
+- [x] `cd frontend && npm install && npm run typecheck && npm test` ; corriger les erreurs de compilation éventuelles (le front n'a jamais été compilé). *(vitest 4 tests, `vue-tsc` et `vite build` OK.)*
+- [x] Essayer un fork complet de bout en bout dans l'UI. *(Vérifié le 2026-10-09 dans Chrome (Playwright, `channel: chrome`) contre l'API réelle : partie J0 humaine (terrain + passes), navigation/lecture, partie 4 IA jusqu'à « Victoire de J3 » (4935 événements), fork depuis #1196 en reprenant J1 (fork #17 : décision possible, journal poursuivi), chargement d'une partie existante, erreur 404 affichée proprement. Aucune erreur console hors le 404 attendu. Script désormais versionné : `npm run recette`.)*
+- [x] Parcours versionné : `cd frontend && npm run recette` (Playwright + Chrome, démarre API et Vite si besoin, captures dans `frontend/recette/`, ignoré par git et vidé à chaque exécution). *(Vérifié le 2026-10-09 : tous les scénarios passent, aucun problème inattendu, serveurs arrêtés en fin de script.)*
+- [x] Lancer la recette en CI. *(`.github/workflows/recette.yml` : MySQL 9.3 en service, Chrome préinstallé, captures en artefact. Vérifié le 2026-10-09 : job vert sur la PR #3. Deux pièges corrigés en route : le serveur PHP intégré ignore `DATABASE_URL` sans `variables_order=EGPCS`, et le script lisait le total d'événements de la partie précédente avant le chargement de la nouvelle.)*
+- [x] Ajouter des tests Symfony (`WebTestCase`) pour : création, fork, décision illégale (422), décision sans attente (409). *(`backend/tests/Api/SimulationApiTest.php`, 11 tests.)*
 
 ## 1. Règles du jeu
 
@@ -43,8 +47,26 @@
 
 ## 5. Technique
 
-- [ ] Checkpoints : un par tour + re-simulation déterministe jusqu'au point voulu (au lieu d'un par priorité).
+- [x] Colonnes `json_text` (LONGTEXT) + insertions par lots (`BulkInserter`) : création d'une partie 4 IA de ~1,9 s à ~0,7 s (MySQL).
+- [ ] **Checkpoints épars + re-simulation déterministe** (gain : ~29 Mo → ~2-3 Mo et écriture ~0,6 s → < 0,2 s par partie 4 IA ; le moteur rejoue une partie en 0,09 s, stocker 897 snapshots de ~25 Ko est un mauvais compromis ; mesures dans `docs/SYMFONY_SETUP.md`) :
+  - [ ] Listener applicatif `SparseCheckpoints` : ancre au changement de tour (paramètre N) ; le moteur et les flags `checkpoint` des événements restent inchangés.
+  - [ ] Ancre forcée à chaque pause humaine + colonne `Checkpoint.decision` (`actionId`) renseignée par `SimulationService::decide()` (sans elle, on ne peut pas rejouer à travers une décision humaine).
+  - [ ] Ancre au point de bifurcation d'un fork (état avec `controllers` surchargés).
+  - [ ] `StateReconstructor::at($sim, $seq)` : ancre ≤ seq, `fromArray`, `advance` avec arrêt à `eventSeq === $seq` ; remontée chez l'ancêtre ; refus (409) si `seq` n'est pas un checkpoint.
+  - [ ] Brancher `fork()` et `stateAt()` sur le reconstructeur ; supprimer l'écriture d'un snapshot par priorité.
+  - [ ] **Test d'acceptation décisif** : pour chaque checkpoint d'une partie 4 IA (seed 42) et d'une partie avec décisions humaines, l'état reconstruit est **identique** (`toArray()`, RNG compris) à l'ancien snapshot dense (garder `InMemoryCheckpoints` comme référence).
+  - [ ] Tests d'API existants (fork identique, `/state`, erreurs) toujours verts ; fork depuis une branche déjà forkée.
+  - [ ] Mesurer : taille en base, durée de `POST`, latence d'un `fork` / `state` (reconstruction ≤ un tour, attendu quelques ms) ; régler N.
+  - [ ] Documenter dans `docs/ARCHITECTURE.md` et `docs/SYMFONY_SETUP.md` ; supprimer le TODO de `backend/src/Entity/Checkpoint.php`.
+  - *Risques* : décisions humaines manquantes dans le journal de rejeu (d'où l'ancre à chaque pause) ; une évolution du format de `GameState` invalide les ancres anciennes (versionner l'état).
 - [ ] Exécution asynchrone des grosses simulations (Symfony Messenger) + progression.
 - [ ] Tests de propriété sur le moteur : invariants (nombre total de cartes constant, pile vide en fin d'étape, déterminisme sur N seeds).
 - [ ] CI : phpunit + phpstan + `vue-tsc` + `vitest`.
 - [ ] Vérifier que la fixture du front est régénérée en CI (le test de contrat doit casser si le format d'événements dérive).
+
+### Acquis d'environnement (faits et vérifiés le 2026-10-09)
+
+- [x] Dépôt hors iCloud (`~/GitHub/cEDH-Interaction-Simulator`) : iCloud corrompait `vendor/` et `.git` sous `~/Documents`.
+- [x] Symfony Flex installé (famille Symfony épinglée en `7.4.*`) ; recettes nettoyées.
+- [x] Base MySQL 9.3 à la place de SQLite (mot de passe dans `.env.local` / `.env.test.local`, non versionnés).
+- [x] Workflow Git `dev` → `staging` (PR à chaque commit), `master` réservée à l'utilisateur.

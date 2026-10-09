@@ -27,7 +27,7 @@ class Checkpoint
         private Simulation $simulation,
         #[ORM\Column]
         private int $eventSeq,
-        #[ORM\Column(type: 'json')]
+        #[ORM\Column(type: 'json_text')]
         private array $state,
     ) {
     }

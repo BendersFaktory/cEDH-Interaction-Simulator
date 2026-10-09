@@ -1,0 +1,13 @@
+# Le moteur (src/Engine) est du PHP pur : ce n'est pas un ensemble de services, on l'exclut de l'autowiring.
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Engine/'
+            - '../src/Entity/'
+            - '../src/Doctrine/'
+            - '../src/Kernel.php'
