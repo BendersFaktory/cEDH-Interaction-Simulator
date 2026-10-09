@@ -77,11 +77,25 @@ curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: applic
 | Création de partie dans le service (`create()`, moteur ~0,09 s inclus) | n.m. | ~1,9 s | **0,6 à 0,8 s** |
 | Suite PHPUnit complète | ~6 s (28 tests) | ~17 s (28 tests) | **~9,6 s (35 tests)** |
 | Taille d'une partie en base | ~19 Mo | ~28 Mo | **~29 Mo** (checkpoints : 28,5 Mo) |
+
 | Pic mémoire PHP d'une création | n.m. | n.m. | **~100 Mo** (dont 65 Mo pour le moteur et ses 897 snapshots en mémoire) |
 
-Ce qui a fait gagner du temps (mesuré en isolation avant de coder) : les 897 checkpoints (~20 Mo de JSON) coûtaient ~1,2 s en colonne `JSON` contre ~0,6 s en `LONGTEXT` (MySQL validait et convertissait le JSON en binaire pour rien), et les 5 832 `INSERT` unitaires coûtaient ~0,37 s contre ~0,07 s en multi-lignes (un aller-retour réseau par ligne). Le temps d'écriture restant est dominé par le **volume** des checkpoints : le type `text` ne change pas la taille en base. La vraie réduction viendra des checkpoints épars (TODO de la section 5 de `docs/ROADMAP.md`).
+Ce qui a fait gagner du temps (mesuré en isolation avant de coder) : les 897 checkpoints (~20 Mo de JSON) coûtaient ~1,2 s en colonne `JSON` contre ~0,6 s en `LONGTEXT` (MySQL validait et convertissait le JSON en binaire pour rien), et les 5 832 `INSERT` unitaires coûtaient ~0,37 s contre ~0,07 s en multi-lignes (un aller-retour réseau par ligne). Le temps d'écriture restant est dominé par le **volume** des checkpoints : le type `text` ne change pas la taille en base. La réduction est venue des checkpoints épars (voir le tableau suivant).
 
 **Mémoire** : en mode debug, le profileur de Doctrine retient les paramètres des requêtes, donc le pic grimpe d'environ 20 Mo à chaque partie créée dans un même processus (script, boucle de tests). Sans debug, il reste stable. Une requête HTTP isolée n'est pas concernée. Garder `memory_limit` confortable (512 Mo pour le serveur de dev et PHPUnit ; le défaut de 128 Mo du CLI ne suffit pas à enchaîner plusieurs créations en debug).
+
+### Checkpoints épars (N = 1 tour, mesuré le 2026-10-09, seed 42, 4 IA)
+
+| | Snapshot par checkpoint (avant) | **Ancres + rejeu** (actuel) |
+|---|---|---|
+| Lignes `checkpoint` | 897 | **130** |
+| Taille des checkpoints | 28,5 Mo | **2,6 Mo** (événements : 0,24 Mo) |
+| `POST /api/simulations` | ~0,68 s | **~0,2 s** |
+| `fork` (en milieu de partie) | n.m. | **~20 à 25 ms** |
+| `GET /state?at=` | n.m. | **~10 à 55 ms** (55 ms à froid) |
+| Suite PHPUnit | ~9,6 s (35 tests) | **~9,6 s (39 tests)** |
+
+Un tour d'écart maximum entre l'ancre et la cible : le rejeu reste en quelques ms, N = 1 n'a donc pas besoin d'être augmenté. Réglage : `app.checkpoint_every_n_turns` dans `config/services.yaml`.
 
 ## Persistance : `json_text` et insertions par lots
 

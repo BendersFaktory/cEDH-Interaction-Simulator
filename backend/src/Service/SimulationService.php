@@ -10,8 +10,6 @@ use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
 use App\Engine\Game\GameState;
 use App\Engine\Rules\LegalActionGenerator;
-use App\Engine\Snapshot\InMemoryCheckpoints;
-use App\Entity\Checkpoint;
 use App\Entity\GameEventRecord;
 use App\Entity\Simulation;
 use Doctrine\ORM\EntityManagerInterface;
@@ -25,6 +23,9 @@ class SimulationService
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly BulkInserter $bulk,
+        private readonly StateReconstructor $reconstructor,
+        /** Ancre complète tous les N tours ; le reste se reconstruit par rejeu (voir SparseCheckpoints). */
+        private readonly int $checkpointEveryNTurns = 1,
     ) {
     }
 
@@ -51,7 +52,8 @@ class SimulationService
         // On recalcule les actions légales côté serveur : jamais de confiance au client.
         foreach ((new LegalActionGenerator())->for($state, (int) $pending['player']) as $action) {
             if ($action->id() === $actionId) {
-                return $this->run($sim, $state, $action);
+                // Ancre de pause : sans elle, on ne pourrait pas rejouer à travers une décision humaine.
+                return $this->run($sim, $state, $action, anchorBefore: [$state->eventSeq, $sim->getState(), $actionId]);
             }
         }
 
@@ -65,10 +67,10 @@ class SimulationService
      */
     public function fork(Simulation $parent, int $atEvent, array $controllerOverrides): Simulation
     {
-        $checkpoint = $this->checkpointAtOrBefore($parent, $atEvent)
+        $checkpoint = $this->reconstructor->at($parent, $atEvent)
             ?? throw new \DomainException("Aucun point de bifurcation à l'événement $atEvent ou avant.");
 
-        $state = GameState::fromArray($checkpoint->getState());
+        $state = GameState::fromArray($checkpoint['state']);
         foreach ($controllerOverrides as $playerId => $key) {
             if (!isset($state->players[(int) $playerId])) {
                 throw new \InvalidArgumentException("Joueur inconnu : $playerId");
@@ -82,7 +84,8 @@ class SimulationService
         $child->setForkEventSeq($state->eventSeq);
         $this->em->persist($child);
 
-        return $this->run($child, $state, null);
+        // Ancre au point de bifurcation : état avec les `controllers` surchargés (le rejeu en dépend).
+        return $this->run($child, $state, null, anchorBefore: [$state->eventSeq, $state->toArray(), null]);
     }
 
     /**
@@ -121,23 +124,30 @@ class SimulationService
     /** État sérialisé du checkpoint le plus proche (<= $seq) : sert à l'endpoint GET /state?at=. */
     public function stateAt(Simulation $sim, int $seq): ?array
     {
-        $cp = $this->checkpointAtOrBefore($sim, $seq);
-
-        return $cp === null ? null : ['eventSeq' => $cp->getEventSeq(), 'state' => $cp->getState()];
+        return $this->reconstructor->at($sim, $seq);
     }
 
-    private function run(Simulation $sim, GameState $state, ?Action $decision): Simulation
+    /**
+     * @param array{0:int,1:array,2:?string}|null $anchorBefore ancre de départ [eventSeq, état, actionId] écrite avec le run (son tour est déjà ancré ; null = création, premier checkpoint ancré)
+     */
+    private function run(Simulation $sim, GameState $state, ?Action $decision, ?array $anchorBefore = null): Simulation
     {
-        $checkpoints = new InMemoryCheckpoints();
+        $checkpoints = new SparseCheckpoints($this->checkpointEveryNTurns, $anchorBefore !== null ? $state->turn : null);
         $result = (new GameEngine(new AgentRegistry(), $checkpoints))->advance($state, $decision);
 
         // Une seule transaction (tout ou rien). Les événements et checkpoints sont écrits en masse, hors
         // UnitOfWork (des milliers d'entités + un INSERT par ligne seraient très lents sur MySQL).
-        $this->em->wrapInTransaction(function () use ($sim, $state, $result, $checkpoints): void {
+        $this->em->wrapInTransaction(function () use ($sim, $state, $result, $checkpoints, $anchorBefore): void {
             $this->em->persist($sim);
             $this->em->flush(); // obtient l'id de la simulation
 
             $this->bulk->insertEvents((int) $sim->getId(), $result->events);
+            if ($anchorBefore !== null) {
+                [$seq, $anchorState, $actionId] = $anchorBefore;
+                $actionId === null
+                    ? $this->bulk->insertCheckpoints((int) $sim->getId(), [$seq => $anchorState])
+                    : $this->bulk->anchorDecision((int) $sim->getId(), $seq, $anchorState, $actionId);
+            }
             $this->bulk->insertCheckpoints((int) $sim->getId(), $checkpoints->states);
 
             $sim->setState($state->toArray());
@@ -147,26 +157,6 @@ class SimulationService
         });
 
         return $sim;
-    }
-
-    private function checkpointAtOrBefore(Simulation $sim, int $seq): ?Checkpoint
-    {
-        $own = $this->em->createQueryBuilder()
-            ->select('c')
-            ->from(Checkpoint::class, 'c')
-            ->where('c.simulation = :s AND c.eventSeq <= :seq')
-            ->orderBy('c.eventSeq', 'DESC')
-            ->setMaxResults(1)
-            ->setParameter('s', $sim)
-            ->setParameter('seq', $seq)
-            ->getQuery()->getOneOrNullResult();
-
-        if ($own !== null || $sim->getParent() === null) {
-            return $own;
-        }
-
-        // Les checkpoints antérieurs à la bifurcation vivent chez l'ancêtre.
-        return $this->checkpointAtOrBefore($sim->getParent(), min($seq, $sim->getForkEventSeq() ?? 0));
     }
 
     /** @param array<int, string> $controllers */
