@@ -26,7 +26,9 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 ## Pièges d'environnement (voir `docs/SYMFONY_SETUP.md`)
 
 - **Ne jamais cloner ni déplacer le dépôt sous `~/Documents` ou `~/Desktop`** (synchronisés par iCloud) : iCloud y crée des copies de conflit (`Request 2.php`, `dev 2` dans `.git`…) qui corrompent `vendor/` et `.git`, et Composer se bloque. Le dépôt vit dans `~/GitHub/`.
-- **Symfony Flex est installé** : il épingle la famille Symfony via `extra.symfony.require` (`7.4.*`). Ses recettes ne doivent pas écraser notre config : après un `composer require`, relire le diff de `.env` (une recette peut y ajouter un `DATABASE_URL` Postgres qui masquerait notre SQLite) et supprimer `compose*.yaml` si une recette en ajoute. Vérifier `composer show | grep ' 8\.'` (doit rester vide).
+- **Symfony Flex est installé** : il épingle la famille Symfony via `extra.symfony.require` (`7.4.*`). Ses recettes ne doivent pas écraser notre config : après un `composer require`, relire le diff de `.env` (une recette peut y ajouter un `DATABASE_URL` Postgres qui masquerait notre MySQL) et supprimer `compose*.yaml` si une recette en ajoute. Vérifier `composer show | grep ' 8\.'` (doit rester vide).
+
+- **Base MySQL** : le mot de passe vit dans `backend/.env.local` et `backend/.env.test.local` (ignorés par git). Ne jamais le mettre dans `.env` / `.env.test` (versionnés, valeur `CHANGEME`) ni dans un commit. Les colonnes JSON de MySQL réordonnent les clés : comparer avec `assertEquals`, pas `assertSame`.
 
 ## Commandes
 
@@ -35,9 +37,9 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend (28 tests : moteur + API)
+# Backend (28 tests : moteur + API ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
-php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée backend/var/data.db
+php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
 cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
 
 # Frontend
@@ -61,7 +63,7 @@ cd frontend && npm install && npm test && npm run dev
 | Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (passer toujours : 32 décisions ; tout jouer : 40) |
 | Reducer front vs état final PHP (fixture) | Oui : `vitest` (4 tests) passe |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés, jamais affichés dans un navigateur) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration SQLite). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 10 tests d'API (`tests/Api/`) passent, scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA : ~0,55 s, ~19 Mo en base |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 10 tests d'API (`tests/Api/`) passent, scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA : ~1,9 s, ~28 Mo en base (MySQL 9.3) |
 | Front branché sur l'API réelle dans un navigateur | **Non** : jamais ouvert dans un navigateur |
 
 Limites de comportement connues : sans combat, personne ne meurt de dégâts, donc tous les joueurs meurent de pioche vers le tour 131 et **J3 gagne toujours** (artefact de l'ordre de pioche). Le commandant n'est lancé qu'une fois par joueur (taxe et retour en zone de commandement jamais exercés en partie). Phases réduites à pioche / principale / fin.

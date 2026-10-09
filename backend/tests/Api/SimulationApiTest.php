@@ -96,7 +96,9 @@ final class SimulationApiTest extends WebTestCase
 
         [$status, $pending] = $this->call('GET', self::BASE . "/{$sim['id']}/pending");
         self::assertSame(200, $status);
-        self::assertSame($sim['pending'], $pending);
+        // assertEquals : MySQL normalise l'ordre des clés des colonnes JSON, or l'ordre des clés d'un objet JSON
+        // n'a pas de sens (les listes, comme `actions`, gardent bien leur ordre).
+        self::assertEquals($sim['pending'], $pending);
     }
 
     public function testDecisionsValidesInvalidesEtSurPartieTerminee(): void
