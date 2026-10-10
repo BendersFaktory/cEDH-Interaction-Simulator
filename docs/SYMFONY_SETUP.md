@@ -1,5 +1,7 @@
 # Symfony : état réel de l'intégration
 
+> Installation pas à pas : voir [INSTALL.md](INSTALL.md). Ce document détaille l'app Symfony (routes, mesures, persistance, pièges).
+
 `backend/` est désormais une **vraie app Symfony 7.4** (kernel, config, migrations, tests d'API), vérifiée le 2026-10-09. Le moteur `src/Engine/` reste du PHP pur, exclu de l'autowiring.
 
 ## Démarrage
