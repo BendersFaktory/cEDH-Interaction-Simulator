@@ -1,6 +1,17 @@
 // Miroir TypeScript des structures produites par le moteur PHP (voir docs/EVENTS.md).
 
-export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature'
+export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact'
+
+/** Capacité activée d'une carte (forme sérialisée par le moteur). */
+export interface AbilityView {
+  isManaAbility: boolean
+  effect: string
+  tap: boolean
+  manaCost?: string | null
+  /** Pour un effet de mana : alternatives produites (ex. ['CC'] ou ['R', 'G']). */
+  options?: string[]
+  amount?: number
+}
 
 export interface PublicCard {
   id: string
@@ -16,6 +27,9 @@ export interface PublicCard {
   commander?: boolean
   power?: number
   toughness?: number
+  abilities?: AbilityView[]
+  /** Mana ajouté par un rituel (effet 'mana'). */
+  adds?: string[] | string
 }
 
 export interface BoardCard extends PublicCard {
@@ -37,12 +51,17 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability'
   player: number
   cardId?: string
   targets?: string[]
   defender?: number
   attackerId?: string
+  /** Action `ability` : index de la capacité et alternative de mana choisie. */
+  ability?: number
+  option?: number
+  /** Action `ability` : vrai pour une capacité de mana. */
+  mana?: boolean
 }
 
 export interface StackItemView {
@@ -51,6 +70,8 @@ export interface StackItemView {
   controller: number
   targets: string[]
   x?: number
+  /** Présent pour une capacité activée (la carte est sa source). */
+  ability?: AbilityView
 }
 
 export interface DecisionRequest {
@@ -93,6 +114,8 @@ export interface PlayerView {
   controller: string
   /** Dégâts de commandant subis : "propriétaire:idCommandant" => total. */
   commanderDamage: Record<string, number>
+  /** Réserve de mana (symbole => quantité). */
+  pool: Record<string, number>
 }
 
 export interface GameView {

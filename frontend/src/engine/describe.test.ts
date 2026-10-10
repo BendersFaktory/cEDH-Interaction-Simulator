@@ -21,3 +21,18 @@ describe('describeEvent — SpellCast', () => {
     expect(describeEvent(spell({ fromCommand: true }))).toBe('J1 lance Éclair depuis la zone de commandement (coût 2)')
   })
 })
+
+describe('describeEvent — capacités', () => {
+  const e = (type: string, payload: Record<string, unknown>): GameEvent => ({ seq: 1, type, verbose: false, payload })
+  it('mana', () => {
+    expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Mountain' }, tapped: ['x'], mana: { R: 1 } }))).toBe('J0 engage Mountain : {R}')
+    expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Sol Ring' }, tapped: ['x'], mana: { C: 2 } }))).toBe('J0 engage Sol Ring : {C}{C}')
+    expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Sol Ring' }, tapped: [], mana: { C: 2 } }))).toBe('J0 active Sol Ring : {C}{C}')
+    expect(describeEvent(e('ManaAdded', { player: 0, mana: { R: 2 } }))).toBe('J0 gagne {R}{R}')
+    expect(describeEvent(e('ManaPoolEmptied', { player: 0, lost: { R: 1 } }))).toBe('J0 perd son mana flottant {R}')
+  })
+  it('capacité non-mana', () => {
+    expect(describeEvent(e('AbilityActivated', { player: 0, card: { name: 'Pinger' }, ability: { effect: 'damage', amount: 1 }, targets: ['player:1'] }))).toBe('J0 active Pinger (1 dégât) → J1')
+    expect(describeEvent(e('AbilityResolved', { card: { name: 'Pinger' } }))).toBe('Capacité de Pinger résolue')
+  })
+})

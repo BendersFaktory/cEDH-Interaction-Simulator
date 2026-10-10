@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
+use App\Engine\Mana\ManaPlan;
 use App\Engine\Mana\ManaPool;
 
 final class PlayerState
@@ -127,33 +129,68 @@ final class PlayerState
     }
 
     /**
-     * Exécute un plan de ManaPayment : engage les terrains (capacité de mana, sans pile), le mana passe par la
-     * réserve puis est dépensé pour le sort (la réserve est donc vide à la fin).
+     * Active une capacité de mana d'un permanent : l'engage (si `{T}`) et ajoute le mana produit à la réserve.
+     * Pas de pile, pas d'événement (l'appelant journalise). Seul endroit qui crée du mana.
      *
-     * @param list<array{land: string, color: Color}> $plan
-     * @return array{tapped: list<string>, paid: array<string, int>} ids engagés et mana produit par couleur
+     * @return array<string, int> mana produit, par symbole
      */
-    public function payWithPlan(array $plan): array
+    public function activateManaSource(CardInstance $card, ActivatedAbility $ability, int $option): array
+    {
+        if ($ability->tap) {
+            $card->tapped = true;
+        }
+        $produced = $ability->produced($option);
+        foreach ($produced as $symbol => $n) {
+            $this->pool->add(Color::fromSymbol($symbol), $n);
+        }
+
+        return $produced;
+    }
+
+    /**
+     * Exécute un plan de ManaPayment : active les capacités de mana prévues, puis dépense `spend` depuis la réserve.
+     * Le surplus produit (Sol Ring pour un `{1}`) reste dans la réserve jusqu'à la fin de l'étape.
+     *
+     * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>} ids engagés, mana produit
+     *         par les activations, et mana pris dans la réserve préexistante
+     */
+    public function payWithPlan(ManaPlan $plan): array
     {
         $tapped = [];
         $paid = [];
-        foreach ($plan as ['land' => $landId, 'color' => $color]) {
-            foreach ($this->battlefield as $card) {
-                if ($card->id === $landId && $card->isLand() && !$card->tapped) {
-                    $card->tapped = true;
-                    $this->pool->add($color);
-                    $tapped[] = $landId;
-                    $paid[$color->symbol()] = ($paid[$color->symbol()] ?? 0) + 1;
-                    continue 2;
-                }
+        foreach ($plan->taps as ['card' => $cardId, 'ability' => $abilityIndex, 'option' => $option]) {
+            $card = $this->findOnBattlefield($cardId);
+            $ability = $card?->abilities()[$abilityIndex] ?? null;
+            if ($card === null || $ability === null || !$ability->isManaAbility || ($ability->tap && $card->tapped)) {
+                throw new \DomainException("Source de mana introuvable ou déjà engagée : $cardId");
             }
-            throw new \DomainException("Terrain introuvable ou déjà engagé : $landId");
+            if ($ability->tap) {
+                $tapped[] = $cardId;
+            }
+            foreach ($this->activateManaSource($card, $ability, $option) as $symbol => $n) {
+                $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
+            }
         }
-        foreach ($plan as ['color' => $color]) {
-            $this->pool->spend($color);
+        $fromPool = [];
+        foreach ($plan->spend as $symbol => $n) {
+            $this->pool->spend(Color::fromSymbol($symbol), $n);
+            if ($n > ($paid[$symbol] ?? 0)) {
+                $fromPool[$symbol] = $n - ($paid[$symbol] ?? 0);
+            }
         }
 
-        return ['tapped' => $tapped, 'paid' => $paid];
+        return ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool];
+    }
+
+    public function findOnBattlefield(string $cardId): ?CardInstance
+    {
+        foreach ($this->battlefield as $card) {
+            if ($card->id === $cardId) {
+                return $card;
+            }
+        }
+
+        return null;
     }
 
     /** @return list<string> ids des permanents qui étaient engagés */

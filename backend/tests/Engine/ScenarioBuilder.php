@@ -44,6 +44,17 @@ final class ScenarioBuilder
         return $this;
     }
 
+    /** @var array<int, list<CardInstance>> */
+    private array $permanents = [];
+
+    /** Pose un permanent quelconque (artefact...) sur le champ de bataille. */
+    public function permanent(int $player, CardInstance $card): self
+    {
+        $this->permanents[$player][] = $card;
+
+        return $this;
+    }
+
     private int $life = 20;
 
     /** PV de départ de tous les joueurs (20 par défaut pour les anciens scénarios, 40 pour Commander). */
@@ -81,6 +92,9 @@ final class ScenarioBuilder
             }
             for ($i = 0; $i < ($this->lands[$id] ?? 0); $i++) {
                 $p->battlefield[] = new CardInstance("p{$id}_land$i", 'Land', CardInstance::LAND);
+            }
+            foreach ($this->permanents[$id] ?? [] as $permanent) {
+                $p->battlefield[] = $permanent;
             }
             foreach ($this->creatures[$id] ?? [] as $creature) {
                 $p->battlefield[] = $creature;

@@ -3,6 +3,10 @@ import type { PlayerView } from '../types/engine'
 import CardView from './CardView.vue'
 
 defineProps<{ player: PlayerView; isActive: boolean; hasPriority: boolean; hasPassed: boolean }>()
+
+/** Réserve => liste de pastilles (une par unité), couleurs d'abord. */
+const poolSymbols = (pool: Record<string, number> | undefined): string[] =>
+  Object.entries(pool ?? {}).flatMap(([s, n]) => Array<string>(Math.max(0, n)).fill(s))
 </script>
 
 <template>
@@ -15,6 +19,11 @@ defineProps<{ player: PlayerView; isActive: boolean; hasPriority: boolean; hasPa
       <span v-else-if="hasPassed" class="badge passed">a passé</span>
       <span v-if="player.lost" class="badge lost">éliminé</span>
     </header>
+
+    <div v-if="poolSymbols(player.pool).length" class="zone mana-pool">
+      <h4>Réserve de mana</h4>
+      <span v-for="(s, i) in poolSymbols(player.pool)" :key="i" class="mana-sym" :class="/^[WUBRGC]$/.test(s) ? `m-${s}` : 'm-n'">{{ s }}</span>
+    </div>
 
     <div v-if="Object.keys(player.commanderDamage).length" class="zone">
       <h4>Dégâts de commandant reçus</h4>

@@ -59,7 +59,10 @@ final class TurnManager
     {
         // Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape.
         foreach ($s->players as $p) {
-            $p->pool->clear();
+            if (!$p->pool->isEmpty()) {
+                $s->emit('ManaPoolEmptied', ['player' => $p->id, 'lost' => $p->pool->toArray(), 'pool' => []]);
+                $p->pool->clear();
+            }
         }
 
         $next = $s->phase->next();

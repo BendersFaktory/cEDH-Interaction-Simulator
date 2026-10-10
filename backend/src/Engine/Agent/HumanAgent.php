@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Agent;
 
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\PassPriority;
 use App\Engine\Decision\DecisionRequest;
 use App\Engine\Decision\DecisionRequired;
@@ -25,7 +26,7 @@ final class HumanAgent implements PlayerAgent
 
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
-        if ($this->autoPass && !$this->hasUsefulAction($legal)) {
+        if ($this->autoPass && !$this->hasUsefulAction($state, $legal)) {
             return AutoPassAgent::pass($legal, $playerId);
         }
 
@@ -33,12 +34,15 @@ final class HumanAgent implements PlayerAgent
     }
 
     /** @param list<Action> $legal */
-    private function hasUsefulAction(array $legal): bool
+    private function hasUsefulAction(GameState $state, array $legal): bool
     {
         foreach ($legal as $action) {
-            if (!$action instanceof PassPriority) {
-                return true;
+            // Passer et activer du mana à la main ne sont pas des raisons de s'arrêter (l'auto-paiement s'en charge).
+            if ($action instanceof PassPriority || ($action instanceof ActivateAbility && $action->isManaAbility($state))) {
+                continue;
             }
+
+            return true;
         }
 
         return false;

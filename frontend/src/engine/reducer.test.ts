@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { GameEvent } from '../types/engine'
+import type { GameEvent, PublicCard } from '../types/engine'
 import fixture from './__fixtures__/game.json'
 import { applyEvent, replay } from './reducer'
 
@@ -89,5 +89,65 @@ describe('reducer — défausse', () => {
     const pl = after.players[drawn.payload.player]
     expect(pl.hand.some((c) => c.id === drawn.payload.card.id)).toBe(false)
     expect(pl.graveyard.some((c) => c.id === drawn.payload.card.id)).toBe(true)
+  })
+})
+
+describe('reducer — capacités et réserve de mana', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const land: PublicCard = { id: 'l1', name: 'Mountain', kind: 'land', cost: 0, effect: null, amount: 0 }
+  const pinger: PublicCard = { id: 'a1', name: 'Pinger', kind: 'artifact', cost: 2, effect: null, amount: 0 }
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h' }, { id: 1, life: 40, library: 0, controller: 'ai' }] }),
+      ev(2, 'LandPlayed', { player: 0, card: land }),
+      ev(3, 'LandPlayed', { player: 0, card: pinger }),
+    ])
+
+  it('pool vide par défaut, lu depuis le snapshot si présent', () => {
+    expect(start().players[0].pool).toEqual({})
+    const v = replay([ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h', pool: { R: 1 } }] })])
+    expect(v.players[0].pool).toEqual({ R: 1 })
+  })
+
+  it('ManaAbilityActivated engage la source et fixe la réserve', () => {
+    const v = applyEvent(start(), ev(4, 'ManaAbilityActivated', { player: 0, card: land, tapped: ['l1'], mana: { R: 1 }, pool: { R: 1 } }))
+    expect(v.players[0].battlefield[0].tapped).toBe(true)
+    expect(v.players[0].pool).toEqual({ R: 1 })
+    expect(v.stack).toEqual([])
+  })
+
+  it('AbilityActivated pose l\'élément de pile, AbilityResolved le retire sans bouger la carte', () => {
+    const v = start()
+    v.priority.passed = [1]
+    const ability = { isManaAbility: false, effect: 'damage', tap: true, amount: 1 }
+    applyEvent(v, ev(4, 'AbilityActivated', { player: 0, stackId: 's1', card: pinger, ability, targets: ['player:1'], tapped: ['a1'] }))
+    expect(v.stack).toEqual([{ id: 's1', card: pinger, controller: 0, targets: ['player:1'], ability }])
+    expect(v.players[0].battlefield[1].tapped).toBe(true)
+    expect(v.priority.passed).toEqual([])
+    applyEvent(v, ev(5, 'AbilityResolved', { stackId: 's1', controller: 0, card: pinger }))
+    expect(v.stack).toEqual([])
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1'])
+  })
+
+  it('ManaAdded, ManaPoolEmptied et SpellCast.pool', () => {
+    const v = start()
+    applyEvent(v, ev(4, 'ManaAdded', { player: 0, mana: { R: 2 }, pool: { R: 2 }, source: 's1' }))
+    expect(v.players[0].pool).toEqual({ R: 2 })
+    applyEvent(v, ev(5, 'ManaPoolEmptied', { player: 0, lost: { R: 2 }, pool: {} }))
+    expect(v.players[0].pool).toEqual({})
+
+    v.players[0].pool = { R: 2 }
+    v.players[0].hand.push({ ...pinger, id: 'h1', tapped: false })
+    applyEvent(v, ev(6, 'SpellCast', { player: 0, card: pinger, stackId: 's2', targets: [], tapped: [], fromCommand: false }))
+    expect(v.players[0].pool).toEqual({ R: 2 })
+    applyEvent(v, ev(7, 'SpellCast', { player: 0, card: { ...pinger, id: 'h2' }, stackId: 's3', targets: [], tapped: [], fromCommand: false, pool: { R: 1 } }))
+    expect(v.players[0].pool).toEqual({ R: 1 })
+  })
+
+  it('un artefact résolu arrive sur le champ de bataille', () => {
+    const v = start()
+    v.stack.push({ id: 's9', card: pinger, controller: 1, targets: [] })
+    applyEvent(v, ev(4, 'SpellResolved', { stackId: 's9', controller: 1, card: pinger, destination: 'battlefield' }))
+    expect(v.players[1].battlefield.map((c) => c.id)).toEqual(['a1'])
   })
 })

@@ -6,37 +6,47 @@ namespace App\Tests\Engine;
 
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\PlayerState;
-use App\Engine\Mana\Color;
+use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Mana\ManaCost;
 use App\Engine\Mana\ManaPayment;
+use App\Engine\Mana\ManaPlan;
+use App\Engine\Mana\ManaPool;
 use PHPUnit\Framework\TestCase;
 
 final class ManaPaymentTest extends TestCase
 {
-    /** @param list<string|null> $specs symbole produit ('R'...) ; préfixe '!' = engagé ; null = terrain sans `produces` */
-    private function player(array $specs): PlayerState
+    /**
+     * @param list<string|null> $specs 'R' = terrain produisant R ; 'RG' = terrain double ; '!R' = engagé ; null = terrain sans
+     *                                 `produces` ; 'SOL' = Sol Ring ({T} : {C}{C})
+     * @param array<string, int> $pool
+     */
+    private function player(array $specs, array $pool = []): PlayerState
     {
-        $lands = [];
+        $cards = [];
         foreach ($specs as $i => $spec) {
             $tapped = is_string($spec) && str_starts_with($spec, '!');
-            $symbol = is_string($spec) ? ltrim($spec, '!') : null;
-            $lands[] = new CardInstance('l' . $i, 'Land', CardInstance::LAND, 0, null, 0, $tapped, false, 0, 0, 0, 0, null, $symbol === null ? [] : [$symbol]);
+            $symbols = is_string($spec) ? ltrim($spec, '!') : null;
+            if ($symbols === 'SOL') {
+                $cards[] = new CardInstance('a' . $i, 'Sol Ring', CardInstance::ARTIFACT, 1, null, 0, $tapped, false, 0, 0, 0, 0, null, [], [ActivatedAbility::mana('{C}{C}')]);
+                continue;
+            }
+            $cards[] = new CardInstance('l' . $i, 'Land', CardInstance::LAND, 0, null, 0, $tapped, false, 0, 0, 0, 0, null, $symbols === null ? [] : str_split($symbols));
         }
 
-        return new PlayerState(0, 40, [], [], $lands);
+        return new PlayerState(0, 40, [], [], $cards, [], [], [], [], new ManaPool($pool));
     }
 
-    /** @param list<array{land: string, color: Color}>|null $plan */
-    private function symbols(?array $plan): ?array
+    /** @return list<string>|null */
+    private function cards(?ManaPlan $plan): ?array
     {
-        return $plan === null ? null : array_map(fn (array $e) => $e['color']->symbol(), $plan);
+        return $plan === null ? null : array_column($plan->taps, 'card');
     }
 
     public function testColoredAndGeneric(): void
     {
         $plan = ManaPayment::plan($this->player(['R', 'U', 'U']), ManaCost::parse('{1}{R}'));
-        $this->assertCount(2, $plan);
-        $this->assertSame(['l0', 'l1'], array_column($plan, 'land'));
+        $this->assertSame(['l0', 'l1'], $this->cards($plan));
+        $this->assertSame(['U' => 1, 'R' => 1], $plan->spend);
     }
 
     public function testImpossibleColor(): void
@@ -48,8 +58,8 @@ final class ManaPaymentTest extends TestCase
     public function testHybridPicksAvailableColor(): void
     {
         $plan = ManaPayment::plan($this->player(['G', 'U']), ManaCost::parse('{R/G}'));
-        $this->assertSame(['G'], $this->symbols($plan));
-        $this->assertSame(['l0'], array_column($plan, 'land'));
+        $this->assertSame(['G' => 1], $plan->spend);
+        $this->assertSame(['l0'], $this->cards($plan));
         $this->assertNull(ManaPayment::plan($this->player(['U']), ManaCost::parse('{R/G}')));
     }
 
@@ -58,14 +68,14 @@ final class ManaPaymentTest extends TestCase
         // {R}{R/G} avec R et G : l'hybride doit prendre G.
         $plan = ManaPayment::plan($this->player(['R', 'G']), ManaCost::parse('{R}{R/G}'));
         $this->assertNotNull($plan);
-        $this->assertEqualsCanonicalizing(['R', 'G'], $this->symbols($plan));
+        $this->assertSame(['R' => 1, 'G' => 1], $plan->spend);
     }
 
     public function testXPlanAndMaxX(): void
     {
         $p = $this->player(['R', 'R', 'U', 'U', 'U']);
         $cost = ManaCost::parse('{X}{R}');
-        $this->assertCount(4, ManaPayment::plan($p, $cost, 3));
+        $this->assertCount(4, ManaPayment::plan($p, $cost, 3)->taps);
         $this->assertNull(ManaPayment::plan($p, $cost, 5));
         $this->assertSame(4, ManaPayment::maxX($p, $cost));
         $this->assertSame(0, ManaPayment::maxX($p, ManaCost::parse('{R}')));
@@ -77,47 +87,152 @@ final class ManaPaymentTest extends TestCase
     {
         $p = $this->player(['!R', 'R']);
         $this->assertNull(ManaPayment::plan($p, ManaCost::parse('{R}{R}')));
-        $this->assertSame(['l1'], array_column(ManaPayment::plan($p, ManaCost::parse('{R}')), 'land'));
+        $this->assertSame(['l1'], $this->cards(ManaPayment::plan($p, ManaCost::parse('{R}'))));
         $this->assertSame(1, ManaPayment::maxX($p, ManaCost::parse('{X}')));
     }
 
     public function testLegacyLandPaysGenericOnly(): void
     {
         $p = $this->player([null, null]);
-        $this->assertNotNull(ManaPayment::plan($p, ManaCost::parse('{2}')));
         $this->assertNull(ManaPayment::plan($p, ManaCost::parse('{R}')));
-        $this->assertSame(['C', 'C'], $this->symbols(ManaPayment::plan($p, ManaCost::parse('{2}'))));
+        $this->assertSame(['C' => 2], ManaPayment::plan($p, ManaCost::parse('{2}'))->spend);
+        $this->assertSame(['C' => 1], ManaPayment::plan($p, ManaCost::parse('{C}'))->spend);
     }
 
-    public function testGenericLeavesScarceColorUntapped(): void
+    public function testGenericTieBrokenByBattlefieldOrder(): void
     {
+        // Même gaspillage et même nombre d'engagements : le premier permanent du champ de bataille gagne.
         $plan = ManaPayment::plan($this->player(['R', 'G', 'G']), ManaCost::parse('{1}'));
-        $this->assertSame(['G'], $this->symbols($plan));
-        $this->assertSame(['l1'], array_column($plan, 'land'));
-
-        // Égalité d'abondance : ordre WUBRGC (W avant R).
-        $plan = ManaPayment::plan($this->player(['R', 'W']), ManaCost::parse('{1}'));
-        $this->assertSame(['W'], $this->symbols($plan));
+        $this->assertSame(['l0'], $this->cards($plan));
+        $this->assertSame(['R' => 1], $plan->spend);
     }
 
     public function testZeroCostAndEmpty(): void
     {
-        $this->assertSame([], ManaPayment::plan($this->player([]), new ManaCost()));
+        $plan = ManaPayment::plan($this->player([]), new ManaCost());
+        $this->assertSame([], $plan->taps);
+        $this->assertSame([], $plan->spend);
         $this->assertNull(ManaPayment::plan($this->player([]), ManaCost::parse('{1}')));
     }
 
     public function testDeterministicAndNoMutation(): void
     {
-        $p = $this->player(['R', 'G', 'G', 'U']);
+        $p = $this->player(['R', 'G', 'G', 'U', 'RG', 'SOL']);
         $before = json_encode($p->toArray());
         $cost = ManaCost::parse('{1}{R/U}{G}');
         $a = ManaPayment::plan($p, $cost);
         $b = ManaPayment::plan($p, $cost);
+        $this->assertNotNull($a);
         $this->assertEquals($a, $b);
         ManaPayment::maxX($p, ManaCost::parse('{X}'));
         $this->assertSame($before, json_encode($p->toArray()));
         foreach ($p->battlefield as $land) {
             $this->assertFalse($land->tapped);
         }
+    }
+
+    public function testDualPaysEitherColorAsNeeded(): void
+    {
+        $this->assertSame(['l0'], $this->cards(ManaPayment::plan($this->player(['RG']), ManaCost::parse('{R}'))));
+        $this->assertSame(['l0'], $this->cards(ManaPayment::plan($this->player(['RG']), ManaCost::parse('{G}'))));
+        $plan = ManaPayment::plan($this->player(['RG']), ManaCost::parse('{G}'));
+        $this->assertSame(['G' => 1], $plan->spend);
+        $this->assertSame(1, $plan->taps[0]['ability']); // la capacité {G} du dual
+        // Deux couleurs avec un dual + un terrain simple.
+        $plan = ManaPayment::plan($this->player(['RG', 'R']), ManaCost::parse('{R}{G}'));
+        $this->assertSame(['l0', 'l1'], $this->cards($plan));
+        $this->assertNull(ManaPayment::plan($this->player(['RG']), ManaCost::parse('{R}{G}')));
+    }
+
+    public function testDualNotWastedWhenSimpleLandSuffices(): void
+    {
+        $this->assertSame(['l1'], $this->cards(ManaPayment::plan($this->player(['RG', 'R']), ManaCost::parse('{R}'))));
+        $this->assertSame(['l1'], $this->cards(ManaPayment::plan($this->player(['RG', 'G']), ManaCost::parse('{1}'))));
+        // Générique : le terrain simple, même placé après.
+        $this->assertSame(['l1'], $this->cards(ManaPayment::plan($this->player(['RG', 'U']), ManaCost::parse('{1}'))));
+    }
+
+    public function testSolRingPaysTwoWithoutWaste(): void
+    {
+        $plan = ManaPayment::plan($this->player(['SOL', 'R']), ManaCost::parse('{2}'));
+        $this->assertSame(['a0'], $this->cards($plan));
+        $this->assertSame(['C' => 2], $plan->spend);
+    }
+
+    public function testSolRingForOneLeavesSurplusInPool(): void
+    {
+        $plan = ManaPayment::plan($this->player(['SOL']), ManaCost::parse('{1}'));
+        $this->assertSame(['a0'], $this->cards($plan));
+        $this->assertSame(['C' => 1], $plan->spend); // le second {C} reste dans la réserve
+        // Un terrain simple est préféré : pas de gaspillage.
+        $this->assertSame(['l1'], $this->cards(ManaPayment::plan($this->player(['SOL', 'R']), ManaCost::parse('{1}'))));
+    }
+
+    public function testSolRingCombinesWithLands(): void
+    {
+        $plan = ManaPayment::plan($this->player(['SOL', 'R']), ManaCost::parse('{2}{R}'));
+        $this->assertSame(['a0', 'l1'], $this->cards($plan));
+        $this->assertSame(['R' => 1, 'C' => 2], $plan->spend);
+        $this->assertNull(ManaPayment::plan($this->player(['SOL']), ManaCost::parse('{2}{R}')));
+    }
+
+    public function testPoolIsSpentFirst(): void
+    {
+        $plan = ManaPayment::plan($this->player(['R'], ['R' => 1]), ManaCost::parse('{R}'));
+        $this->assertSame([], $plan->taps);
+        $this->assertSame(['R' => 1], $plan->spend);
+    }
+
+    public function testPoolPlusLands(): void
+    {
+        $plan = ManaPayment::plan($this->player(['U', 'R'], ['R' => 1]), ManaCost::parse('{1}{R}{U}'));
+        $this->assertSame(['l0', 'l1'], $this->cards($plan));
+        $this->assertSame(['U' => 1, 'R' => 2], $plan->spend);
+
+        $plan = ManaPayment::plan($this->player(['U'], ['R' => 1]), ManaCost::parse('{1}{R}'));
+        $this->assertSame(['l0'], $this->cards($plan));
+        $this->assertSame(['U' => 1, 'R' => 1], $plan->spend);
+
+        // La réserve (coloré) ne paie pas ce que le coût ne demande pas.
+        $this->assertNull(ManaPayment::plan($this->player([], ['R' => 1]), ManaCost::parse('{U}')));
+    }
+
+    public function testHybridWithDual(): void
+    {
+        $plan = ManaPayment::plan($this->player(['RG', 'U']), ManaCost::parse('{R/G}{U}'));
+        $this->assertSame(['l0', 'l1'], $this->cards($plan));
+        $this->assertNull(ManaPayment::plan($this->player(['RG']), ManaCost::parse('{R/G}{R/G}')));
+        $plan = ManaPayment::plan($this->player(['RG', 'R']), ManaCost::parse('{R/G}{R/G}'));
+        $this->assertSame(['l0', 'l1'], $this->cards($plan));
+        // Hybride payé par la réserve plutôt que par un engagement.
+        $plan = ManaPayment::plan($this->player(['RG'], ['G' => 1]), ManaCost::parse('{R/G}'));
+        $this->assertSame([], $plan->taps);
+        $this->assertSame(['G' => 1], $plan->spend);
+    }
+
+    public function testMaxXWithSolRing(): void
+    {
+        $this->assertSame(2, ManaPayment::maxX($this->player(['SOL', 'R']), ManaCost::parse('{X}{R}')));
+        $this->assertSame(1, ManaPayment::maxX($this->player(['SOL']), ManaCost::parse('{X}{X}')));
+        $this->assertSame(0, ManaPayment::maxX($this->player(['SOL']), ManaCost::parse('{X}{R}')));
+        $this->assertSame(3, ManaPayment::maxX($this->player(['SOL'], ['U' => 1]), ManaCost::parse('{X}')));
+        $plan = ManaPayment::plan($this->player(['SOL', 'R']), ManaCost::parse('{X}{R}'), 2);
+        $this->assertSame(['a0', 'l1'], $this->cards($plan));
+        $this->assertSame(['R' => 1, 'C' => 2], $plan->spend);
+    }
+
+    public function testNodeLimitDoesNotHang(): void
+    {
+        $specs = array_fill(0, 24, 'RG');
+        $p = $this->player($specs);
+        $start = microtime(true);
+        $plan = ManaPayment::plan($p, ManaCost::parse('{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}'));
+        $this->assertNotNull($plan);
+        $this->assertCount(24, $plan->taps);
+        $this->assertSame(['R' => 12, 'G' => 12], $plan->spend);
+        // Impossible (25 symboles, 24 sources, mais borne couleur non détectée) : doit rendre null sans boucler.
+        $this->assertNull(ManaPayment::plan($p, ManaCost::parse('{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}')));
+        $this->assertNull(ManaPayment::plan($this->player(array_merge(array_fill(0, 12, 'RG'), array_fill(0, 12, 'WU'))), ManaCost::parse('{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{W}{U}')));
+        $this->assertLessThan(5.0, microtime(true) - $start);
     }
 }

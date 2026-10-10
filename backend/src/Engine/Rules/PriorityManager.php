@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\AbilityManager;
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
@@ -92,6 +94,11 @@ final class PriorityManager
                 continue; // action spéciale : le joueur garde la priorité, pas de nouvelle ronde
             }
 
+            if ($action instanceof ActivateAbility) {
+                AbilityManager::activate($s, $action);
+                continue; // capacité de mana : le joueur garde la priorité ; autre capacité : sur la pile (remise à zéro des passes)
+            }
+
             if ($action instanceof CastSpell) {
                 $this->cast($s, $action);
                 continue;
@@ -157,7 +164,7 @@ final class PriorityManager
             $card = $p->takeFromCommand($a->cardId);
             $fromCommand = true;
         }
-        ['tapped' => $tapped, 'paid' => $paid] = $p->payWithPlan($plan);
+        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool] = $p->payWithPlan($plan);
         if ($fromCommand) {
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
@@ -175,6 +182,8 @@ final class PriorityManager
             'manaCost' => (string) $cost,
             'x' => $a->x,
             'paid' => $paid,
+            'fromPool' => $fromPool,
+            'pool' => $p->pool->toArray(),
             'fromCommand' => $fromCommand,
         ]);
 

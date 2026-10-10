@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\AbilityManager;
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
@@ -78,6 +80,40 @@ final class LegalActionGenerator
                     }
                     $seen[$key] = true;
                     $actions[] = new CastSpell($playerId, $card->id, $targets, $x);
+                }
+            }
+        }
+
+        return [...$actions, ...$this->abilityActions($s, $p)];
+    }
+
+    /**
+     * Capacités activées des permanents du joueur, à tout moment où il a la priorité. Dédoublonnées par
+     * (nom, capacité, alternative, cibles) : quatre Montagnes non engagées = une seule action.
+     *
+     * @return list<ActivateAbility>
+     */
+    private function abilityActions(GameState $s, PlayerState $p): array
+    {
+        $actions = [];
+        $seen = [];
+        foreach ($p->battlefield as $card) {
+            foreach ($card->abilities() as $index => $ability) {
+                if (!AbilityManager::canActivate($s, $p, $card, $ability)) {
+                    continue;
+                }
+                $options = $ability->isManaAbility ? array_keys($ability->options) : [0];
+                $targetSets = $ability->effect === 'damage'
+                    ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
+                    : [[]];
+                foreach ($options as $option) {
+                    foreach ($targetSets as $targets) {
+                        $key = $card->name . '|' . $index . '|' . $option . '|' . implode(',', $targets);
+                        if (!isset($seen[$key])) {
+                            $seen[$key] = true;
+                            $actions[] = new ActivateAbility($p->id, $card->id, $index, $option, $targets, $ability->isManaAbility);
+                        }
+                    }
                 }
             }
         }
@@ -203,7 +239,8 @@ final class LegalActionGenerator
     {
         return match ($card->effect) {
             'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
-            'counter' => array_map(static fn ($item) => ['stack:' . $item->id], $s->stack),
+            // Un contresort ne cible que des sorts, pas des capacités activées.
+            'counter' => array_map(static fn ($item) => ['stack:' . $item->id], array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility()))),
             default => [[]],
         };
     }

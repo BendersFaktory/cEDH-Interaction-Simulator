@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
 
@@ -18,6 +19,7 @@ final class CardInstance
     public const INSTANT = 'instant';
     public const SORCERY = 'sorcery';
     public const CREATURE = 'creature';
+    public const ARTIFACT = 'artifact';
 
     public function __construct(
         public readonly string $id,
@@ -35,6 +37,9 @@ final class CardInstance
         public readonly ?string $manaCost = null, // forme canonique `{X}{2}{R}` ; null = `{cost}` générique
         /** @var list<string> lettres des couleurs produites par un terrain ; vide = incolore (`C`) */
         public readonly array $produces = [],
+        /** @var list<ActivatedAbility> capacités activées déclarées (les terrains reçoivent les leurs de `produces`, voir abilities()) */
+        public readonly array $abilities = [],
+        public readonly ?string $adds = null, // mana ajouté à la résolution d'un sort `effect 'mana'` (rituel), ex. `{R}{R}`
     ) {
     }
 
@@ -52,6 +57,30 @@ final class CardInstance
         }
 
         return $this->produces === [] ? [Color::Colorless] : array_map(Color::fromSymbol(...), $this->produces);
+    }
+
+    /**
+     * Capacités activées, dans un ordre stable (l'index fait partie de l'id d'action). Un terrain a une capacité de mana
+     * `{T} : {couleur}` par lettre de `produces` (`{C}` s'il est vide).
+     *
+     * @return list<ActivatedAbility>
+     */
+    public function abilities(): array
+    {
+        if (!$this->isLand()) {
+            return $this->abilities;
+        }
+
+        return array_map(
+            static fn (string $symbol) => ActivatedAbility::mana('{' . $symbol . '}'),
+            $this->produces === [] ? ['C'] : $this->produces,
+        );
+    }
+
+    /** Permanent : va sur le champ de bataille en se résolvant (créature, artefact) ou en étant joué (terrain). */
+    public function isPermanent(): bool
+    {
+        return $this->kind !== self::INSTANT && $this->kind !== self::SORCERY;
     }
 
     public function isLand(): bool
@@ -79,6 +108,8 @@ final class CardInstance
             'cost' => $this->cost,
             'manaCost' => $this->isLand() ? null : (string) $this->manaCost(),
             'produces' => $this->produces,
+            'abilities' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->abilities),
+            'adds' => $this->adds,
             'effect' => $this->effect,
             'amount' => $this->amount,
             'commander' => $this->commander,
@@ -109,6 +140,8 @@ final class CardInstance
             (int) ($d['enteredTurn'] ?? 0),
             $d['manaCost'] ?? null,
             $d['produces'] ?? [],
+            array_map([ActivatedAbility::class, 'fromArray'], $d['abilities'] ?? []),
+            $d['adds'] ?? null,
         );
     }
 }

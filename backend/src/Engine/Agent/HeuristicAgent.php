@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Agent;
 
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
@@ -13,6 +14,9 @@ use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PlayLand;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
+use App\Engine\Game\PlayerState;
+use App\Engine\Mana\ManaCost;
+use App\Engine\Mana\ManaPayment;
 
 /**
  * IA de départ, volontairement simple :
@@ -57,6 +61,21 @@ final class HeuristicAgent implements PlayerAgent
             }
         }
 
+        // Capacité non-mana (Prodigal Pinger) : sur l'adversaire vivant le plus faible (égalité : plus petit id).
+        // Les capacités de mana ne sont jamais choisies : l'auto-paiement s'en charge.
+        $ping = null;
+        foreach ($legal as $action) {
+            if ($action instanceof ActivateAbility && !$action->mana && ($target = $this->playerTarget($action)) !== null && $target !== $playerId) {
+                $life = $state->player($target)->life;
+                if ($ping === null || $life < $ping[1] || ($life === $ping[1] && $target < $ping[2])) {
+                    $ping = [$action, $life, $target];
+                }
+            }
+        }
+        if ($ping !== null) {
+            return $ping[0];
+        }
+
         if ($top === null && $state->activePlayer === $playerId && $state->phase->isMain()) {
             $casts = [];
             foreach ($legal as $action) {
@@ -66,6 +85,12 @@ final class HeuristicAgent implements PlayerAgent
                     $casts[] = $action;
                 }
             }
+            foreach ($casts as $c) {
+                if ($state->player($playerId)->findCastable($c->cardId)?->name === 'Sol Ring') {
+                    return $c;
+                }
+            }
+            $casts = array_values(array_filter($casts, fn (CastSpell $c) => $this->worthCasting($state, $playerId, $c)));
             if ($casts !== []) {
                 $pick = $casts[$state->rng->int(0, count($casts) - 1)];
 
@@ -74,6 +99,48 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return AutoPassAgent::pass($legal, $playerId);
+    }
+
+    private function playerTarget(ActivateAbility $a): ?int
+    {
+        $t = $a->targets[0] ?? null;
+
+        return $t !== null && str_starts_with($t, 'player:') ? (int) substr($t, 7) : null;
+    }
+
+    /**
+     * Un rituel (effect 'mana') n'est lancé que s'il rend payable un sort non-rituel de la main (ou du commandement)
+     * qui ne l'était pas. Simulation sur une copie de l'état du joueur : le rituel est payé, puis son mana ajouté.
+     */
+    private function worthCasting(GameState $state, int $playerId, CastSpell $cast): bool
+    {
+        $p = $state->player($playerId);
+        $ritual = $p->findCastable($cast->cardId);
+        if ($ritual === null || $ritual->effect !== 'mana') {
+            return true;
+        }
+        $copy = PlayerState::fromArray($p->toArray());
+        $plan = ManaPayment::plan($copy, $copy->castCost($copy->findCastable($cast->cardId)));
+        if ($plan === null) {
+            return false;
+        }
+        $copy->payWithPlan($plan);
+        foreach (ManaCost::parse($ritual->adds ?? '')->colored as $symbol => $n) {
+            $copy->pool->add(\App\Engine\Mana\Color::fromSymbol($symbol), $n);
+        }
+        // Avant : sans le rituel (état d'origine) ; après : réserve augmentée.
+        $before = PlayerState::fromArray($p->toArray());
+        foreach ([...$p->hand, ...$p->command] as $card) {
+            if ($card->isLand() || $card->effect === 'mana' || $card->id === $ritual->id) {
+                continue;
+            }
+            $cost = $p->castCost($card);
+            if (ManaPayment::plan($before, $cost) === null && ManaPayment::plan($copy, $cost) !== null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param list<Discard> $discards */

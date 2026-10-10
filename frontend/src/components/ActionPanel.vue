@@ -13,6 +13,7 @@ const groups = computed(() => {
     { title: 'Terminer la déclaration', items: actions.filter((a) => a.type === 'done') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },
+    { title: 'Capacités', items: actions.filter((a) => a.type === 'ability') },
     { title: 'Sorts', items: actions.filter((a) => a.type === 'cast') },
     { title: 'Priorité', items: actions.filter((a) => a.type === 'pass') },
   ].filter((g) => g.items.length)
@@ -28,7 +29,7 @@ const groups = computed(() => {
     <div v-for="g in groups" :key="g.title">
       <h4>{{ g.title }}</h4>
       <!-- TODO: TargetPicker — choisir la cible en cliquant sur le plateau au lieu d'une action par cible -->
-      <button v-for="a in g.items" :key="a.id" :disabled="store.loading" @click="store.decide(a.id)">
+      <button v-for="a in g.items" :key="a.id" :class="{ 'ability-btn': a.type === 'ability', 'mana-ability': a.type === 'ability' && a.mana === true }" :disabled="store.loading" @click="store.decide(a.id)">
         {{ a.label }}
       </button>
     </div>

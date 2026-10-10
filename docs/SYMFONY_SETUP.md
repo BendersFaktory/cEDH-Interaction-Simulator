@@ -119,6 +119,10 @@ Lecture : l'hypothèse « ~2× plus d'événements » ne tient plus. Le combat t
 
 3642 événements, 38 ancres, 1,28 Mo d'ancres + 0,18 Mo d'événements ; `create` ~0,15 s (+35 % : le solveur de paiement est appelé pour chaque sort envisagé à chaque priorité) ; `fork` ~30 ms ; reconstruction ~5-15 ms (pire écart de 133 événements : ~14 ms) ; pic mémoire ~25 Mo. N = 1 reste adapté.
 
+#### Après les capacités activées et le mana avancé (solveur exact, réserve persistante, duals, Sol Ring, rituels ; mesuré le 2026-10-10, graines 42 / 6 / 16)
+
+Seed 42 : 3805 événements (dont 2945 verbeux), 40 ancres, 1,56 Mo d'ancres + 0,20 Mo d'événements ; `create` ~0,21 s (graines 6 et 16 : ~0,25 et ~0,30 s pour 4048 et 4740 événements ; +40 % vs le mana de base : le solveur est maintenant une recherche exacte, appelée pour chaque sort envisagé) ; `fork` 8-22 ms ; reconstruction 1-17 ms (pire écart : 125-139 événements) ; pic mémoire 29-36 Mo. N = 1 reste adapté. Les activations de mana manuelles d'un humain ajoutent une ancre par pause (~35 Ko chacune).
+
 ## Persistance : `json_text` et insertions par lots
 
 - Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.

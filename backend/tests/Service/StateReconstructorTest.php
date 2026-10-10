@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Service;
 
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
@@ -71,6 +72,14 @@ final class StateReconstructorTest extends KernelTestCase
     private function pickAction(GameState $state, int $player, int $step): Action
     {
         $legal = (new LegalActionGenerator())->for($state, $player);
+
+        // Les capacités de mana sont exercées de temps en temps (réserve non vide dans les ancres) ;
+        // sinon elles sont écartées pour garder le même parcours qu'avant leur introduction.
+        $mana = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ActivateAbility && $a->isManaAbility($state)));
+        if ($mana !== [] && $step % 5 === 4) {
+            return $mana[0];
+        }
+        $legal = array_values(array_filter($legal, static fn (Action $a) => !in_array($a, $mana, true)));
 
         return $step % 3 === 2 ? $legal[0] : $legal[array_key_last($legal)];
     }
