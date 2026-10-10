@@ -120,7 +120,7 @@ final class HeuristicAgent implements PlayerAgent
             return true;
         }
         $copy = PlayerState::fromArray($p->toArray());
-        $plan = ManaPayment::plan($copy, $copy->castCost($copy->findCastable($cast->cardId)));
+        $plan = ManaPayment::plan($copy, $copy->castCost($copy->findCastable($cast->cardId)), 0, $state->turn);
         if ($plan === null) {
             return false;
         }
@@ -135,7 +135,7 @@ final class HeuristicAgent implements PlayerAgent
                 continue;
             }
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($before, $cost) === null && ManaPayment::plan($copy, $cost) !== null) {
+            if (ManaPayment::plan($before, $cost, 0, $state->turn) === null && ManaPayment::plan($copy, $cost, 0, $state->turn) !== null) {
                 return true;
             }
         }
@@ -163,7 +163,9 @@ final class HeuristicAgent implements PlayerAgent
     /** @param list<Action> $legal */
     private function declareAttackers(GameState $state, array $legal, int $playerId): Action
     {
-        $attacks = array_values(array_filter($legal, static fn (Action $a) => $a instanceof DeclareAttacker));
+        // Les créatures à mana (Llanowar Elves) restent à la maison : leur mana vaut plus que leur attaque.
+        $attacks = array_values(array_filter($legal, fn (Action $a) => $a instanceof DeclareAttacker
+            && !$this->hasManaAbility($this->battlefieldCard($state, $playerId, $a->cardId))));
         if ($attacks === []) {
             return $this->finish($legal, $playerId);
         }
@@ -268,6 +270,17 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return null;
+    }
+
+    private function hasManaAbility(?CardInstance $card): bool
+    {
+        foreach ($card?->abilities() ?? [] as $ability) {
+            if ($ability->isManaAbility) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isCounter(GameState $state, CastSpell $action): bool

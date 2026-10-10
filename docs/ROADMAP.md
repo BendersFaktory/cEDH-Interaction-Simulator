@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (TODO regroupés par section ; Mana terminé). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (créatures à mana exercées ; mana conditionnel reporté après les déclencheurs). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -26,8 +26,11 @@
   - [x] Mana de capacités non-terrain (rituels, Sol Ring), terrains multicolores/non-basiques, actions de mana manuelles. *(Vérifié le 2026-10-10 : PHPUnit 99 tests dont `AbilityTest` (11) et `ManaPaymentTest` (20) ; `smoke.php 42` déterministe (3805 événements) ; audit de 7 graines : 348 sorts, 0 paiement incohérent (couleurs, montant), 77 capacités activées toutes résolues, 7 rituels résolus, aucun mana manuel de l'IA ; `vitest` 17 tests, `vue-tsc` + `vite build` ; `npm run recette` (scénario 9 : J0 engage une terre à la main, la réserve s'affiche). Capacité de mana = capacité activée avec `isManaAbility`, résolue immédiatement sans pile.)*
   - [x] Choix de paiement par l'humain (quels terrains engager) : activer ses sources à la main, la réserve est dépensée avant tout nouvel engagement. *(Vérifié : `AbilityTest::testManualManaIsSpentBeforeUntappedLands`, recette scénario 9.)*
 - [ ] **Déclencheurs** : file d'attente dans `GameState`, ordre APNAP, ciblage, `TriggerManager`.
+- [ ] **Mana conditionnel** (réserve à restrictions, ex. Eldrazi Temple) : reporté après les déclencheurs (touche tout le solveur de paiement).
 - [x] **Capacités activées** : socle. `ActivatedAbility` (coût `{T}`/mana, effet `mana` ou `damage`, `isManaAbility`), action `ActivateAbility`, `AbilityManager` (mana : résolution immédiate ; autre : pile, `AbilityActivated`/`AbilityResolved`), contresort qui ne cible que des sorts. *(Vérifié le 2026-10-10 : voir ci-dessus ; Prodigal Pinger activé et résolu via la pile par l'IA.)*
-  - [ ] Capacités de mana avec coût de mana (Signets), mana conditionnel/Treasure, créatures à mana (mal d'invocation géré mais non exercé).
+  - [x] Créatures à mana (Llanowar Elves) : mal d'invocation respecté par les actions **et** par l'auto-paiement (`AbilityManager::sourceReady`, partagé avec `ManaPayment`). *(Vérifié le 2026-10-10 : PHPUnit 101 tests dont 2 nouveaux dans `AbilityTest` ; `smoke.php 42` déterministe (deux exécutions identiques, 3805 événements) ; audit de 7 graines : 10 elfes résolues, 17 engagements pour payer, 0 pendant le mal d'invocation, 0 attaque ; `vitest` 17 tests, `vue-tsc` + `vite build`.)*
+  - [ ] Capacités de mana avec coût de mana (Signets) : paiement manuel et auto-paiement (convertisseurs).
+  - [ ] Treasure : jetons, sacrifice comme coût, sort qui crée un Treasure.
   - [ ] Coûts d'activation riches (mana + `{T}`, sacrifice, défausse), capacités à effets variés (pioche, jeton, bonus), restriction de timing (rapidité de rituel), créatures à capacité `{T}` exercées en jeu.
 - [ ] **Actions basées sur l'état** : ~~créatures létales~~ (faites avec le combat), légendes, jetons...
 - [x] Format **Commander à 4** (tranché) : 40 PV, zone de commandement, taxe de commandant, retour en zone de commandement, seuil de 21 dégâts de commandant (SBA).

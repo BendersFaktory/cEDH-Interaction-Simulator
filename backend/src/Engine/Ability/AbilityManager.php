@@ -22,20 +22,27 @@ final class AbilityManager
     /** Peut-on activer cette capacité maintenant (coût payable, source prête) ? Le timing est celui de l'instant (priorité). */
     public static function canActivate(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability): bool
     {
-        if ($ability->tap) {
-            if ($card->tapped) {
-                return false;
-            }
-            // Une créature qui s'engage pour son coût est soumise au mal d'invocation.
-            if ($card->isCreature() && $card->enteredTurn >= $s->turn) {
-                return false;
-            }
+        if (!self::sourceReady($card, $ability, $s->turn)) {
+            return false;
         }
-        if ($ability->manaCost !== null && ManaPayment::plan($p, $ability->manaCost) === null) {
+        if ($ability->manaCost !== null && ManaPayment::plan($p, $ability->manaCost, 0, $s->turn) === null) {
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * La source peut-elle payer le `{T}` de la capacité au tour `$turn` ? Non engagée, et pas une créature arrivée ce tour
+     * (mal d'invocation). Partagée avec l'auto-paiement (`ManaPayment`) ; `$turn` null = mal d'invocation ignoré.
+     */
+    public static function sourceReady(CardInstance $card, ActivatedAbility $ability, ?int $turn): bool
+    {
+        if (!$ability->tap) {
+            return true;
+        }
+
+        return !$card->tapped && !($turn !== null && $card->isCreature() && $card->enteredTurn >= $turn);
     }
 
     public static function activate(GameState $s, ActivateAbility $a): void
@@ -68,7 +75,7 @@ final class AbilityManager
 
         $tapped = [];
         if ($ability->manaCost !== null) {
-            $plan = ManaPayment::plan($p, $ability->manaCost) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
+            $plan = ManaPayment::plan($p, $ability->manaCost, 0, $s->turn) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
             $tapped = $p->payWithPlan($plan)['tapped'];
         }
         if ($ability->tap) {

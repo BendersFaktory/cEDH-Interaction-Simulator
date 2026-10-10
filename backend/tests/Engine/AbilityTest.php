@@ -40,6 +40,11 @@ final class AbilityTest extends TestCase
         return new CardInstance($id, 'Rite of Flame', CardInstance::INSTANT, 1, 'mana', 0, false, false, 0, 0, 0, 0, '{R}', [], [], '{R}{R}');
     }
 
+    private static function elves(string $id, int $enteredTurn): CardInstance
+    {
+        return new CardInstance($id, 'Llanowar Elves', CardInstance::CREATURE, 1, null, 0, false, false, 1, 1, 0, $enteredTurn, '{G}', [], [ActivatedAbility::mana('{G}')]);
+    }
+
     private static function mountain(string $id): CardInstance
     {
         return new CardInstance($id, 'Mountain', CardInstance::LAND, 0, null, 0, false, false, 0, 0, 0, 0, null, ['R']);
@@ -195,5 +200,34 @@ final class AbilityTest extends TestCase
 
         $this->assertSame(json_encode($s->toArray()), json_encode($copy->toArray()));
         $this->assertSame(['C' => 2], $copy->player(0)->pool->toArray());
+    }
+
+    public function testManaCreatureIsSummoningSickForActionsAndAutoPayment(): void
+    {
+        // Elfe arrivée ce tour + une Montagne : ni action de mana, ni source pour l'auto-paiement de {1}{R}.
+        $s = (new ScenarioBuilder())->hand(0, new CardInstance('bb', 'Bear', CardInstance::CREATURE, 2, null, 0, false, false, 2, 2, 0, 0, '{1}{R}'))->build(self::PASS);
+        $s->turn = 3;
+        $s->player(0)->battlefield = [self::elves('elf', 3), self::mountain('m1')];
+
+        $this->assertSame(['m1'], array_map(static fn (ActivateAbility $a) => $a->cardId, $this->abilities($s)));
+        $casts = array_filter((new LegalActionGenerator())->for($s, 0), static fn (Action $a) => $a instanceof CastSpell);
+        $this->assertSame([], $casts, 'L\'elfe malade ne paie pas le {1}');
+
+        // Tour suivant : l'elfe est prête, elle paie le générique.
+        $s->turn = 4;
+        $this->assertCount(2, $this->abilities($s));
+        $cast = array_values(array_filter((new LegalActionGenerator())->for($s, 0), static fn (Action $a) => $a instanceof CastSpell))[0];
+        $result = (new GameEngine(new AgentRegistry()))->advance($s, $cast);
+        $spell = array_values(array_filter($result->events, static fn ($e) => $e->type === 'SpellCast'))[0];
+        $this->assertSame(['elf', 'm1'], $spell->payload['tapped']);
+    }
+
+    public function testManaCreatureCannotBeTappedManuallyWhileSick(): void
+    {
+        $s = (new ScenarioBuilder())->build(self::PASS);
+        $s->turn = 2;
+        $s->player(0)->battlefield = [self::elves('elf', 2)];
+        $this->expectException(IllegalActionException::class);
+        AbilityManager::activate($s, new ActivateAbility(0, 'elf', 0, 0, [], true));
     }
 }

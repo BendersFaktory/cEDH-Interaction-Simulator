@@ -69,6 +69,12 @@ final class Decks
                 $library[] = $make('Counterspell', CardInstance::INSTANT, 2, 'counter', 0, false, 0, 0, '{U}{U}');
             }
         }
+        // Créature à mana : soumise au mal d'invocation comme toute créature qui s'engage pour un coût.
+        if (in_array('G', $colors, true)) {
+            for ($i = 0; $i < 2; $i++) {
+                $library[] = $make('Llanowar Elves', CardInstance::CREATURE, 1, null, 0, false, 1, 1, '{G}', [], [ActivatedAbility::mana('{G}')]);
+            }
+        }
         for ($i = 0; $i < 2; $i++) {
             $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');
         }

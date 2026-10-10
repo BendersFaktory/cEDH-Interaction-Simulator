@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Engine\Mana;
 
+use App\Engine\Ability\AbilityManager;
 use App\Engine\Game\PlayerState;
 
 /**
  * Solveur de paiement (auto-paiement) : recherche exacte, déterministe, sans effet de bord.
  *
- * Sources : la réserve (`$p->pool`) et, pour chaque permanent non engagé, ses capacités de mana `{T}`. Un permanent
+ * Sources : la réserve (`$p->pool`) et, pour chaque permanent prêt (non engagé ; pas une créature arrivée au tour `$turn`,
+ * mal d'invocation), ses capacités de mana `{T}`. `$turn` null = mal d'invocation ignoré (tests du solveur). Un permanent
  * ne s'engage qu'une fois : il choisit UNE capacité et UNE alternative (`choices`).
  *
  * Étapes :
@@ -26,9 +28,9 @@ final class ManaPayment
 {
     private const NODE_LIMIT = 50000;
 
-    public static function plan(PlayerState $p, ManaCost $cost, int $x = 0): ?ManaPlan
+    public static function plan(PlayerState $p, ManaCost $cost, int $x = 0, ?int $turn = null): ?ManaPlan
     {
-        $sources = self::sources($p);
+        $sources = self::sources($p, $turn);
         $pool = $p->pool->toArray();
         $state = ['nodes' => 0];
 
@@ -36,12 +38,12 @@ final class ManaPayment
     }
 
     /** Plus grand X payable avec la réserve et les sources non engagées (0 si le sort n'a pas de {X}). */
-    public static function maxX(PlayerState $p, ManaCost $cost): int
+    public static function maxX(PlayerState $p, ManaCost $cost, ?int $turn = null): int
     {
         if (!$cost->hasX()) {
             return 0;
         }
-        $sources = self::sources($p);
+        $sources = self::sources($p, $turn);
         $pool = $p->pool->toArray();
 
         // Borne haute : tout le mana potentiel, divisé par le nombre de {X}. Le coût croît avec X, donc faisable est monotone.
@@ -65,11 +67,11 @@ final class ManaPayment
     }
 
     /**
-     * Permanents non engagés avec au moins une capacité de mana `{T}`.
+     * Permanents prêts (voir `AbilityManager::sourceReady`) avec au moins une capacité de mana `{T}`.
      *
      * @return list<array{card: string, multi: bool, choices: list<array{ability: int, option: int, prod: array<string,int>, total: int}>}>
      */
-    private static function sources(PlayerState $p): array
+    private static function sources(PlayerState $p, ?int $turn): array
     {
         $order = [];
         foreach (Color::cases() as $i => $color) {
@@ -78,12 +80,10 @@ final class ManaPayment
 
         $sources = [];
         foreach ($p->battlefield as $card) {
-            if ($card->tapped) {
-                continue;
-            }
             $choices = [];
             foreach ($card->abilities() as $ai => $ability) {
-                if (!$ability->isManaAbility || $ability->effect !== 'mana' || !$ability->tap) {
+                if (!$ability->isManaAbility || $ability->effect !== 'mana' || !$ability->tap
+                    || !AbilityManager::sourceReady($card, $ability, $turn)) {
                     continue;
                 }
                 foreach ($ability->options as $oi => $_) {
