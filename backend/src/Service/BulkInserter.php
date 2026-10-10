@@ -35,14 +35,32 @@ class BulkInserter
         $this->insert('game_event', ['simulation_id', 'seq', 'type', 'payload', 'verbose'], $rows, self::EVENTS_PER_QUERY);
     }
 
-    /** @param array<int, array> $states eventSeq => état sérialisé */
-    public function insertCheckpoints(int $simulationId, array $states): void
+    /**
+     * @param array<int, array>       $states    eventSeq => état sérialisé
+     * @param array<int, string|null> $decisions eventSeq => actionId à rejouer depuis cette ancre
+     */
+    public function insertCheckpoints(int $simulationId, array $states, array $decisions = []): void
     {
         $rows = [];
         foreach ($states as $seq => $state) {
-            $rows[] = [$simulationId, $seq, $this->json($state)];
+            $rows[] = [$simulationId, $seq, $this->json($state), $decisions[$seq] ?? null];
         }
-        $this->insert('checkpoint', ['simulation_id', 'event_seq', 'state'], $rows, self::CHECKPOINTS_PER_QUERY);
+        $this->insert('checkpoint', ['simulation_id', 'event_seq', 'state', 'decision'], $rows, self::CHECKPOINTS_PER_QUERY);
+    }
+
+    /**
+     * Ancre posée à une pause humaine : complète l'ancre existante à ce seq (une ancre de tour peut coïncider
+     * avec la pause, contrainte unique), sinon en insère une.
+     */
+    public function anchorDecision(int $simulationId, int $seq, array $state, string $actionId): void
+    {
+        $updated = $this->connection->executeStatement(
+            'UPDATE checkpoint SET decision = ? WHERE simulation_id = ? AND event_seq = ?',
+            [$actionId, $simulationId, $seq],
+        );
+        if ($updated === 0) {
+            $this->insertCheckpoints($simulationId, [$seq => $state], [$seq => $actionId]);
+        }
     }
 
     /**

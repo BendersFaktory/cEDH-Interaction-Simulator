@@ -1,5 +1,9 @@
-# Le moteur (src/Engine) est du PHP pur : ce n'est pas un ensemble de services, on l'exclut de l'autowiring.
+# Ancre complète tous les N tours (reste reconstruit par rejeu) : voir docs/SYMFONY_SETUP.md pour le réglage.
+parameters:
+    app.checkpoint_every_n_turns: 1
+
 services:
+    # Le moteur (src/Engine) est du PHP pur : ce n'est pas un ensemble de services, on l'exclut de l'autowiring.
     _defaults:
         autowire: true
         autoconfigure: true
@@ -11,3 +15,7 @@ services:
             - '../src/Entity/'
             - '../src/Doctrine/'
             - '../src/Kernel.php'
+
+    App\Service\SimulationService:
+        arguments:
+            $checkpointEveryNTurns: '%app.checkpoint_every_n_turns%'

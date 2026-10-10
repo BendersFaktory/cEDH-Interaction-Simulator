@@ -78,10 +78,10 @@ final class SimulationApiTest extends WebTestCase
 
         self::assertSame('over', $sim['status']);
         self::assertNull($sim['pending']);
-        self::assertSame(4935, $sim['eventCount'], 'Même partie que bin/smoke.php 42');
+        self::assertSame(3805, $sim['eventCount'], 'Même partie que bin/smoke.php 42');
 
         $events = $this->events($sim['id']);
-        self::assertCount(4935, $events);
+        self::assertCount(3805, $events);
         self::assertSame('GameOver', end($events)['type']);
         $seqs = array_column($events, 'seq');
         $sorted = $seqs;
@@ -147,7 +147,9 @@ final class SimulationApiTest extends WebTestCase
         $sim = $this->createGame(7);
         $decisions = 0;
         while ($sim['status'] === 'waiting' && $decisions < 500) {
-            $pass = array_values(array_filter($sim['pending']['actions'], static fn (array $a) => $a['type'] === 'pass'))[0];
+            // « Passer toujours » : passer ; la défausse (main > 7 au cleanup) est obligatoire, on prend la première carte proposée.
+            $actions = $sim['pending']['actions'];
+            $pass = array_values(array_filter($actions, static fn (array $a) => in_array($a['type'], ['pass', 'done'], true)))[0] ?? $actions[0];
             [$status, $sim] = $this->call('POST', self::BASE . "/{$sim['id']}/decisions", ['actionId' => $pass['id']]);
             self::assertSame(200, $status);
             ++$decisions;

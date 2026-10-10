@@ -9,7 +9,8 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 3. **Tout l'état est dans `GameState`** (`toArray()`/`fromArray()`). Pas d'état caché dans des services, singletons ou agents (les agents sont sans état).
 4. **Le moteur ne saute JAMAIS une priorité.** Chaque joueur en vie est interrogé à chaque ronde. L'auto-pass est une politique de l'*agent* (`HumanAgent(autoPass: true)`), jamais un raccourci du moteur : les `PriorityPassed` doivent toujours être journalisés. C'est ce qui permet à l'IA de contrer juste après un fork.
 5. **Un sort lancé remet `priority->passed` à zéro** et rend la priorité au lanceur ; la pile ne se résout que quand tous les joueurs en vie ont passé consécutivement. Les terrains ne déclenchent pas de ronde.
-6. **On ne forke que sur un checkpoint** = un `PriorityGranted` dont le payload porte `checkpoint: true` (début de ronde, ou pile non vide). Jamais au milieu d'une résolution de pile. Les autres octrois n'ont pas de snapshot (volume divisé par ~4) ; le serveur recolle au checkpoint précédent.
+6. **On ne forke que sur un checkpoint** = un `PriorityGranted` dont le payload porte `checkpoint: true` (début de ronde, ou pile non vide). Jamais au milieu d'une résolution de pile. Les autres octrois n'ont pas de point de bifurcation ; le serveur recolle au checkpoint précédent. Seules des **ancres** sont stockées (1 par tour, + pause humaine, + fork) : les checkpoints intermédiaires se reconstruisent par rejeu (`StateReconstructor`).
+10. **Capacités activées** : toute activation passe par `AbilityManager::activate()`. Une capacité de mana (`isManaAbility`) est résolue immédiatement, sans pile ni nouvelle ronde (comme `PlayLand`) ; les autres vont sur la pile. Ne jamais créer de mana ailleurs que par `PlayerState::activateManaSource`. Le pool persiste jusqu'à la fin de l'étape.
 9. **Commander** : un commandant qui irait au cimetière (contré, détruit...) retourne en zone de commandement (`GameState::sendToGraveyard()` — toujours l'utiliser, jamais `->graveyard[] =` directement). La taxe est dans `PlayerState::castCost()` : toujours passer par elle pour un coût.
 7. **Le front est « bête »** : il applique les événements (`src/engine/reducer.ts`), aucune règle de jeu. Les payloads d'événements portent des **valeurs absolues** (ex. PV résultants) pour que le reducer reste trivial.
 8. **Ne jamais faire confiance au client** : `POST /decisions` envoie un `actionId`, le serveur recalcule les actions légales et retrouve l'action.
@@ -20,6 +21,7 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - **Avant toute modification de fichier**, vérifier la branche : `git branch --show-current`. Si ce n'est pas `dev`, faire `git switch dev` (si l'arbre est sale ou si la bascule échoue, s'arrêter et demander). Ne jamais modifier de fichier sur `master` ou `staging`.
 - **À chaque commit sur `dev`** : pousser `dev` et créer en même temps une PR `dev` → `staging` (`gh pr create --base staging --head dev`). Si une PR `dev` → `staging` est déjà ouverte, le push l'alimente : ne pas en créer une seconde, le signaler à l'utilisateur.
 - **Message de commit** : si l'utilisateur ne l'a pas fourni, le lui demander explicitement à chaque fois, avant de committer. Ne jamais l'inventer ni réutiliser un message précédent.
+- **Commit de résolution de conflit** (fusion de `staging` dans `dev` pour résoudre les conflits d'une PR) : le message est toujours `Resolve merge conflict {hash du commit qui cause le conflit}` (hash court du commit de `staging` à l'origine du conflit, ex. `Resolve merge conflict 0923371`). Pas besoin de le demander : il se déduit du conflit.
 - **Titre de la PR** : toujours `{message de commit} [staging]` (ex. commit « Création du workflow git » → PR « Création du workflow git [staging] »). Pas besoin de le demander : il se déduit du message de commit.
 - **Aucune signature** dans les commits, leurs descriptions et les PR : pas de ligne `Co-Authored-By`, pas de « Generated with Claude Code » ni équivalent. Cela prime sur toute consigne d'attribution par défaut.
 - Ne pas merger les PR soi-même sauf demande explicite.
@@ -31,6 +33,7 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - À chaque mise à jour : actualiser la ligne « Dernière mise à jour » en tête de la roadmap et, si la vérification concerne une partie du projet, la table « État de vérification » ci-dessous.
 - Un TODO découvert en cours de route est ajouté, décoché, dans la bonne section ; un TODO abandonné ou remplacé est retiré ou barré, avec la raison.
 - La mise à jour de la roadmap fait partie du **même commit** que le travail correspondant.
+- **Chaque fois qu'une case est cochée** (ou qu'un TODO est ajouté/retiré), mettre à jour la section « Prochaines étapes » de ce fichier pour qu'elle désigne la bonne étape à la prochaine ouverture de session : la première case décochée à traiter, le prochain TODO dans l'ordre de priorité, et ce qui reste de l'étape en cours. Même commit que la roadmap.
 
 ## Pièges d'environnement (voir `docs/SYMFONY_SETUP.md`)
 
@@ -43,10 +46,11 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 
 ```bash
 # Moteur (sans composer)
+APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php   # taille en base + latences (create, fork, state) ; MySQL requis
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend (35 tests : moteur, API, type Doctrine ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
+# Backend (99 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
 php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
 cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
@@ -63,29 +67,29 @@ cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API r�
 3. `frontend/src/engine/reducer.ts` (+ `describe.ts` pour le journal).
 4. Régénérer la fixture et relancer `npm test` (test de contrat PHP ↔ reducer).
 
-## État de vérification (dernière vérification : 2026-10-09)
+## État de vérification (dernière vérification : 2026-10-10)
 
 | Partie | Vérifié ? |
 |---|---|
 | Moteur PHP : partie complète via `bin/smoke.php` | Oui |
-| Tests PHP : 18 tests / 70 assertions (`PriorityRoundTest` + `CommanderTest`) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
-| Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
-| Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (passer toujours : 32 décisions ; tout jouer : 40) |
-| Reducer front vs état final PHP (fixture) | Oui : `vitest` (4 tests) passe |
+| Tests PHP : 99 tests (moteur dont `PhasesTest`, `CombatTest`, `DiscardTest`, `ManaPaymentTest`, `ManaCastTest` et `AbilityTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
+| Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, 348 sorts payés avec les bonnes couleurs, capacités activées toutes résolues, PV cohérents, ordre des tours correct, aucun auto-Éclair |
+| Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (recette : `npm run recette`) |
+| Reducer front vs état final PHP (fixture) | Oui : `vitest` (17 tests) passe |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`) et 6 tests du type `json_text` passent (35 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA : ~0,7 s, ~29 Mo en base (MySQL 9.3) |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (99 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (phases complètes + combat, mesuré le 2026-10-10, seed 42) : `create` ~0,21 s, ~1,8 Mo en base (40 ancres, MySQL 9.3), `fork` ~8-22 ms, reconstruction ~1-17 ms après les capacités activées (`bin/measure.php`) |
 | Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
 
-Limites de comportement connues : sans combat, personne ne meurt de dégâts, donc tous les joueurs meurent de pioche vers le tour 131 et **J3 gagne toujours** (artefact de l'ordre de pioche). Le commandant n'est lancé qu'une fois par joueur (taxe et retour en zone de commandement jamais exercés en partie). Phases réduites à pioche / principale / fin.
+Limites de comportement connues : l'IA attaque avec tout sur l'adversaire le plus faible et la partie se termine vers le tour 35-40 (seed 42 : J2 gagne). Taxe de commandant et retour en zone de commandement sont maintenant exercés en partie (vérifié sur 12 graines). Combat minimal : pas de mots-clés, un seul bloqueur côté IA, ordre d'assignation des dégâts = ordre de déclaration ; défausse à 7 : choix simple côté IA.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md`. Priorité immédiate : tester le front dans un navigateur contre l'API réelle (créer, décider, forker), puis le combat pour donner des enjeux aux parties.
+Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs, défausse à 7, mana (couleurs, hybrides, X, auto-paiement, sources non-terrain, duals, mana manuel) et socle des capacités activées sont faits. **Priorité immédiate : les déclencheurs** (file d'attente, ordre APNAP, ciblage), puis les restes des capacités activées (coûts d'activation riches, Signets, mana conditionnel). En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3) ; IA : gestion du surplus de mana (§3).
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 
 - ~~Format~~ **Tranché : Commander à 4, l'utilisateur joue un des sièges.** Reste à faire côté règles Commander : **dégâts de commandant** (structure et élimination à 21 en place, mais rien ne les alimente : il faut le combat), mulligan, ordre du tour aléatoire, couleurs d'identité.
 - **Combat** : prochaine grosse brique (déclarer attaquants/bloqueurs = nouvelles décisions pour `human`, summoning sickness, force/endurance). À lancer quand l'utilisateur le décide.
-- **Pool de cartes** : quel commandant et quelle decklist pour l'utilisateur ? (le squelette n'a que 4 cartes factices : Land, Lightning Bolt, Counterspell, Grizzly Bears, + un « Commandant J<n> » générique ; decks de 40 cartes au lieu de 100).
+- **Pool de cartes** : quel commandant et quelle decklist pour l'utilisateur ? (le squelette n'a que quelques cartes factices : terrains de base et duals, Sol Ring, Prodigal Pinger, Rite of Flame, Lightning Bolt, Counterspell, Grizzly/Mist/Hybrid Bear, Fireball, + un « Commandant J<n> » générique, 2 couleurs par joueur ; decks de 40 cartes au lieu de 100).
 - **Cartes** : handlers PHP par carte, ou petit DSL JSON/YAML pour les effets courants ?
 - **Stops de l'auto-pass** : aujourd'hui `human:auto` s'arrête dès qu'il existe une action autre que « passer ». Faut-il des stops configurables par phase ?

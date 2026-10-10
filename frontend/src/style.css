@@ -7,6 +7,7 @@
   --accent: #6aa9ff;
   --warn: #f2b84b;
   --bad: #ef6b6b;
+  --mana-W: #f3ecc8; --mana-U: #5aa9e6; --mana-B: #a79bb5; --mana-R: #e8735a; --mana-G: #5fb86a; --mana-C: #c4c7cf; --mana-N: #9aa1b2;
   color-scheme: dark;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
@@ -57,7 +58,22 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .card.creature { border-color: #d08a4e; }
 .card.commander { box-shadow: 0 0 0 1px var(--warn) inset; }
 .card.tapped { transform: rotate(8deg); opacity: .55; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --mana-W: #d9cf8f; --mana-U: #3b8ad1; --mana-B: #8a7d9a; --mana-R: #d9573a; --mana-G: #3f9a4b; --mana-C: #aeb2bd; --mana-N: #8a91a2; }
+}
+.card-mana { margin-left: 5px; display: inline-flex; gap: 2px; vertical-align: middle; }
+.mana-sym { display: inline-block; min-width: 15px; height: 15px; line-height: 15px; padding: 0 3px; border-radius: 8px; font-size: 10px; font-weight: 700; text-align: center; color: #111; border: 1px solid rgba(0,0,0,.35); background: var(--mana-N); }
+.mana-sym.m-W { background: var(--mana-W); } .mana-sym.m-U { background: var(--mana-U); } .mana-sym.m-B { background: var(--mana-B); }
+.mana-sym.m-R { background: var(--mana-R); } .mana-sym.m-G { background: var(--mana-G); } .mana-sym.m-C { background: var(--mana-C); }
+.mana-sym.m-n { background: var(--mana-N); }
+.mana-sym.hybrid { background: linear-gradient(90deg, var(--mana-R) 50%, var(--mana-G) 50%); }
+.card.land-W { border-color: var(--mana-W); } .card.land-U { border-color: var(--mana-U); } .card.land-B { border-color: var(--mana-B); }
+.card.land-R { border-color: var(--mana-R); } .card.land-G { border-color: var(--mana-G); }
 .card-cost { margin-left: 5px; color: var(--muted); }
+.card-pt { margin-left: 5px; font-weight: 600; }
+.card-combat { margin-left: 5px; color: var(--warn); }
+.card.attacking { border-color: var(--bad); }
+.card.blocking { border-color: var(--accent); }
 
 .stack ol { margin: 0; padding-left: 20px; }
 .stack li small { color: var(--muted); margin-left: 6px; }
@@ -83,3 +99,14 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
   .layout { grid-template-columns: 1fr; }
   .players { grid-template-columns: 1fr; }
 }
+
+/* Capacités et réserve de mana */
+.mana-pool { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.mana-pool h4 { margin: 0 6px 0 0; }
+.card.artifact { border-style: double; border-color: var(--mana-C); }
+.card-abilities { margin-left: 5px; display: inline-flex; gap: 2px; font-size: 10px; }
+.ability-chip { color: var(--mana-C); } .ability-chip.mana { color: var(--mana-W); }
+.stack .stack-ability { border-left: 3px solid var(--mana-U); padding-left: 6px; }
+.stack .ability-label { margin-left: 6px; font-size: 12px; color: var(--muted); }
+.actions button.ability-btn { border-style: dashed; }
+.actions button.ability-btn.mana-ability { border-color: var(--mana-G); }

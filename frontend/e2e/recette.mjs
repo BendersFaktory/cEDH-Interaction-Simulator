@@ -7,6 +7,8 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
+// Délai maximal de chaque attente/action Playwright (valeur par défaut de Playwright).
+const TIMEOUT = 30_000
 const FRONT = fileURLToPath(new URL('..', import.meta.url))
 const BACK = fileURLToPath(new URL('../../backend', import.meta.url))
 const S = `${FRONT}recette`
@@ -38,6 +40,7 @@ try {
 async function run() {
   const browser = await chromium.launch({ channel: 'chrome', headless: true })
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } })
+  page.setDefaultTimeout(TIMEOUT)
   const problems = []
   page.on('console', m => { if (['error','warning'].includes(m.type())) problems.push(`console.${m.type()}: ${m.text()}`) })
   page.on('pageerror', e => problems.push('pageerror: ' + e.message))
@@ -89,7 +92,7 @@ async function run() {
     const m = (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)
     const n = (document.querySelector('.playback small')?.textContent ?? '').match(/\/ (\d+)/)
     return m && m[1] !== o && n && n[1] !== t
-  }, [oldId, oldTotal], { timeout: 30000 })
+  }, [oldId, oldTotal], { timeout: TIMEOUT })
   log('5 info:', await info(), '|', await prog())
   await page.selectOption('.playback select', '10')
   await page.click('button[title="Lecture"]')
@@ -104,10 +107,11 @@ async function run() {
   log('6 curseur:', await prog(), '|', (await page.locator('.pausebar p').first().textContent()).replace(/\s+/g,' '))
   await page.check('.pausebar label:has-text("J1") input'); await shot('6a-avant-fork')
   await page.click('text=Reprendre la main ici')
-  await page.waitForSelector('.actions', { timeout: 30000 })
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
   log('6 fork info:', await info(), '|', await prog())
   log('6 fork actions:', (await page.locator('.actions h3').textContent()), (await page.locator('.actions button').count()), 'boutons'); await shot('6b-fork')
-  const pass2 = page.locator('.actions h4:has-text("Priorité") ~ button').first(); await pass2.click(); await page.waitForTimeout(500)
+  // Selon le point de fork, J1 est en priorité ou en déclaration de combat : on prend l'une ou l'autre décision.
+  const pass2 = page.locator('.actions h4:has-text("Priorité") ~ button, .actions h4:has-text("Terminer la déclaration") ~ button').first(); await pass2.click(); await page.waitForTimeout(500)
   log('6 fork après décision:', await prog(), await info()); await shot('6c-fork-decision')
 
   // 7 : charger
@@ -115,6 +119,59 @@ async function run() {
   log('7 charger parent:', await info(), '|', await prog())
   await page.fill('input[type=number] >> nth=1', '99999'); await page.click('text=Ouvrir'); await page.waitForTimeout(800)
   log('7 id inexistant, erreur affichée:', await page.locator('.error').textContent().catch(()=>'(aucune)')); await shot('7-erreur')
+
+  // 8 : combat côté humain (J0 vs 3 IA, seed 7) : jouer, lancer des créatures, puis déclarer une attaque (et bloquer si l'IA attaque J0)
+  await page.check('text=Je joue J0 >> input')
+  await page.fill('input[placeholder="aléatoire"]', '7')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  const first = (title) => page.locator(`.actions h4:has-text("${title}") ~ button`).first()
+  let attacked = false, sawBlock = false
+  for (let i = 0; i < 400 && !attacked; i++) {
+    if (!(await page.locator('.actions').count())) break
+    const order = ['Défausser', 'Attaquer', 'Bloquer', 'Terrains', 'Sorts', 'Terminer la déclaration', 'Priorité']
+    for (const title of order) {
+      // Sorts : on ne lance que des créatures (le Bolt/Contresort ne servent pas ce scénario).
+      const b = title === 'Sorts' ? page.locator('.actions h4:has-text("Sorts") ~ button:is(:has-text("Grizzly"), :has-text("Commandant"))').first() : first(title)
+      if (!(await b.count())) continue
+      // On ne bloque qu'une fois (pour vérifier la déclaration) : bloquer à chaque fois sacrifierait toutes les créatures de J0 avant qu'elles attaquent.
+      if (title === 'Bloquer' && sawBlock) continue
+      if (title === 'Bloquer') sawBlock = true
+      if (title === 'Attaquer') attacked = true
+      await b.click()
+      break
+    }
+    await page.waitForTimeout(150)
+  }
+  log('8 attaque déclarée par J0:', attacked, '| a pu bloquer:', sawBlock, '|', await info())
+  if (!attacked) problems.push('recette combat : J0 n\'a jamais pu déclarer d\'attaque en 400 décisions')
+  await page.waitForTimeout(500)
+  log('8 journal :', (await page.locator('text=/J0 attaque J\\d/').count()) > 0 ? 'AttackerDeclared affiché' : 'absent'); await shot('8-combat')
+
+  // 9 : capacités de mana à la main (J0 engage lui-même une source) -> la réserve s'affiche ; le mana flottant disparaît ensuite
+  const prevGame = (await info()).match(/#(\d+)/)[1]
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame)
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  let poolSeen = false
+  // Seuls les boutons activés comptent (pendant un chargement ils sont désactivés et le panneau se redessine) ;
+  // un clic raté est simplement retenté au tour suivant.
+  const enabled = (title) => page.locator(`.actions h4:has-text("${title}") ~ button:not([disabled])`).first()
+  const tryClick = async (b) => { try { await b.click({ timeout: 3000 }); return true } catch { return false } }
+  for (let i = 0; i < 80 && !poolSeen; i++) {
+    const mana = page.locator('.actions h4:has-text("Capacités") ~ button.mana-ability:not([disabled])').first()
+    if (await mana.count()) {
+      if (await tryClick(mana)) {
+        await page.waitForTimeout(300)
+        poolSeen = (await page.locator('.mana-pool').count()) > 0
+        if (poolSeen) break
+      }
+    } else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
+    else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
+    await page.waitForTimeout(200)
+  }
+  log('9 réserve visible après engagement manuel:', poolSeen); await shot('9-mana-manuel')
+  if (!poolSeen) problems.push('recette mana : la réserve n\'apparaît pas après une capacité de mana')
 
   // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
   const unexpected = problems.filter((p) => !/404/.test(p))

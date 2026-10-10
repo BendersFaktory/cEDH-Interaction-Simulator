@@ -8,8 +8,10 @@ Vue (reducer, store)  ──HTTP──►  SimulationController
                                 SimulationService  ──►  Doctrine (Simulation, GameEventRecord, Checkpoint)
                                        │
                                   GameEngine  (PHP pur, src/Engine)
-                                  ├── TurnManager        étapes et tours
+                                  ├── TurnManager        étapes et tours (untap/cleanup sans priorité)
                                   ├── PriorityManager    boucle de priorité
+                                  ├── CombatManager      déclarations d'attaquants/bloqueurs (+ CombatResolver : dégâts)
+                                  ├── HandSizeManager    défausse à 7 au cleanup (décision hors priorité)
                                   ├── StackResolver      résolution du sommet de pile
                                   ├── StateBasedActions  vérifiées avant chaque octroi de priorité
                                   ├── TriggerManager     (stub) déclencheurs, ordre APNAP
@@ -49,12 +51,12 @@ Deux agents humains :
 
 ## Snapshots et fork
 
-- `CheckpointListener::onCheckpoint()` est appelé juste après chaque `PriorityGranted`. `SimulationService` stocke alors `GameState::toArray()` dans `Checkpoint`.
-- **Fork** : trouver le checkpoint le plus proche ≤ `atEvent` (en remontant la chaîne des parents), restaurer le `GameState`, remplacer des clés dans `controllers` (ex. `[1 => 'human:auto']`), créer une `Simulation` fille (`parent`, `forkEventSeq`) et relancer `advance`.
+- `CheckpointListener::onCheckpoint()` est appelé par le moteur juste après chaque `PriorityGranted` marqué `checkpoint`. Le moteur ne change pas, mais `SimulationService` ne persiste qu'une **ancre** (`GameState::toArray()` dans `Checkpoint`) : `SparseCheckpoints` en garde une par tour (paramètre `app.checkpoint_every_n_turns`), plus une à chaque pause humaine (colonne `decision` = `actionId` à rejouer, posée par `decide()`) et une au point de bifurcation d'un fork (état avec `controllers` surchargés).- **Reconstruction** : `StateReconstructor::at($sim, $seq)` prend l'ancre la plus proche ≤ `seq` (en remontant la chaîne des parents), restaure le `GameState`, rejoue `advance` (avec la `decision` de l'ancre) et s'arrête au dernier checkpoint ≤ `seq` (un listener lève `ReplayStop` dès que la cible est dépassée ; `DecisionRequired` clôt aussi le rejeu). Le rejeu ne persiste rien.
+- **Fork** : reconstruire le checkpoint ≤ `atEvent`, remplacer des clés dans `controllers` (ex. `[1 => 'human:auto']`), créer une `Simulation` fille (`parent`, `forkEventSeq`) et relancer `advance`.
 - **Journal d'une branche** = événements de ses ancêtres jusqu'à `forkEventSeq` + les siens. Le numéro `seq` est unique le long de la chaîne.
 - Pourquoi ça marche : état 100 % sérialisable, RNG dans l'état (`Rng`, xorshift32), agents sans état.
 
-Volume actuel : ~900 checkpoints pour une partie de démo à 4 joueurs (les octrois intermédiaires sur pile vide n'en ont pas ; `PriorityGranted.payload.checkpoint` le dit au front). Si on demande un fork à un instant sans checkpoint, le serveur recolle au précédent : comme le moteur est déterministe, la reprise est identique. Alternative prévue dans la roadmap : un checkpoint par tour + re-simulation jusqu'au point voulu.
+Volume actuel : ~130 ancres (2,6 Mo) pour une partie 4 IA, contre 897 snapshots (28,5 Mo) en stockage dense. Les octrois sans `checkpoint` n'ont pas de point de bifurcation ; si on demande un instant sans checkpoint, la reconstruction recolle au précédent (le moteur est déterministe, la reprise est identique). Une évolution du format de `GameState` invalide les ancres anciennes (en dev : recréer les parties).
 
 ## Front
 
@@ -67,6 +69,16 @@ Le store Pinia garde `events[]` et `cursor`. L'état affiché est **toujours dé
 - **Remplacement** : `GameState::sendToGraveyard()` renvoie un commandant en zone de commandement au lieu du cimetière (résolution et contre). Toujours passer par cette méthode.
 - **Dégâts de commandant** : `PlayerState::$commanderDamage` + élimination à 21 (`StateBasedActions`) sont en place ; seul le combat (à venir) les alimentera.
 - **Ton siège** : `GameFactory::create($seed, [0 => 'human:auto', 1 => 'ai:heuristic', ...])`. La simulation se suspend dès que J0 a une action utile ; un fork permet ensuite de changer de ligne depuis n'importe quel checkpoint.
+
+## Mana
+
+- **Modèle** (`Engine/Mana/`) : `Color` (enum `White…Colorless`, `symbol()` = lettre WUBRGC, seul format sérialisé), `ManaCost` (générique, coloré, hybride, X ; `parse('{X}{2}{R/G}{U}')`, forme canonique via `__toString`), `ManaPool` (réserve par couleur ; **persiste jusqu'à la fin de l'étape**, vidée par `TurnManager::endStep` avec un événement `ManaPoolEmptied` si elle n'était pas vide). `CardInstance` porte `manaCost` (chaîne, `null` = `{cost}` générique), `produces` (terrains), `abilities` (capacités activées) et `adds` (mana ajouté par un rituel) ; `cost` reste la valeur de mana entière.
+- **Capacités activées** (`Engine/Ability/`) : `ActivatedAbility` (coût `{T}` et/ou mana, effet `mana` ou `damage`, `isManaAbility`) est le **seul** modèle. Les terrains n'ont pas de cas particulier : `CardInstance::abilities()` leur synthétise une capacité de mana par lettre de `produces`. `AbilityManager::activate()` est le seul chemin d'activation : une capacité de mana (`isManaAbility`) est **résolue immédiatement** (règle 605 : ni pile, ni nouvelle ronde, le joueur garde la priorité, aucune passe remise à zéro, événement `ManaAbilityActivated`) ; une autre capacité va sur la pile (`StackItem::$ability`, la source ne change pas de zone), remet les passes à zéro et se résout via `StackResolver` (`AbilityActivated` / `AbilityResolved`). Action : `ActivateAbility` (id `ability:P:CARD:IDX:OPT:CIBLES`).
+- **Paiement** : `ManaPayment::plan()` est une recherche exacte déterministe sur la réserve et les capacités de mana des permanents non engagés ; elle rend un `ManaPlan` (activations + mana dépensé). Ordre de préférence : réserve d'abord, moins de gaspillage, moins d'engagements, sources multicolores préservées. `PlayerState::payWithPlan` l'exécute ; le surplus (Sol Ring pour un `{1}`) reste dans la réserve. `maxX()` donne le X maximal ; une action par X (0 à 10) pour un sort à {X} (`CastSpell::$x`). L'humain peut activer lui-même ses sources de mana (choix des terrains) : la réserve est dépensée avant tout nouvel engagement. `HumanAgent` en auto-pass ignore ces activations de mana (sinon la moindre terre arrêterait la partie).
+- **Rituels** : sort `effect 'mana'` ; à la résolution, `adds` est ajouté à la réserve (`ManaAdded`).
+- **Taxe de commandant** : `PlayerState::castCost()` renvoie un `ManaCost` avec +2 de générique par lancement précédent.
+- **X** : la valeur choisie est portée par `StackItem::$x` ; un sort de dégâts dont le coût contient {X} inflige X.
+- **Limites** : pas de capacité de mana avec un coût de mana (Signets), pas de mana conditionnel/Treasure, pas de créatures à mana (mal d'invocation géré mais non exercé), pas d'identité de couleurs ; la recherche de paiement est bornée en nœuds.
 
 ## Sécurité du modèle
 

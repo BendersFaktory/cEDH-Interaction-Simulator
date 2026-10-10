@@ -1,6 +1,17 @@
 // Miroir TypeScript des structures produites par le moteur PHP (voir docs/EVENTS.md).
 
-export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature'
+export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact'
+
+/** Capacité activée d'une carte (forme sérialisée par le moteur). */
+export interface AbilityView {
+  isManaAbility: boolean
+  effect: string
+  tap: boolean
+  manaCost?: string | null
+  /** Pour un effet de mana : alternatives produites (ex. ['CC'] ou ['R', 'G']). */
+  options?: string[]
+  amount?: number
+}
 
 export interface PublicCard {
   id: string
@@ -8,12 +19,25 @@ export interface PublicCard {
   kind: CardKind
   cost: number
   effect: string | null
+  /** Coût de mana canonique ('{X}{2}{R/G}{U}{U}'), null pour un terrain. */
+  manaCost?: string | null
+  /** Couleurs produites (W U B R G C) ; vide pour un terrain incolore/historique. */
+  produces?: string[]
   amount: number
   commander?: boolean
+  power?: number
+  toughness?: number
+  abilities?: AbilityView[]
+  /** Mana ajouté par un rituel (effet 'mana'). */
+  adds?: string[] | string
 }
 
 export interface BoardCard extends PublicCard {
   tapped: boolean
+  /** Joueur attaqué, tant que la créature attaque (efface à la fin du combat). */
+  attacking?: number
+  /** Id de l'attaquant bloqué, tant que la créature bloque. */
+  blocking?: string
 }
 
 export interface GameEvent {
@@ -27,10 +51,17 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability'
   player: number
   cardId?: string
   targets?: string[]
+  defender?: number
+  attackerId?: string
+  /** Action `ability` : index de la capacité et alternative de mana choisie. */
+  ability?: number
+  option?: number
+  /** Action `ability` : vrai pour une capacité de mana. */
+  mana?: boolean
 }
 
 export interface StackItemView {
@@ -38,6 +69,9 @@ export interface StackItemView {
   card: PublicCard
   controller: number
   targets: string[]
+  x?: number
+  /** Présent pour une capacité activée (la carte est sa source). */
+  ability?: AbilityView
 }
 
 export interface DecisionRequest {
@@ -46,6 +80,8 @@ export interface DecisionRequest {
   turn: number
   phase: string
   activePlayer: number
+  /** Déclaration de combat en cours (attaquants/bloqueurs) : le déclarant occupe `priority.holder`. */
+  declaring: 'attackers' | 'blockers' | null
   priority: { holder: number; passed: number[]; announced: boolean }
   stack: StackItemView[]
   actions: ActionView[]
@@ -76,6 +112,10 @@ export interface PlayerView {
   command: BoardCard[]
   lost: boolean
   controller: string
+  /** Dégâts de commandant subis : "propriétaire:idCommandant" => total. */
+  commanderDamage: Record<string, number>
+  /** Réserve de mana (symbole => quantité). */
+  pool: Record<string, number>
 }
 
 export interface GameView {

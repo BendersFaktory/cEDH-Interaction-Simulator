@@ -7,7 +7,7 @@ namespace App\Engine\Rules;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PlayerState;
 
-/** Vérifiées avant chaque octroi de priorité. TODO: créatures létales, légendes, jetons, etc. */
+/** Vérifiées avant chaque octroi de priorité. Créatures létalement blessées incluses. TODO: légendes, jetons, etc. */
 final class StateBasedActions
 {
     public function check(GameState $s): void
@@ -19,16 +19,33 @@ final class StateBasedActions
             if ($p->life <= 0) {
                 $this->eliminate($s, $p->id, 'life');
             } elseif ($p->commanderDamage !== [] && max($p->commanderDamage) >= PlayerState::COMMANDER_DAMAGE_LIMIT) {
-                // Les dégâts de commandant ne sont alimentés que par le combat (pas encore implémenté).
                 $this->eliminate($s, $p->id, 'commander_damage');
             }
         }
+
+        $this->destroyLethallyDamagedCreatures($s);
 
         $alive = $s->alivePlayerIds();
         if (!$s->over && count($alive) <= 1) {
             $s->over = true;
             $s->winner = $alive[0] ?? null;
             $s->emit('GameOver', ['winner' => $s->winner, 'reason' => 'last_player_standing']);
+        }
+    }
+
+    /** Une créature marquée d'au moins autant de dégâts que son endurance meurt (un commandant retourne en zone de commandement). */
+    private function destroyLethallyDamagedCreatures(GameState $s): void
+    {
+        foreach ($s->players as $p) {
+            foreach ($p->battlefield as $card) {
+                if ($card->isCreature() && $card->damage >= $card->toughness && $card->damage > 0) {
+                    $p->takeFromBattlefield($card->id);
+                    $card->damage = 0;
+                    $card->tapped = false;
+                    $destination = $s->sendToGraveyard($p->id, $card);
+                    $s->emit('CreatureDied', ['player' => $p->id, 'card' => $card->toPublic(), 'destination' => $destination]);
+                }
+            }
         }
     }
 

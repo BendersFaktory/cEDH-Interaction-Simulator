@@ -1,5 +1,7 @@
 # Symfony : état réel de l'intégration
 
+> Installation pas à pas : voir [INSTALL.md](INSTALL.md). Ce document détaille l'app Symfony (routes, mesures, persistance, pièges).
+
 `backend/` est désormais une **vraie app Symfony 7.4** (kernel, config, migrations, tests d'API), vérifiée le 2026-10-09. Le moteur `src/Engine/` reste du PHP pur, exclu de l'autowiring.
 
 ## Démarrage
@@ -77,11 +79,51 @@ curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: applic
 | Création de partie dans le service (`create()`, moteur ~0,09 s inclus) | n.m. | ~1,9 s | **0,6 à 0,8 s** |
 | Suite PHPUnit complète | ~6 s (28 tests) | ~17 s (28 tests) | **~9,6 s (35 tests)** |
 | Taille d'une partie en base | ~19 Mo | ~28 Mo | **~29 Mo** (checkpoints : 28,5 Mo) |
+
 | Pic mémoire PHP d'une création | n.m. | n.m. | **~100 Mo** (dont 65 Mo pour le moteur et ses 897 snapshots en mémoire) |
 
-Ce qui a fait gagner du temps (mesuré en isolation avant de coder) : les 897 checkpoints (~20 Mo de JSON) coûtaient ~1,2 s en colonne `JSON` contre ~0,6 s en `LONGTEXT` (MySQL validait et convertissait le JSON en binaire pour rien), et les 5 832 `INSERT` unitaires coûtaient ~0,37 s contre ~0,07 s en multi-lignes (un aller-retour réseau par ligne). Le temps d'écriture restant est dominé par le **volume** des checkpoints : le type `text` ne change pas la taille en base. La vraie réduction viendra des checkpoints épars (TODO de la section 5 de `docs/ROADMAP.md`).
+Ce qui a fait gagner du temps (mesuré en isolation avant de coder) : les 897 checkpoints (~20 Mo de JSON) coûtaient ~1,2 s en colonne `JSON` contre ~0,6 s en `LONGTEXT` (MySQL validait et convertissait le JSON en binaire pour rien), et les 5 832 `INSERT` unitaires coûtaient ~0,37 s contre ~0,07 s en multi-lignes (un aller-retour réseau par ligne). Le temps d'écriture restant est dominé par le **volume** des checkpoints : le type `text` ne change pas la taille en base. La réduction est venue des checkpoints épars (voir le tableau suivant).
 
 **Mémoire** : en mode debug, le profileur de Doctrine retient les paramètres des requêtes, donc le pic grimpe d'environ 20 Mo à chaque partie créée dans un même processus (script, boucle de tests). Sans debug, il reste stable. Une requête HTTP isolée n'est pas concernée. Garder `memory_limit` confortable (512 Mo pour le serveur de dev et PHPUnit ; le défaut de 128 Mo du CLI ne suffit pas à enchaîner plusieurs créations en debug).
+
+### Checkpoints épars (N = 1 tour, mesuré le 2026-10-09, seed 42, 4 IA)
+
+| | Snapshot par checkpoint (avant) | **Ancres + rejeu** (actuel) |
+|---|---|---|
+| Lignes `checkpoint` | 897 | **130** |
+| Taille des checkpoints | 28,5 Mo | **2,6 Mo** (événements : 0,24 Mo) |
+| `POST /api/simulations` | ~0,68 s | **~0,2 s** |
+| `fork` (en milieu de partie) | n.m. | **~20 à 25 ms** |
+| `GET /state?at=` | n.m. | **~10 à 55 ms** (55 ms à froid) |
+| Suite PHPUnit | ~9,6 s (35 tests) | **~9,6 s (39 tests)** |
+
+Un tour d'écart maximum entre l'ancre et la cible : le rejeu reste en quelques ms, N = 1 n'a donc pas besoin d'être augmenté. Réglage : `app.checkpoint_every_n_turns` dans `config/services.yaml`.
+
+### Phases complètes + combat + défausse (mesuré le 2026-10-10, 4 IA, MySQL 9.3, N = 1)
+
+Commande : `APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php [seed...]` (médiane de 5 ; les parties créées sont supprimées ensuite).
+
+| | Avant (1re table, étapes réduites) | **Après** (seed 42) | seed 6 | seed 16 |
+|---|---|---|---|---|
+| Événements (dont verbeux) | 4935 | **3294** (2447) | 3057 (2322) | 4318 (3316) |
+| Ancres (lignes `checkpoint`) | 130 | **38** (1 par tour) | 33 | 48 |
+| Taille : ancres / événements | 2,6 Mo / 0,24 Mo | **1,08 Mo / 0,16 Mo** | 0,94 / 0,15 Mo | 1,36 / 0,20 Mo |
+| `create()` (service, médiane) | ~0,2 s | **~0,11 s** | ~0,10 s | ~0,13 s |
+| `POST /api/simulations` (HTTP, 1re / suivantes) | ~0,2 s | **0,34 s / ~0,11 s** | | |
+| `fork` au milieu | ~20-25 ms | **~13 ms** (HTTP : ~28 ms) | ~14 ms | ~6 ms |
+| `state@` (reconstruction, pire écart entre ancres) | ~10-55 ms | **~3 ms** (à froid 17 ms au 1er appel du processus) ; HTTP : 45 ms à froid, ~9 ms ensuite | 3 ms | 3 ms |
+| Plus grand écart entre ancres | n.m. | **128 événements** | 127 | 138 |
+| Pic mémoire PHP (`APP_DEBUG=0`) | ~100 Mo | **~38 Mo** | 38 Mo | 42 Mo |
+
+Lecture : l'hypothèse « ~2× plus d'événements » ne tient plus. Le combat termine les parties au tour ~33-48 au lieu de ~100+, ce qui compense les 9 étapes par tour : une partie a **moins** d'événements qu'avant les phases complètes (les ~2/3 sont des événements verbeux, 1 ancre par tour). Un tour fait au plus ~140 événements, la reconstruction reste à quelques ms : **N = 1 est conservé**. Limite : seules des parties « 4 IA » ont été mesurées ; la taille des ancres croîtra avec les vraies decks (100 cartes) et le mana/les déclencheurs, à remesurer à ce moment-là.
+
+#### Après le mana (couleurs, auto-paiement ; mesuré le 2026-10-10, seed 42)
+
+3642 événements, 38 ancres, 1,28 Mo d'ancres + 0,18 Mo d'événements ; `create` ~0,15 s (+35 % : le solveur de paiement est appelé pour chaque sort envisagé à chaque priorité) ; `fork` ~30 ms ; reconstruction ~5-15 ms (pire écart de 133 événements : ~14 ms) ; pic mémoire ~25 Mo. N = 1 reste adapté.
+
+#### Après les capacités activées et le mana avancé (solveur exact, réserve persistante, duals, Sol Ring, rituels ; mesuré le 2026-10-10, graines 42 / 6 / 16)
+
+Seed 42 : 3805 événements (dont 2945 verbeux), 40 ancres, 1,56 Mo d'ancres + 0,20 Mo d'événements ; `create` ~0,21 s (graines 6 et 16 : ~0,25 et ~0,30 s pour 4048 et 4740 événements ; +40 % vs le mana de base : le solveur est maintenant une recherche exacte, appelée pour chaque sort envisagé) ; `fork` 8-22 ms ; reconstruction 1-17 ms (pire écart : 125-139 événements) ; pic mémoire 29-36 Mo. N = 1 reste adapté. Les activations de mana manuelles d'un humain ajoutent une ancre par pause (~35 Ko chacune).
 
 ## Persistance : `json_text` et insertions par lots
 

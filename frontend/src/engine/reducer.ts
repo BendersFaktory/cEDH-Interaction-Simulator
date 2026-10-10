@@ -38,6 +38,13 @@ function removeCard(cards: BoardCard[], id: string): void {
   if (i >= 0) cards.splice(i, 1)
 }
 
+function tapAll(pl: PlayerView, ids: string[] | undefined): void {
+  for (const id of ids ?? []) {
+    const c = pl.battlefield.find((x) => x.id === id)
+    if (c) c.tapped = true
+  }
+}
+
 /** Applique UN événement en mutant `v` (rapide pour rejouer des milliers d'événements). */
 export function applyEvent(v: GameView, e: GameEvent): GameView {
   const p = e.payload
@@ -45,7 +52,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
   switch (e.type) {
     case 'GameStarted':
-      for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[] }>) {
+      for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[]; pool?: Record<string, number> }>) {
         v.players[pl.id] = {
           id: pl.id,
           life: pl.life,
@@ -56,6 +63,8 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
           command: (pl.command ?? []).map(board),
           lost: false,
           controller: pl.controller,
+          commanderDamage: {},
+          pool: { ...(pl.pool ?? {}) },
         } satisfies PlayerView
       }
       break
@@ -105,9 +114,36 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
         if (land) land.tapped = true
       }
       v.stack.push({ id: p.stackId, card: p.card, controller: p.player, targets: p.targets })
+      if (p.pool) pl.pool = { ...p.pool }
       v.priority.passed = []
       break
     }
+
+    case 'ManaAbilityActivated': {
+      const pl = v.players[p.player]
+      tapAll(pl, p.tapped)
+      pl.pool = { ...p.pool }
+      break
+    }
+
+    case 'AbilityActivated': {
+      tapAll(v.players[p.player], p.tapped)
+      v.stack.push({ id: p.stackId, card: p.card, controller: p.player, targets: p.targets ?? [], ability: p.ability })
+      v.priority.passed = []
+      break
+    }
+
+    case 'AbilityResolved':
+      v.stack = v.stack.filter((i) => i.id !== p.stackId)
+      break
+
+    case 'ManaAdded':
+      v.players[p.player].pool = { ...p.pool }
+      break
+
+    case 'ManaPoolEmptied':
+      v.players[p.player].pool = {}
+      break
 
     case 'SpellResolved': {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
@@ -125,8 +161,47 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'DamageDealt': {
       const id = Number(String(p.target).replace('player:', ''))
       v.players[id].life = p.life
+      if (p.commanderDamage) v.players[id].commanderDamage[p.commanderDamage.key] = p.commanderDamage.total
       break
     }
+
+    case 'CardDiscarded': {
+      const pl = v.players[p.player]
+      removeCard(pl.hand, p.card.id)
+      zoneOf(pl, p.destination).push(board(p.card))
+      break
+    }
+
+    case 'AttackerDeclared': {
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) {
+        c.tapped = p.tapped
+        c.attacking = p.defender
+      }
+      break
+    }
+
+    case 'BlockerDeclared': {
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.blocker)
+      if (c) c.blocking = p.attacker
+      break
+    }
+
+    case 'CreatureDied': {
+      const pl = v.players[p.player]
+      removeCard(pl.battlefield, p.card.id)
+      zoneOf(pl, p.destination).push(board(p.card))
+      break
+    }
+
+    case 'CombatEnded':
+      for (const pl of Object.values(v.players)) {
+        for (const c of pl.battlefield) {
+          delete c.attacking
+          delete c.blocking
+        }
+      }
+      break
 
     case 'PlayerLost':
       v.players[p.player].lost = true
@@ -137,7 +212,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.winner = p.winner
       break
 
-    // 'SpellFizzled' et autres : pas d'effet sur l'état affiché.
+    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled' et autres : pas d'effet sur l'état affiché.
   }
 
   return v
