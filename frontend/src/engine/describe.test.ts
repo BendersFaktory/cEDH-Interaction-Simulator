@@ -35,4 +35,11 @@ describe('describeEvent — capacités', () => {
     expect(describeEvent(e('AbilityActivated', { player: 0, card: { name: 'Pinger' }, ability: { effect: 'damage', amount: 1 }, targets: ['player:1'] }))).toBe('J0 active Pinger (1 dégât) → J1')
     expect(describeEvent(e('AbilityResolved', { card: { name: 'Pinger' } }))).toBe('Capacité de Pinger résolue')
   })
+  it('jetons et sacrifices', () => {
+    expect(describeEvent(e('TokenCreated', { player: 0, card: { name: 'Treasure' } }))).toBe('J0 crée un jeton Treasure')
+    expect(describeEvent(e('PermanentSacrificed', { player: 0, card: { name: 'Treasure' }, destination: 'none' }))).toBe('J0 sacrifie Treasure')
+  })
+  it('bonus de force/endurance', () => {
+    expect(describeEvent(e('CreatureBoosted', { player: 0, card: 'p0_c3', power: 3, toughness: 3 }))).toBe('p0_c3 (J0) passe à 3/3')
+  })
 })

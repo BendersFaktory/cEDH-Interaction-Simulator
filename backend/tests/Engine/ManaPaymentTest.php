@@ -17,7 +17,8 @@ final class ManaPaymentTest extends TestCase
 {
     /**
      * @param list<string|null> $specs 'R' = terrain produisant R ; 'RG' = terrain double ; '!R' = engagé ; null = terrain sans
-     *                                 `produces` ; 'SOL' = Sol Ring ({T} : {C}{C})
+     *                                 `produces` ; 'SOL' = Sol Ring ({T} : {C}{C}) ;
+     *                                 'SIG' = Izzet Signet ({1}, {T} : {U}{R})
      * @param array<string, int> $pool
      */
     private function player(array $specs, array $pool = []): PlayerState
@@ -26,6 +27,10 @@ final class ManaPaymentTest extends TestCase
         foreach ($specs as $i => $spec) {
             $tapped = is_string($spec) && str_starts_with($spec, '!');
             $symbols = is_string($spec) ? ltrim($spec, '!') : null;
+            if ($symbols === 'SIG') {
+                $cards[] = new CardInstance('a' . $i, 'Izzet Signet', CardInstance::ARTIFACT, 2, null, 0, $tapped, false, 0, 0, 0, 0, null, [], [ActivatedAbility::mana('{U}{R}', '{1}')]);
+                continue;
+            }
             if ($symbols === 'SOL') {
                 $cards[] = new CardInstance('a' . $i, 'Sol Ring', CardInstance::ARTIFACT, 1, null, 0, $tapped, false, 0, 0, 0, 0, null, [], [ActivatedAbility::mana('{C}{C}')]);
                 continue;
@@ -234,5 +239,51 @@ final class ManaPaymentTest extends TestCase
         $this->assertNull(ManaPayment::plan($p, ManaCost::parse('{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}')));
         $this->assertNull(ManaPayment::plan($this->player(array_merge(array_fill(0, 12, 'RG'), array_fill(0, 12, 'WU'))), ManaCost::parse('{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{W}{U}')));
         $this->assertLessThan(5.0, microtime(true) - $start);
+    }
+
+    public function testSignetNeverPaysItsOwnCost(): void
+    {
+        $this->assertNull(ManaPayment::plan($this->player(['SIG']), ManaCost::parse('{U}')));
+        $this->assertNull(ManaPayment::plan($this->player(['SIG']), ManaCost::parse('{1}')));
+        $this->assertSame(0, ManaPayment::maxX($this->player(['SIG']), ManaCost::parse('{X}')));
+    }
+
+    public function testSignetConvertsALandIntoTwoColors(): void
+    {
+        $plan = ManaPayment::plan($this->player(['G', 'SIG']), ManaCost::parse('{U}{R}'));
+        $this->assertSame(['l0'], $this->cards($plan));
+        $this->assertSame([['card' => 'a1', 'ability' => 0, 'option' => 0, 'spend' => ['G' => 1]]], $plan->converters);
+        $this->assertSame(['U' => 1, 'R' => 1], $plan->spend);
+        $this->assertSame(2, ManaPayment::maxX($this->player(['G', 'SIG']), ManaCost::parse('{X}')));
+    }
+
+    public function testSignetIsOnlyUsedWhenItDoesStrictlyBetter(): void
+    {
+        $plan = ManaPayment::plan($this->player(['R', 'U', 'SIG']), ManaCost::parse('{U}'));
+        $this->assertSame(['l1'], $this->cards($plan));
+        $this->assertSame([], $plan->converters);
+        // {2} : deux terrains ou terrain + Signet, à égalité (2 engagements, rien de perdu) : pas de Signet.
+        $this->assertSame([], ManaPayment::plan($this->player(['G', 'G', 'SIG']), ManaCost::parse('{2}'))->converters);
+        // {2}{U}{R} avec trois terrains : impossible sans le Signet.
+        $plan = ManaPayment::plan($this->player(['G', 'G', 'U', 'SIG']), ManaCost::parse('{1}{U}{R}{G}'));
+        $this->assertNotNull($plan);
+        $this->assertCount(1, $plan->converters);
+    }
+
+    public function testSignetCostIsPaidFromThePoolFirst(): void
+    {
+        $plan = ManaPayment::plan($this->player(['SIG'], ['C' => 1]), ManaCost::parse('{U}{R}'));
+        $this->assertSame([], $this->cards($plan));
+        $this->assertSame(['C' => 1], $plan->converters[0]['spend']);
+    }
+
+    public function testPayWithPlanActivatesConvertersAfterSimpleSources(): void
+    {
+        $p = $this->player(['G', 'SIG']);
+        $result = $p->payWithPlan(ManaPayment::plan($p, ManaCost::parse('{U}{R}')));
+        $this->assertSame(['l0', 'a1'], $result['tapped']);
+        $this->assertSame([], $result['fromPool']);
+        $this->assertTrue($p->pool->isEmpty());
+        $this->assertTrue($p->findOnBattlefield('a1')->tapped);
     }
 }

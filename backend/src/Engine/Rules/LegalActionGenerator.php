@@ -68,10 +68,10 @@ final class LegalActionGenerator
             }
             // Payable avec les terrains non engagés (couleurs, hybrides) ; un sort à {X} offre une action par X payable.
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($p, $cost) === null) {
+            if (ManaPayment::plan($p, $cost, 0, $s->turn) === null) {
                 continue;
             }
-            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost), self::MAX_X) : 0;
+            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost, $s->turn), self::MAX_X) : 0;
             foreach ($this->targetSets($s, $card) as $targets) {
                 for ($x = 0; $x <= $maxX; $x++) {
                     $key = $card->name . '|' . implode(',', $targets) . '|' . $x;
@@ -88,8 +88,9 @@ final class LegalActionGenerator
     }
 
     /**
-     * Capacités activées des permanents du joueur, à tout moment où il a la priorité. Dédoublonnées par
-     * (nom, capacité, alternative, cibles) : quatre Montagnes non engagées = une seule action.
+     * Capacités activées des permanents du joueur, à tout moment où il a la priorité (ou seulement en rituel si
+     * `sorcerySpeed`, voir AbilityManager::canActivate). Une action par (alternative, cibles, choix de coût), dédoublonnée
+     * par noms : quatre Montagnes non engagées = une seule action ; sacrifier l'un ou l'autre de deux jetons Kobold aussi.
      *
      * @return list<ActivateAbility>
      */
@@ -106,12 +107,16 @@ final class LegalActionGenerator
                 $targetSets = $ability->effect === 'damage'
                     ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
                     : [[]];
-                foreach ($options as $option) {
-                    foreach ($targetSets as $targets) {
-                        $key = $card->name . '|' . $index . '|' . $option . '|' . implode(',', $targets);
-                        if (!isset($seen[$key])) {
-                            $seen[$key] = true;
-                            $actions[] = new ActivateAbility($p->id, $card->id, $index, $option, $targets, $ability->isManaAbility);
+                foreach (AbilityManager::costChoices($p, $card, $ability) as $choices) {
+                    $names = implode(',', array_map(static fn (CardInstance $c) => $c->name, $choices));
+                    $ids = array_map(static fn (CardInstance $c) => $c->id, $choices);
+                    foreach ($options as $option) {
+                        foreach ($targetSets as $targets) {
+                            $key = $card->name . '|' . $index . '|' . $option . '|' . implode(',', $targets) . '|' . $names;
+                            if (!isset($seen[$key])) {
+                                $seen[$key] = true;
+                                $actions[] = new ActivateAbility($p->id, $card->id, $index, $option, $targets, $ability->isManaAbility, $ids);
+                            }
                         }
                     }
                 }

@@ -12,7 +12,11 @@ use App\Engine\Game\GameState;
  */
 final class ActivateAbility implements Action
 {
-    /** @param list<string> $targets */
+    /**
+     * @param list<string> $targets
+     * @param list<string> $costChoices ids choisis pour le coût : créature sacrifiée (`sacrificeCreature`) puis cartes
+     *                                  défaussées (`discard`), dans cet ordre
+     */
     public function __construct(
         private readonly int $player,
         public readonly string $cardId,
@@ -20,6 +24,7 @@ final class ActivateAbility implements Action
         public readonly int $option = 0, // alternative de mana choisie (capacité de mana)
         public readonly array $targets = [],
         public readonly bool $mana = false, // capacité de mana (information d'affichage, hors id)
+        public readonly array $costChoices = [],
     ) {
     }
 
@@ -30,7 +35,8 @@ final class ActivateAbility implements Action
 
     public function id(): string
     {
-        return sprintf('ability:%d:%s:%d:%d:%s', $this->player, $this->cardId, $this->abilityIndex, $this->option, implode(',', $this->targets));
+        return sprintf('ability:%d:%s:%d:%d:%s', $this->player, $this->cardId, $this->abilityIndex, $this->option, implode(',', $this->targets))
+            . ($this->costChoices === [] ? '' : ':' . implode(',', $this->costChoices));
     }
 
     public function describe(GameState $state): string
@@ -43,6 +49,14 @@ final class ActivateAbility implements Action
         }
         $ability = $card?->abilities()[$this->abilityIndex] ?? null;
         $label = ($card?->name ?? $this->cardId) . ($ability === null ? '' : ' (' . $ability->label($this->option) . ')');
+        if ($this->costChoices !== []) {
+            $names = [];
+            $p = $state->player($this->player);
+            foreach ($this->costChoices as $id) {
+                $names[] = ($p->findOnBattlefield($id) ?? $p->findInHand($id))?->name ?? $id;
+            }
+            $label .= ' en ' . ($ability?->sacrificeCreature ? 'sacrifiant ' : 'défaussant ') . implode(', ', $names);
+        }
         if ($this->targets !== []) {
             $label .= ' → joueur ' . substr($this->targets[0], 7);
         }
@@ -64,6 +78,6 @@ final class ActivateAbility implements Action
 
     public function toArray(): array
     {
-        return ['type' => 'ability', 'player' => $this->player, 'cardId' => $this->cardId, 'ability' => $this->abilityIndex, 'option' => $this->option, 'targets' => $this->targets, 'mana' => $this->mana];
+        return ['type' => 'ability', 'player' => $this->player, 'cardId' => $this->cardId, 'ability' => $this->abilityIndex, 'option' => $this->option, 'targets' => $this->targets, 'mana' => $this->mana, 'costChoices' => $this->costChoices];
     }
 }

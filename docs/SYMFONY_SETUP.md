@@ -125,6 +125,19 @@ Lecture : l'hypothèse « ~2× plus d'événements » ne tient plus. Le combat t
 
 Seed 42 : 3805 événements (dont 2945 verbeux), 40 ancres, 1,56 Mo d'ancres + 0,20 Mo d'événements ; `create` ~0,21 s (graines 6 et 16 : ~0,25 et ~0,30 s pour 4048 et 4740 événements ; +40 % vs le mana de base : le solveur est maintenant une recherche exacte, appelée pour chaque sort envisagé) ; `fork` 8-22 ms ; reconstruction 1-17 ms (pire écart : 125-139 événements) ; pic mémoire 29-36 Mo. N = 1 reste adapté. Les activations de mana manuelles d'un humain ajoutent une ancre par pause (~35 Ko chacune).
 
+#### Après la fin des capacités activées (créatures à mana, Signets, Treasure, coûts riches ; mesuré le 2026-10-10, graines 42 / 6 / 16)
+
+| | seed 42 | seed 6 | seed 16 |
+|---|---|---|---|
+| Événements (dont verbeux) / ancres | 4751 (3585) / 49 | 4087 (3121) / 43 | 4204 (3232) / 47 |
+| Taille : ancres / événements | 2,08 / 0,28 Mo | 1,83 / 0,23 Mo | 2,00 / 0,23 Mo |
+| `create()` (service, médiane) | ~0,45 s | ~0,37 s | ~0,36 s |
+| `fork` au milieu | ~34 ms | ~50 ms | ~41 ms |
+| `state@` (pire écart entre ancres, 137-148 événements) | ~27 ms | ~25 ms | ~22 ms |
+| Pic mémoire PHP (`APP_DEBUG=0`) | 34 Mo | 36 Mo | 36 Mo |
+
+Lecture : `create` double environ par rapport à la mesure précédente (seed 42 : 0,21 → 0,45 s). Deux causes, mesurées séparément : les parties sont plus longues (jetons bloqueurs : 49 tours au lieu de 40 pour la seed 42, +25 % d'événements, ancres de 1,56 à 2,08 Mo), et le moteur seul coûte 30 à 45 % de plus par événement (seed 42, sans base : 36 → 53 µs par événement ; 133 → 252 ms pour la partie). Chaque priorité évalue maintenant plus de capacités (choix de coût, plans de paiement avec convertisseurs). Reconstruction et fork restent sous 50 ms : **N = 1 est conservé**. Piste si `create` devient gênant : profiler `LegalActionGenerator` / `AbilityManager::canActivate` (un plan de paiement par capacité à coût de mana à chaque priorité).
+
 ## Persistance : `json_text` et insertions par lots
 
 - Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.

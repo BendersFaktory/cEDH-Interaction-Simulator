@@ -37,22 +37,22 @@ final class CombatResolver
             }
 
             if (($s->combat->blockers[$attackerId] ?? []) === []) {
-                if ($attacker->power > 0 && !$s->player($defender)->lost) {
-                    $toPlayers[] = [$attacker, $defender, $attacker->power];
+                if ($attacker->currentPower() > 0 && !$s->player($defender)->lost) {
+                    $toPlayers[] = [$attacker, $defender, $attacker->currentPower()];
                 }
                 continue;
             }
 
-            $remaining = $attacker->power;
+            $remaining = $attacker->currentPower();
             foreach ($blockers as $i => $blocker) {
                 $isLast = $i === array_key_last($blockers);
-                $assign = $isLast ? $remaining : min($remaining, max(0, $blocker->toughness - $blocker->damage));
+                $assign = $isLast ? $remaining : min($remaining, max(0, $blocker->currentToughness() - $blocker->damage));
                 $remaining -= $assign;
                 if ($assign > 0) {
                     $toCreatures[$blocker->id] = ($toCreatures[$blocker->id] ?? 0) + $assign;
                 }
-                if ($blocker->power > 0) {
-                    $toCreatures[$attacker->id] = ($toCreatures[$attacker->id] ?? 0) + $blocker->power;
+                if ($blocker->currentPower() > 0) {
+                    $toCreatures[$attacker->id] = ($toCreatures[$attacker->id] ?? 0) + $blocker->currentPower();
                 }
             }
         }

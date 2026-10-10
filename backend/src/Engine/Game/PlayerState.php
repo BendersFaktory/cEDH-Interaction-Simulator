@@ -148,16 +148,20 @@ final class PlayerState
     }
 
     /**
-     * Exécute un plan de ManaPayment : active les capacités de mana prévues, puis dépense `spend` depuis la réserve.
+     * Exécute un plan de ManaPayment : active les capacités de mana prévues, puis chaque convertisseur (son coût pris dans la
+     * réserve, puis sa production ajoutée), enfin dépense `spend` depuis la réserve.
      * Le surplus produit (Sol Ring pour un `{1}`) reste dans la réserve jusqu'à la fin de l'étape.
+     * Les sources dont le coût inclut un sacrifice (Treasure) restent engagées sur le champ de bataille : l'appelant les
+     * sacrifie aussitôt avec `GameState::sacrifice($joueur, $result['sacrifice'])`.
      *
-     * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>} ids engagés, mana produit
-     *         par les activations, et mana pris dans la réserve préexistante
+     * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>, sacrifice: list<string>}
+     *         ids engagés, mana produit par les activations, mana pris dans la réserve préexistante, ids à sacrifier
      */
     public function payWithPlan(ManaPlan $plan): array
     {
         $tapped = [];
         $paid = [];
+        $sacrifice = [];
         foreach ($plan->taps as ['card' => $cardId, 'ability' => $abilityIndex, 'option' => $option]) {
             $card = $this->findOnBattlefield($cardId);
             $ability = $card?->abilities()[$abilityIndex] ?? null;
@@ -167,19 +171,45 @@ final class PlayerState
             if ($ability->tap) {
                 $tapped[] = $cardId;
             }
+            if ($ability->sacrifice) {
+                $sacrifice[] = $cardId;
+            }
             foreach ($this->activateManaSource($card, $ability, $option) as $symbol => $n) {
                 $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
             }
         }
-        $fromPool = [];
+        $spent = [];
+        foreach ($plan->converters as ['card' => $cardId, 'ability' => $abilityIndex, 'option' => $option, 'spend' => $cost]) {
+            $card = $this->findOnBattlefield($cardId);
+            $ability = $card?->abilities()[$abilityIndex] ?? null;
+            if ($card === null || $ability === null || !$ability->isManaAbility || ($ability->tap && $card->tapped)) {
+                throw new \DomainException("Convertisseur introuvable ou déjà engagé : $cardId");
+            }
+            foreach ($cost as $symbol => $n) {
+                $this->pool->spend(Color::fromSymbol($symbol), $n);
+                $spent[$symbol] = ($spent[$symbol] ?? 0) + $n;
+            }
+            if ($ability->tap) {
+                $tapped[] = $cardId;
+            }
+            foreach ($this->activateManaSource($card, $ability, $option) as $symbol => $n) {
+                $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
+            }
+        }
         foreach ($plan->spend as $symbol => $n) {
             $this->pool->spend(Color::fromSymbol($symbol), $n);
-            if ($n > ($paid[$symbol] ?? 0)) {
-                $fromPool[$symbol] = $n - ($paid[$symbol] ?? 0);
+            $spent[$symbol] = ($spent[$symbol] ?? 0) + $n;
+        }
+        // Pris dans la réserve préexistante = dépensé au-delà de ce que les activations ont produit.
+        $fromPool = [];
+        foreach (Color::cases() as $color) {
+            $symbol = $color->symbol();
+            if (($spent[$symbol] ?? 0) > ($paid[$symbol] ?? 0)) {
+                $fromPool[$symbol] = $spent[$symbol] - ($paid[$symbol] ?? 0);
             }
         }
 
-        return ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool];
+        return ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice];
     }
 
     public function findOnBattlefield(string $cardId): ?CardInstance
