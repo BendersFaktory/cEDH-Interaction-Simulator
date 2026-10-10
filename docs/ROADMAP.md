@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (capacités activées : socle + mana avancé). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (README général + guide d'installation `docs/INSTALL.md`). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -86,3 +86,4 @@
 - [x] Symfony Flex installé (famille Symfony épinglée en `7.4.*`) ; recettes nettoyées.
 - [x] Base MySQL 9.3 à la place de SQLite (mot de passe dans `.env.local` / `.env.test.local`, non versionnés).
 - [x] Workflow Git `dev` → `staging` (PR à chaque commit), `master` réservée à l'utilisateur.
+- [x] README général (sans tâches restantes) + guide d'installation `docs/INSTALL.md` (2026-10-10 : suivi pas à pas vérifié — migration, `POST` 201 sur :8000, proxy Vite :5173 → 200, 99 tests PHP, 17 tests Vitest, build).

@@ -2,54 +2,62 @@
 
 Simulateur **Magic: The Gathering — Commander à 4 joueurs** : tu occupes un siège (J0 par défaut) face à 3 IA. À tout moment tu peux mettre en pause, revenir à un point de priorité, **bifurquer** (fork), jouer autrement et voir comment les IA réagissent. Tu peux aussi lancer 4 IA et regarder.
 
-```
-mtg-sim/
-├── backend/    Moteur PHP pur (src/Engine) + glue Symfony (Controller, Entity, Service) + tests
-├── frontend/   Vue 3 + Pinia + Vite : lecteur de replay, fork, panneau d'actions
-├── docs/       Architecture, catalogue d'événements, roadmap, intégration Symfony
-└── CLAUDE.md   Règles d'or et contexte pour reprendre le travail avec Claude
-```
+## Fonctionnalités
+
+- **Règles Commander** : 40 PV, commandant en zone de commandement, taxe de commandant, retour du commandant en zone de commandement, élimination à 21 dégâts de commandant.
+- **Tour complet** : toutes les phases et étapes, pile et priorité (contresorts compris), combat à 4 joueurs, défausse en fin de tour, élimination et fin de partie.
+- **Mana** : couleurs, hybrides, coûts X, sources non-terrain, paiement automatique ou manuel ; **capacités activées** (capacités de mana résolues immédiatement, les autres sur la pile).
+- **Ton siège** (`human:auto`) : le moteur te demande une décision dès que tu as une action utile et passe pour toi sinon (les passes restent journalisées).
+- **IA heuristique** pour les autres sièges : terrains, sorts, contresorts, attaques et blocages.
+- **Fork déterministe** : même graine → même partie ; reprendre depuis n'importe quel point de priorité rejoue exactement la même suite.
+- **API REST** (création, journal, état, fork, décisions) et **interface Vue** (lecteur de replay, panneau d'actions, fork).
+
+L'avancement détaillé et les travaux prévus sont dans [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Démarrage rapide
 
-**1. Voir le moteur tourner (aucune dépendance, juste PHP ≥ 8.3)**
+Prérequis : PHP ≥ 8.3, Composer, MySQL 8+, Node 18+.
 
 ```bash
-php backend/bin/smoke.php 42
+php backend/bin/smoke.php 42    # joue une partie complète à 4 IA, sans base ni dépendance
 ```
 
-**2. Lancer les tests du moteur**
+Installation complète (base, API, interface) : **[docs/INSTALL.md](docs/INSTALL.md)**.
 
-```bash
-cd backend && composer install && vendor/bin/phpunit
-```
-
-**3. Brancher Symfony** : le dossier `backend/` contient `src/` et `tests/` mais **pas** un kernel Symfony complet. Suis `docs/SYMFONY_SETUP.md` (≈ 10 min).
-
-**4. Front**
-
-```bash
-cd frontend && npm install && npm test && npm run dev   # http://localhost:5173, /api proxifié vers :8000
-```
-
-## Comment ça marche, en bref
+## Comment ça marche
 
 - Le moteur joue la partie côté serveur et produit un **journal d'événements** (`CardDrawn`, `SpellCast`, `PriorityGranted`, ...).
-- Le front **rejoue** ces événements (lecture, pause, pas à pas, retour arrière) via un reducer.
-- Au début de chaque ronde de priorité, et à chaque octroi quand la pile n'est pas vide, le moteur enregistre un **checkpoint** (snapshot complet, RNG compris).
+- Le front **rejoue** ces événements (lecture, pause, pas à pas, retour arrière) via un reducer, sans aucune règle de jeu.
+- Chaque début de ronde de priorité (et chaque octroi quand la pile n'est pas vide) est un **checkpoint**. Seules des **ancres** sont stockées (une par tour, plus les pauses et les forks) ; les autres checkpoints se reconstruisent par rejeu déterministe (RNG compris).
 - **Fork** = on restaure un checkpoint, on remplace l'agent d'un ou plusieurs joueurs par `human:auto`, et la simulation repart : le moteur suspend quand c'est à toi de décider, les IA restantes jouent normalement et peuvent **contrer tes sorts**, car la ronde de priorité n'est jamais court-circuitée.
 
-Détails : `docs/ARCHITECTURE.md`.
+## Stack
 
-## Ce que le squelette fait déjà
+- **Moteur** : PHP pur (`backend/src/Engine/`), sans dépendance au framework, testable seul.
+- **API** : Symfony 7.4 + Doctrine, persistance MySQL.
+- **Front** : Vue 3 + Pinia + Vite (TypeScript), tests Vitest, recette navigateur Playwright.
 
-- **Commander à 4** : 40 PV, commandant en zone de commandement, **taxe de commandant** (+2 par lancement), retour du commandant en zone de commandement s'il est contré, limite de 21 dégâts de commandant (la règle est en place, mais rien ne l'alimente tant que le combat n'existe pas).
-- Tour complet : pioche, terrain, sorts instantanés / créatures, pile, priorité, contresorts, dégâts, élimination, fin de partie.
-- **Ton siège** : `human:auto` te demande une décision dès que tu as une action utile, et passe tout seul sinon (les passes restent journalisées).
-- IA heuristique (contre le sort adverse au sommet de la pile, joue des terrains, lance des sorts).
-- Snapshots, fork, reprise déterministe (testée : même seed → mêmes événements ; reprise depuis un snapshot → mêmes événements que la partie d'origine).
-- API REST complète (création, événements, état, fork, décisions) et UI de base.
+```
+cEDH-Interaction-Simulator/
+├── backend/    Moteur PHP pur (src/Engine) + app Symfony (Controller, Entity, Service) + tests
+├── frontend/   Vue 3 + Pinia + Vite : lecteur de replay, fork, panneau d'actions ; e2e/ : recette Playwright
+├── docs/       Installation, architecture, catalogue d'événements, intégration Symfony, roadmap
+└── CLAUDE.md   Règles d'or et contexte pour travailler avec Claude
+```
 
-## Ce qu'il ne fait pas encore
+## Documentation
 
-**Combat** (donc aucun dégât de commandant pour l'instant : les parties se terminent par pioche vide ou par éclairs), capacités déclenchées/activées, mana coloré, vraies cartes (Scryfall), `TargetPicker` et `BranchTree` côté UI. Les decks de démo sont des mini-Commander (1 commandant + 39 cartes). Voir `docs/ROADMAP.md`.
+| Document | Contenu |
+|---|---|
+| [docs/INSTALL.md](docs/INSTALL.md) | Installer et lancer le projet chez soi, dépannage |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Moteur, priorité, checkpoints, fork |
+| [docs/EVENTS.md](docs/EVENTS.md) | Catalogue des événements |
+| [docs/SYMFONY_SETUP.md](docs/SYMFONY_SETUP.md) | Détails de l'app Symfony : routes, mesures, persistance, pièges |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Avancement et travaux prévus |
+| [CLAUDE.md](CLAUDE.md) | Règles d'or du projet |
+
+## Contribuer
+
+- Branche de travail `dev`, PR vers `staging` ; `master` est gérée par le mainteneur.
+- Avant une PR : `cd backend && vendor/bin/phpunit`, `cd frontend && npm test && npm run build`.
+- Nouveau type d'événement : suivre la checklist de [CLAUDE.md](CLAUDE.md).
