@@ -50,6 +50,9 @@ final class Decks
         $pair = [$colors[0], $colors[1]];
         sort($pair);
         $library[] = $make($duals[implode('', $pair)] ?? 'Dual Land', CardInstance::LAND, 0, null, 0, false, 0, 0, null, $colors);
+        // Signet : convertisseur `{1}, {T}` -> les deux couleurs du joueur.
+        $signets = ['GR' => 'Gruul Signet', 'RU' => 'Izzet Signet', 'GU' => 'Simic Signet'];
+        $library[] = $make($signets[implode('', $pair)] ?? 'Signet', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', [], [ActivatedAbility::mana('{' . $colors[0] . '}{' . $colors[1] . '}', '{1}')]);
         $library[] = $make('Sol Ring', CardInstance::ARTIFACT, 1, null, 0, false, 0, 0, '{1}', [], [ActivatedAbility::mana('{C}{C}')]);
         $library[] = $make('Prodigal Pinger', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', [], [ActivatedAbility::pinger(1)]);
         if ($hasRed) {

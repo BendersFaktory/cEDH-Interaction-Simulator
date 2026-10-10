@@ -45,6 +45,11 @@ final class AbilityTest extends TestCase
         return new CardInstance($id, 'Llanowar Elves', CardInstance::CREATURE, 1, null, 0, false, false, 1, 1, 0, $enteredTurn, '{G}', [], [ActivatedAbility::mana('{G}')]);
     }
 
+    private static function signet(string $id = 'sig'): CardInstance
+    {
+        return new CardInstance($id, 'Izzet Signet', CardInstance::ARTIFACT, 2, null, 0, false, false, 0, 0, 0, 0, '{2}', [], [ActivatedAbility::mana('{U}{R}', '{1}')]);
+    }
+
     private static function mountain(string $id): CardInstance
     {
         return new CardInstance($id, 'Mountain', CardInstance::LAND, 0, null, 0, false, false, 0, 0, 0, 0, null, ['R']);
@@ -229,5 +234,25 @@ final class AbilityTest extends TestCase
         $s->player(0)->battlefield = [self::elves('elf', 2)];
         $this->expectException(IllegalActionException::class);
         AbilityManager::activate($s, new ActivateAbility(0, 'elf', 0, 0, [], true));
+    }
+
+    public function testSignetIsActivatedManuallyByTappingAnotherSourceForItsCost(): void
+    {
+        $s = (new ScenarioBuilder())->build(self::PASS);
+        $s->player(0)->battlefield = [self::signet()];
+        $this->assertSame([], $this->abilities($s), 'Seul, le Signet ne peut pas payer son {1}');
+
+        $s->player(0)->battlefield[] = self::mountain('m1');
+        $sig = array_values(array_filter($this->abilities($s), static fn (ActivateAbility $a) => $a->cardId === 'sig'))[0];
+        $this->assertTrue($sig->mana);
+        $this->assertSame('Activer Izzet Signet ({1}, {T} : {U}{R})', $sig->describe($s));
+
+        $s->drainEvents();
+        AbilityManager::activate($s, $sig);
+        $event = $s->drainEvents()[0];
+        $this->assertSame('ManaAbilityActivated', $event->type);
+        $this->assertSame(['sig', 'm1'], $event->payload['tapped']);
+        $this->assertSame(['U' => 1, 'R' => 1], $event->payload['pool']);
+        $this->assertSame([], $s->stack);
     }
 }

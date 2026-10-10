@@ -148,7 +148,8 @@ final class PlayerState
     }
 
     /**
-     * Exécute un plan de ManaPayment : active les capacités de mana prévues, puis dépense `spend` depuis la réserve.
+     * Exécute un plan de ManaPayment : active les capacités de mana prévues, puis chaque convertisseur (son coût pris dans la
+     * réserve, puis sa production ajoutée), enfin dépense `spend` depuis la réserve.
      * Le surplus produit (Sol Ring pour un `{1}`) reste dans la réserve jusqu'à la fin de l'étape.
      *
      * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>} ids engagés, mana produit
@@ -171,11 +172,34 @@ final class PlayerState
                 $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
             }
         }
-        $fromPool = [];
+        $spent = [];
+        foreach ($plan->converters as ['card' => $cardId, 'ability' => $abilityIndex, 'option' => $option, 'spend' => $cost]) {
+            $card = $this->findOnBattlefield($cardId);
+            $ability = $card?->abilities()[$abilityIndex] ?? null;
+            if ($card === null || $ability === null || !$ability->isManaAbility || ($ability->tap && $card->tapped)) {
+                throw new \DomainException("Convertisseur introuvable ou déjà engagé : $cardId");
+            }
+            foreach ($cost as $symbol => $n) {
+                $this->pool->spend(Color::fromSymbol($symbol), $n);
+                $spent[$symbol] = ($spent[$symbol] ?? 0) + $n;
+            }
+            if ($ability->tap) {
+                $tapped[] = $cardId;
+            }
+            foreach ($this->activateManaSource($card, $ability, $option) as $symbol => $n) {
+                $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
+            }
+        }
         foreach ($plan->spend as $symbol => $n) {
             $this->pool->spend(Color::fromSymbol($symbol), $n);
-            if ($n > ($paid[$symbol] ?? 0)) {
-                $fromPool[$symbol] = $n - ($paid[$symbol] ?? 0);
+            $spent[$symbol] = ($spent[$symbol] ?? 0) + $n;
+        }
+        // Pris dans la réserve préexistante = dépensé au-delà de ce que les activations ont produit.
+        $fromPool = [];
+        foreach (Color::cases() as $color) {
+            $symbol = $color->symbol();
+            if (($spent[$symbol] ?? 0) > ($paid[$symbol] ?? 0)) {
+                $fromPool[$symbol] = $spent[$symbol] - ($paid[$symbol] ?? 0);
             }
         }
 

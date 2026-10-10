@@ -11,6 +11,7 @@ use App\Engine\Game\GameState;
 use App\Engine\Game\PlayerState;
 use App\Engine\Game\StackItem;
 use App\Engine\Mana\ManaPayment;
+use App\Engine\Mana\ManaPlan;
 
 /**
  * Activation des capacités activées. Seul chemin d'activation (humain, IA) : une capacité de mana est résolue
@@ -25,7 +26,7 @@ final class AbilityManager
         if (!self::sourceReady($card, $ability, $s->turn)) {
             return false;
         }
-        if ($ability->manaCost !== null && ManaPayment::plan($p, $ability->manaCost, 0, $s->turn) === null) {
+        if ($ability->manaCost !== null && self::costPlan($s, $p, $card, $ability) === null) {
             return false;
         }
 
@@ -45,6 +46,12 @@ final class AbilityManager
         return !$card->tapped && !($turn !== null && $card->isCreature() && $card->enteredTurn >= $turn);
     }
 
+    /** Plan de paiement du coût de mana d'une capacité ; la source ne paie jamais son propre coût. */
+    private static function costPlan(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability): ?ManaPlan
+    {
+        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id);
+    }
+
     public static function activate(GameState $s, ActivateAbility $a): void
     {
         $p = $s->player($a->player());
@@ -58,6 +65,12 @@ final class AbilityManager
             if (!isset($ability->options[$a->option])) {
                 throw new IllegalActionException('Alternative de mana inconnue');
             }
+            // Coût de mana (Signet) : payé par les autres sources avant l'activation ; elles sont journalisées dans `tapped`.
+            $payers = [];
+            if ($ability->manaCost !== null) {
+                $plan = self::costPlan($s, $p, $card, $ability) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
+                $payers = $p->payWithPlan($plan)['tapped'];
+            }
             $mana = $p->activateManaSource($card, $ability, $a->option);
             $s->emit('ManaAbilityActivated', [
                 'player' => $a->player(),
@@ -66,7 +79,7 @@ final class AbilityManager
                 'ability' => $ability->toArray(),
                 'option' => $a->option,
                 'mana' => $mana,
-                'tapped' => $ability->tap ? [$card->id] : [],
+                'tapped' => [...($ability->tap ? [$card->id] : []), ...$payers],
                 'pool' => $p->pool->toArray(),
             ], verbose: true);
 
@@ -75,7 +88,7 @@ final class AbilityManager
 
         $tapped = [];
         if ($ability->manaCost !== null) {
-            $plan = ManaPayment::plan($p, $ability->manaCost, 0, $s->turn) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
+            $plan = self::costPlan($s, $p, $card, $ability) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
             $tapped = $p->payWithPlan($plan)['tapped'];
         }
         if ($ability->tap) {
