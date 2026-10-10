@@ -5,6 +5,9 @@ import { phaseLabel } from './phases'
 const target = (t: string): string =>
   t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`
 
+const manaStr = (m: Record<string, number> | undefined): string =>
+  Object.entries(m ?? {}).map(([s, n]) => `{${s}}`.repeat(n)).join('')
+
 /** Phrase lisible pour le journal. Les événements verbeux restent concis. */
 export function describeEvent(e: GameEvent): string {
   const p = e.payload
@@ -25,9 +28,28 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} joue ${p.card.name}`
     case 'SpellCast': {
       const t = (p.targets as string[]).map(target).join(', ')
-      const from = p.fromCommand ? ` depuis la zone de commandement (coût ${p.cost})` : ''
-      return `J${p.player} lance ${p.card.name}${from}${t ? ` → ${t}` : ''}`
+      const from = p.fromCommand ? ' depuis la zone de commandement' : ''
+      const paid = p.manaCost
+        ? ` (coût ${p.manaCost}${p.x !== undefined && p.manaCost.includes('{X}') ? `, X=${p.x}` : ''})`
+        : p.fromCommand ? ` (coût ${p.cost})` : ''
+      return `J${p.player} lance ${p.card.name}${from}${paid}${t ? ` → ${t}` : ''}`
     }
+    case 'ManaAbilityActivated': {
+      const tapped = (p.tapped as string[] | undefined)?.length ? 'engage' : 'active'
+      return `J${p.player} ${tapped} ${p.card.name} : ${manaStr(p.mana)}`
+    }
+    case 'AbilityActivated': {
+      const t = ((p.targets ?? []) as string[]).map(target).join(', ')
+      const a = p.ability ?? {}
+      const detail = a.effect === 'damage' && a.amount !== undefined ? ` (${a.amount} dégât${a.amount > 1 ? 's' : ''})` : ''
+      return `J${p.player} active ${p.card.name}${detail}${t ? ` → ${t}` : ''}`
+    }
+    case 'AbilityResolved':
+      return `Capacité de ${p.card.name} résolue`
+    case 'ManaAdded':
+      return `J${p.player} gagne ${manaStr(p.mana)}`
+    case 'ManaPoolEmptied':
+      return `J${p.player} perd son mana flottant ${manaStr(p.lost)}`
     case 'SpellResolved':
       return `${p.card.name} se résout`
     case 'SpellCountered':

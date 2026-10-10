@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\AbilityManager;
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
@@ -12,6 +14,7 @@ use App\Engine\Agent\AgentRegistry;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PriorityState;
+use App\Engine\Mana\ManaPayment;
 use App\Engine\Snapshot\CheckpointListener;
 
 /**
@@ -91,6 +94,11 @@ final class PriorityManager
                 continue; // action spéciale : le joueur garde la priorité, pas de nouvelle ronde
             }
 
+            if ($action instanceof ActivateAbility) {
+                AbilityManager::activate($s, $action);
+                continue; // capacité de mana : le joueur garde la priorité ; autre capacité : sur la pile (remise à zéro des passes)
+            }
+
             if ($action instanceof CastSpell) {
                 $this->cast($s, $action);
                 continue;
@@ -141,22 +149,27 @@ final class PriorityManager
     private function cast(GameState $s, CastSpell $a): void
     {
         $p = $s->player($a->player());
+        $card = $p->findCastable($a->cardId) ?? throw new IllegalActionException('Carte absente de la main et de la zone de commandement');
+
+        // Coût calculé AVANT d'incrémenter le compteur de lancements (taxe de commandant).
+        $cost = $p->castCost($card);
+        if ($a->x < 0 || ($a->x > 0 && !$cost->hasX())) {
+            throw new IllegalActionException('X invalide pour ce sort');
+        }
+        $plan = ManaPayment::plan($p, $cost, $a->x) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
+
         $card = $p->takeFromHand($a->cardId);
         $fromCommand = false;
         if ($card === null) {
             $card = $p->takeFromCommand($a->cardId);
-            $fromCommand = $card !== null;
+            $fromCommand = true;
         }
-        $card ?? throw new IllegalActionException('Carte absente de la main et de la zone de commandement');
-
-        // Coût calculé AVANT d'incrémenter le compteur de lancements (taxe de commandant).
-        $cost = $p->castCost($card);
-        $tapped = $p->tapLands($cost);
+        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool] = $p->payWithPlan($plan);
         if ($fromCommand) {
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
 
-        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets);
+        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x);
         $s->stack[] = $item;
 
         $s->emit('SpellCast', [
@@ -165,7 +178,12 @@ final class PriorityManager
             'stackId' => $item->id,
             'targets' => $a->targets,
             'tapped' => $tapped,
-            'cost' => $cost,
+            'cost' => $cost->manaValue($a->x),
+            'manaCost' => (string) $cost,
+            'x' => $a->x,
+            'paid' => $paid,
+            'fromPool' => $fromPool,
+            'pool' => $p->pool->toArray(),
             'fromCommand' => $fromCommand,
         ]);
 

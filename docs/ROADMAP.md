@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (mesures taille/latence refaites). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (capacités activées : socle + mana avancé). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -25,9 +25,15 @@
   - [ ] Mots-clés (vol, initiative, piétinement, célérité...) et ordre d'assignation des dégâts choisi par l'attaquant.
   - [ ] Stops configurables : `human:auto` s'arrête à chaque déclaration possible (§4).
   - [x] Mesurer taille en base / latence avec le combat. *(Couvert par la même mesure, 2026-10-10 : voir ci-dessus et `docs/SYMFONY_SETUP.md`.)*
-- [ ] **Mana** : couleurs, pool, capacités de mana (ne passent pas par la pile), coûts hybrides/X.
+- [x] **Mana** : couleurs, pool, capacités de mana (ne passent pas par la pile), coûts hybrides/X. *(Vérifié le 2026-10-10 : PHPUnit 78 tests dont `ManaPaymentTest` (10) et `ManaCastTest` (4), `smoke.php 42` déterministe (3642 événements), audit de 7 graines : 0 paiement incohérent sur 305 sorts (couleurs payées, `tapped` = coût, Fireball/hybrides/contresorts joués) ; `vitest` 10 tests, `vue-tsc` + `vite build`, `npm run recette` sans problème ; mesures refaites (`create` ~0,15 s, reconstruction 5-15 ms, ancres 1,28 Mo). Auto-paiement par `ManaPayment`, terrains de base seulement.)*
+  - [x] Mana de capacités non-terrain (rituels, Sol Ring), terrains multicolores/non-basiques, actions de mana manuelles. *(Vérifié le 2026-10-10 : PHPUnit 99 tests dont `AbilityTest` (11) et `ManaPaymentTest` (20) ; `smoke.php 42` déterministe (3805 événements) ; audit de 7 graines : 348 sorts, 0 paiement incohérent (couleurs, montant), 77 capacités activées toutes résolues, 7 rituels résolus, aucun mana manuel de l'IA ; `vitest` 17 tests, `vue-tsc` + `vite build` ; `npm run recette` (scénario 9 : J0 engage une terre à la main, la réserve s'affiche). Capacité de mana = capacité activée avec `isManaAbility`, résolue immédiatement sans pile.)*
+  - [x] Choix de paiement par l'humain (quels terrains engager) : activer ses sources à la main, la réserve est dépensée avant tout nouvel engagement. *(Vérifié : `AbilityTest::testManualManaIsSpentBeforeUntappedLands`, recette scénario 9.)*
+  - [ ] Capacités de mana avec coût de mana (Signets), mana conditionnel/Treasure, créatures à mana (mal d'invocation géré mais non exercé) : avec « Capacités activées ».
+  - [ ] IA : ne pas gaspiller le surplus de mana (Sol Ring pour un coût impair : 17 mana perdus sur 348 sorts, 7 graines).
+  - [ ] IA : garder de quoi contrer, jouer dans le bon ordre (§3).
 - [ ] **Déclencheurs** : file d'attente dans `GameState`, ordre APNAP, ciblage, `TriggerManager`.
-- [ ] **Capacités activées** (action légale + pile).
+- [x] **Capacités activées** : socle. `ActivatedAbility` (coût `{T}`/mana, effet `mana` ou `damage`, `isManaAbility`), action `ActivateAbility`, `AbilityManager` (mana : résolution immédiate ; autre : pile, `AbilityActivated`/`AbilityResolved`), contresort qui ne cible que des sorts. *(Vérifié le 2026-10-10 : voir ci-dessus ; Prodigal Pinger activé et résolu via la pile par l'IA.)*
+  - [ ] Coûts d'activation riches (mana + `{T}`, sacrifice, défausse), capacités à effets variés (pioche, jeton, bonus), restriction de timing (rapidité de rituel), créatures à capacité `{T}` exercées en jeu.
 - [ ] **Actions basées sur l'état** : ~~créatures létales~~ (faites avec le combat), légendes, jetons...
 - [x] Format **Commander à 4** (tranché) : 40 PV, zone de commandement, taxe de commandant, retour en zone de commandement, seuil de 21 dégâts de commandant (SBA).
 - [x] Commander : **dégâts de commandant** (via le combat, vérifié ci-dessus).

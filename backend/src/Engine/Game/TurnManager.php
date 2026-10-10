@@ -57,6 +57,14 @@ final class TurnManager
 
     public function endStep(GameState $s): void
     {
+        // Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape.
+        foreach ($s->players as $p) {
+            if (!$p->pool->isEmpty()) {
+                $s->emit('ManaPoolEmptied', ['player' => $p->id, 'lost' => $p->pool->toArray(), 'pool' => []]);
+                $p->pool->clear();
+            }
+        }
+
         $next = $s->phase->next();
         while ($next !== null && $this->combat->skips($next, $s)) {
             $next = $next->next();

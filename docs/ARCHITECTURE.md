@@ -70,6 +70,16 @@ Le store Pinia garde `events[]` et `cursor`. L'état affiché est **toujours dé
 - **Dégâts de commandant** : `PlayerState::$commanderDamage` + élimination à 21 (`StateBasedActions`) sont en place ; seul le combat (à venir) les alimentera.
 - **Ton siège** : `GameFactory::create($seed, [0 => 'human:auto', 1 => 'ai:heuristic', ...])`. La simulation se suspend dès que J0 a une action utile ; un fork permet ensuite de changer de ligne depuis n'importe quel checkpoint.
 
+## Mana
+
+- **Modèle** (`Engine/Mana/`) : `Color` (enum `White…Colorless`, `symbol()` = lettre WUBRGC, seul format sérialisé), `ManaCost` (générique, coloré, hybride, X ; `parse('{X}{2}{R/G}{U}')`, forme canonique via `__toString`), `ManaPool` (réserve par couleur ; **persiste jusqu'à la fin de l'étape**, vidée par `TurnManager::endStep` avec un événement `ManaPoolEmptied` si elle n'était pas vide). `CardInstance` porte `manaCost` (chaîne, `null` = `{cost}` générique), `produces` (terrains), `abilities` (capacités activées) et `adds` (mana ajouté par un rituel) ; `cost` reste la valeur de mana entière.
+- **Capacités activées** (`Engine/Ability/`) : `ActivatedAbility` (coût `{T}` et/ou mana, effet `mana` ou `damage`, `isManaAbility`) est le **seul** modèle. Les terrains n'ont pas de cas particulier : `CardInstance::abilities()` leur synthétise une capacité de mana par lettre de `produces`. `AbilityManager::activate()` est le seul chemin d'activation : une capacité de mana (`isManaAbility`) est **résolue immédiatement** (règle 605 : ni pile, ni nouvelle ronde, le joueur garde la priorité, aucune passe remise à zéro, événement `ManaAbilityActivated`) ; une autre capacité va sur la pile (`StackItem::$ability`, la source ne change pas de zone), remet les passes à zéro et se résout via `StackResolver` (`AbilityActivated` / `AbilityResolved`). Action : `ActivateAbility` (id `ability:P:CARD:IDX:OPT:CIBLES`).
+- **Paiement** : `ManaPayment::plan()` est une recherche exacte déterministe sur la réserve et les capacités de mana des permanents non engagés ; elle rend un `ManaPlan` (activations + mana dépensé). Ordre de préférence : réserve d'abord, moins de gaspillage, moins d'engagements, sources multicolores préservées. `PlayerState::payWithPlan` l'exécute ; le surplus (Sol Ring pour un `{1}`) reste dans la réserve. `maxX()` donne le X maximal ; une action par X (0 à 10) pour un sort à {X} (`CastSpell::$x`). L'humain peut activer lui-même ses sources de mana (choix des terrains) : la réserve est dépensée avant tout nouvel engagement. `HumanAgent` en auto-pass ignore ces activations de mana (sinon la moindre terre arrêterait la partie).
+- **Rituels** : sort `effect 'mana'` ; à la résolution, `adds` est ajouté à la réserve (`ManaAdded`).
+- **Taxe de commandant** : `PlayerState::castCost()` renvoie un `ManaCost` avec +2 de générique par lancement précédent.
+- **X** : la valeur choisie est portée par `StackItem::$x` ; un sort de dégâts dont le coût contient {X} inflige X.
+- **Limites** : pas de capacité de mana avec un coût de mana (Signets), pas de mana conditionnel/Treasure, pas de créatures à mana (mal d'invocation géré mais non exercé), pas d'identité de couleurs ; la recherche de paiement est bornée en nœuds.
+
 ## Sécurité du modèle
 
 - Le client n'envoie qu'un `actionId` ; le serveur recalcule les actions légales.

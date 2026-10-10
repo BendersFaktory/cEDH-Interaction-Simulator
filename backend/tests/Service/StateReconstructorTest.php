@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Service;
 
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
@@ -71,6 +72,14 @@ final class StateReconstructorTest extends KernelTestCase
     private function pickAction(GameState $state, int $player, int $step): Action
     {
         $legal = (new LegalActionGenerator())->for($state, $player);
+
+        // Les capacités de mana sont exercées de temps en temps (réserve non vide dans les ancres) ;
+        // sinon elles sont écartées pour garder le même parcours qu'avant leur introduction.
+        $mana = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ActivateAbility && $a->isManaAbility($state)));
+        if ($mana !== [] && $step % 5 === 4) {
+            return $mana[0];
+        }
+        $legal = array_values(array_filter($legal, static fn (Action $a) => !in_array($a, $mana, true)));
 
         return $step % 3 === 2 ? $legal[0] : $legal[array_key_last($legal)];
     }
@@ -147,12 +156,23 @@ final class StateReconstructorTest extends KernelTestCase
 
         // Fork n°2 depuis le fils.
         $childSeqs = array_keys($ref->states);
-        $g = $childSeqs[intdiv(count($childSeqs), 2)];
+        // Point de fork à partir du milieu de la branche : on prend le premier où J2, devenu humain, ne s'arrête pas
+        // avant d'avoir produit un checkpoint (sinon il n'y a rien à comparer : pause humaine immédiate).
+        $g = null;
+        $grandRef = null;
+        $grandState = null;
+        foreach (array_slice($childSeqs, intdiv(count($childSeqs), 2)) as $candidate) {
+            $grandRef = new InMemoryCheckpoints();
+            $grandState = GameState::fromArray($ref->states[$candidate]);
+            $grandState->controllers[2] = 'human:auto';
+            (new GameEngine(new AgentRegistry(), $grandRef))->advance($grandState);
+            if ($grandRef->states !== []) {
+                $g = $candidate;
+                break;
+            }
+        }
+        self::assertNotNull($g, 'Aucun point de fork exploitable sur la branche');
         $grand = $this->simulations->fork($child, $g, [2 => 'human:auto']);
-        $grandRef = new InMemoryCheckpoints();
-        $grandState = GameState::fromArray($ref->states[$g]);
-        $grandState->controllers[2] = 'human:auto';
-        (new GameEngine(new AgentRegistry(), $grandRef))->advance($grandState);
 
         $this->assertReconstructsEverything($grand, $grandRef->states);
         $before = $this->reconstructor->at($grand, $g - 1);

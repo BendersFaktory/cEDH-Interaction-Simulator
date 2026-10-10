@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\AbilityManager;
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
@@ -17,6 +19,7 @@ use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
+use App\Engine\Mana\ManaPayment;
 
 /**
  * Calcule les actions légales d'un joueur À CET INSTANT (état du GameState fait foi).
@@ -25,6 +28,9 @@ use App\Engine\Game\PlayerState;
  */
 final class LegalActionGenerator
 {
+    /** Plus grand X proposé pour un sort à {X} (évite des centaines d'actions identiques). */
+    private const MAX_X = 10;
+
     /** @return list<Action> */
     public function for(GameState $s, int $playerId): array
     {
@@ -57,19 +63,58 @@ final class LegalActionGenerator
         // Le coût d'un commandant inclut la taxe : +2 par lancement précédent.
         $seen = [];
         foreach ([...$p->hand, ...$p->command] as $card) {
-            if ($card->isLand() || $p->castCost($card) > $p->availableMana()) {
+            if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed)) {
                 continue;
             }
-            if (!$card->isInstantSpeed() && !$sorcerySpeed) {
+            // Payable avec les terrains non engagés (couleurs, hybrides) ; un sort à {X} offre une action par X payable.
+            $cost = $p->castCost($card);
+            if (ManaPayment::plan($p, $cost) === null) {
                 continue;
             }
+            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost), self::MAX_X) : 0;
             foreach ($this->targetSets($s, $card) as $targets) {
-                $key = $card->name . '|' . implode(',', $targets);
-                if (isset($seen[$key])) {
+                for ($x = 0; $x <= $maxX; $x++) {
+                    $key = $card->name . '|' . implode(',', $targets) . '|' . $x;
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $actions[] = new CastSpell($playerId, $card->id, $targets, $x);
+                }
+            }
+        }
+
+        return [...$actions, ...$this->abilityActions($s, $p)];
+    }
+
+    /**
+     * Capacités activées des permanents du joueur, à tout moment où il a la priorité. Dédoublonnées par
+     * (nom, capacité, alternative, cibles) : quatre Montagnes non engagées = une seule action.
+     *
+     * @return list<ActivateAbility>
+     */
+    private function abilityActions(GameState $s, PlayerState $p): array
+    {
+        $actions = [];
+        $seen = [];
+        foreach ($p->battlefield as $card) {
+            foreach ($card->abilities() as $index => $ability) {
+                if (!AbilityManager::canActivate($s, $p, $card, $ability)) {
                     continue;
                 }
-                $seen[$key] = true;
-                $actions[] = new CastSpell($playerId, $card->id, $targets);
+                $options = $ability->isManaAbility ? array_keys($ability->options) : [0];
+                $targetSets = $ability->effect === 'damage'
+                    ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
+                    : [[]];
+                foreach ($options as $option) {
+                    foreach ($targetSets as $targets) {
+                        $key = $card->name . '|' . $index . '|' . $option . '|' . implode(',', $targets);
+                        if (!isset($seen[$key])) {
+                            $seen[$key] = true;
+                            $actions[] = new ActivateAbility($p->id, $card->id, $index, $option, $targets, $ability->isManaAbility);
+                        }
+                    }
+                }
             }
         }
 
@@ -194,7 +239,8 @@ final class LegalActionGenerator
     {
         return match ($card->effect) {
             'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
-            'counter' => array_map(static fn ($item) => ['stack:' . $item->id], $s->stack),
+            // Un contresort ne cible que des sorts, pas des capacités activées.
+            'counter' => array_map(static fn ($item) => ['stack:' . $item->id], array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility()))),
             default => [[]],
         };
     }

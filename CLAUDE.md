@@ -10,6 +10,7 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 4. **Le moteur ne saute JAMAIS une priorité.** Chaque joueur en vie est interrogé à chaque ronde. L'auto-pass est une politique de l'*agent* (`HumanAgent(autoPass: true)`), jamais un raccourci du moteur : les `PriorityPassed` doivent toujours être journalisés. C'est ce qui permet à l'IA de contrer juste après un fork.
 5. **Un sort lancé remet `priority->passed` à zéro** et rend la priorité au lanceur ; la pile ne se résout que quand tous les joueurs en vie ont passé consécutivement. Les terrains ne déclenchent pas de ronde.
 6. **On ne forke que sur un checkpoint** = un `PriorityGranted` dont le payload porte `checkpoint: true` (début de ronde, ou pile non vide). Jamais au milieu d'une résolution de pile. Les autres octrois n'ont pas de point de bifurcation ; le serveur recolle au checkpoint précédent. Seules des **ancres** sont stockées (1 par tour, + pause humaine, + fork) : les checkpoints intermédiaires se reconstruisent par rejeu (`StateReconstructor`).
+10. **Capacités activées** : toute activation passe par `AbilityManager::activate()`. Une capacité de mana (`isManaAbility`) est résolue immédiatement, sans pile ni nouvelle ronde (comme `PlayLand`) ; les autres vont sur la pile. Ne jamais créer de mana ailleurs que par `PlayerState::activateManaSource`. Le pool persiste jusqu'à la fin de l'étape.
 9. **Commander** : un commandant qui irait au cimetière (contré, détruit...) retourne en zone de commandement (`GameState::sendToGraveyard()` — toujours l'utiliser, jamais `->graveyard[] =` directement). La taxe est dans `PlayerState::castCost()` : toujours passer par elle pour un coût.
 7. **Le front est « bête »** : il applique les événements (`src/engine/reducer.ts`), aucune règle de jeu. Les payloads d'événements portent des **valeurs absolues** (ex. PV résultants) pour que le reducer reste trivial.
 8. **Ne jamais faire confiance au client** : `POST /decisions` envoie un `actionId`, le serveur recalcule les actions légales et retrouve l'action.
@@ -49,7 +50,7 @@ APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php   # taille en base 
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend (64 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
+# Backend (99 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
 php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
 cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
@@ -71,24 +72,24 @@ cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API r�
 | Partie | Vérifié ? |
 |---|---|
 | Moteur PHP : partie complète via `bin/smoke.php` | Oui |
-| Tests PHP : 64 tests (moteur dont `PhasesTest`, `CombatTest` et `DiscardTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
-| Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
+| Tests PHP : 99 tests (moteur dont `PhasesTest`, `CombatTest`, `DiscardTest`, `ManaPaymentTest`, `ManaCastTest` et `AbilityTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
+| Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, 348 sorts payés avec les bonnes couleurs, capacités activées toutes résolues, PV cohérents, ordre des tours correct, aucun auto-Éclair |
 | Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (recette : `npm run recette`) |
-| Reducer front vs état final PHP (fixture) | Oui : `vitest` (7 tests) passe |
+| Reducer front vs état final PHP (fixture) | Oui : `vitest` (17 tests) passe |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (64 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (phases complètes + combat, mesuré le 2026-10-10, seed 42) : `create` ~0,11 s, ~1,2 Mo en base (38 ancres, MySQL 9.3), `fork` ~13 ms, reconstruction ~3 ms (`bin/measure.php`) |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (99 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (phases complètes + combat, mesuré le 2026-10-10, seed 42) : `create` ~0,21 s, ~1,8 Mo en base (40 ancres, MySQL 9.3), `fork` ~8-22 ms, reconstruction ~1-17 ms après les capacités activées (`bin/measure.php`) |
 | Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
 
 Limites de comportement connues : l'IA attaque avec tout sur l'adversaire le plus faible et la partie se termine vers le tour 35-40 (seed 42 : J2 gagne). Taxe de commandant et retour en zone de commandement sont maintenant exercés en partie (vérifié sur 12 graines). Combat minimal : pas de mots-clés, un seul bloqueur côté IA, ordre d'assignation des dégâts = ordre de déclaration ; défausse à 7 : choix simple côté IA.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs et défausse à 7 sont faits. **Priorité immédiate : le mana** (couleurs, pool, capacités de mana, coûts hybrides/X), puis les déclencheurs et capacités activées. En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3).
+Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs, défausse à 7, mana (couleurs, hybrides, X, auto-paiement, sources non-terrain, duals, mana manuel) et socle des capacités activées sont faits. **Priorité immédiate : les déclencheurs** (file d'attente, ordre APNAP, ciblage), puis les restes des capacités activées (coûts d'activation riches, Signets, mana conditionnel). En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3) ; IA : gestion du surplus de mana (§3).
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 
 - ~~Format~~ **Tranché : Commander à 4, l'utilisateur joue un des sièges.** Reste à faire côté règles Commander : **dégâts de commandant** (structure et élimination à 21 en place, mais rien ne les alimente : il faut le combat), mulligan, ordre du tour aléatoire, couleurs d'identité.
 - **Combat** : prochaine grosse brique (déclarer attaquants/bloqueurs = nouvelles décisions pour `human`, summoning sickness, force/endurance). À lancer quand l'utilisateur le décide.
-- **Pool de cartes** : quel commandant et quelle decklist pour l'utilisateur ? (le squelette n'a que 4 cartes factices : Land, Lightning Bolt, Counterspell, Grizzly Bears, + un « Commandant J<n> » générique ; decks de 40 cartes au lieu de 100).
+- **Pool de cartes** : quel commandant et quelle decklist pour l'utilisateur ? (le squelette n'a que quelques cartes factices : terrains de base et duals, Sol Ring, Prodigal Pinger, Rite of Flame, Lightning Bolt, Counterspell, Grizzly/Mist/Hybrid Bear, Fireball, + un « Commandant J<n> » générique, 2 couleurs par joueur ; decks de 40 cartes au lieu de 100).
 - **Cartes** : handlers PHP par carte, ou petit DSL JSON/YAML pour les effets courants ?
 - **Stops de l'auto-pass** : aujourd'hui `human:auto` s'arrête dès qu'il existe une action autre que « passer ». Faut-il des stops configurables par phase ?
