@@ -173,6 +173,35 @@ async function run() {
   log('9 réserve visible après engagement manuel:', poolSeen); await shot('9-mana-manuel')
   if (!poolSeen) problems.push('recette mana : la réserve n\'apparaît pas après une capacité de mana')
 
+  // 10 : capacité à choix de coût (seed 7 : J0 a Goblin Bombardment, Llanowar Elves et Grizzly Bears en main de départ).
+  // J0 joue ses terrains, lance Bombardment et des créatures, n'attaque pas, puis sacrifie une créature pour 1 dégât à J1.
+  const prevGame10 = (await info()).match(/#(\d+)/)[1]
+  await page.fill('input[placeholder="aléatoire"]', '7')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame10)
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  let sacrificed = false
+  for (let i = 0; i < 300 && !sacrificed; i++) {
+    if (!(await page.locator('.actions').count())) break
+    const sac = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("en sacrifiant"):has-text("→ joueur 1")').first()
+    const creature = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):is(:has-text("Goblin Bombardment"), :has-text("Llanowar"), :has-text("Grizzly"))').first()
+    if (await sac.count()) {
+      if (await tryClick(sac)) {
+        await page.waitForTimeout(400)
+        sacrificed = (await page.locator('text=/J0 sacrifie/').count()) > 0
+      }
+    } else if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
+    else if (await enabled('Terminer la déclaration').count()) await tryClick(enabled('Terminer la déclaration'))
+    else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
+    else if (await creature.count()) await tryClick(creature)
+    else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
+    await page.waitForTimeout(150)
+  }
+  const sacLine = sacrificed ? (await page.locator('text=/J0 sacrifie/').first().textContent())?.replace(/\s+/g, ' ').trim() : '(absent)'
+  log('10 sacrifice d\'une créature (Goblin Bombardment) par J0 :', sacrificed, '| journal :', sacLine, '|', await info())
+  await page.locator('text=/J0 sacrifie/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('10-cout-sacrifice')
+  if (!sacrificed) problems.push('recette coût : J0 n\'a pas pu sacrifier une créature au Goblin Bombardment')
+
   // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
   const unexpected = problems.filter((p) => !/404/.test(p))
   log('\nPROBLÈMES inattendus:', unexpected.length ? '\n' + unexpected.join('\n') : 'aucun')

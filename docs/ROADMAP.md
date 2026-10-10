@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (capacités activées : coûts riches, effets pioche/jeton/bonus, timing de rituel ; Treasure ; Signets ; créatures à mana ; mana conditionnel reporté après les déclencheurs). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (capacités activées terminées : recette avec choix de coût, mesures refaites ; mana conditionnel reporté après les déclencheurs). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -32,7 +32,8 @@
   - [x] Capacités de mana avec coût de mana (Signets) : paiement manuel (coût payé par les autres sources, jamais par le Signet lui-même) et auto-paiement (« convertisseurs » de `ManaPayment`, au plus 3, sans chaînage Signet → Signet ; utilisés seulement s'ils font strictement mieux). *(Vérifié le 2026-10-10 : PHPUnit 107 tests dont 5 nouveaux dans `ManaPaymentTest` et 1 dans `AbilityTest` ; `smoke.php 42` déterministe (deux exécutions identiques, 3457 événements, test d'API mis à jour) ; audit de 7 graines : 316 sorts, 0 paiement incohérent (mana dépensé = coût + 1 par Signet, couleurs couvertes), 11 Signets résolus, 24 utilisations par l'auto-paiement ; `vitest` 17 tests, `vue-tsc` + `vite build`.)*
   - [x] Treasure : jetons (`CardInstance::token`, `sendToGraveyard` → `none`), sacrifice de la source comme coût (`GameState::sacrifice()`, `PermanentSacrificed`), sort Strike It Rich (`TokenCreated`) ; l'auto-paiement ne sacrifie qu'en dernier recours (critère « sacrifices » avant « engagements »). *(Vérifié le 2026-10-10 : PHPUnit 110 tests dont 3 nouveaux dans `AbilityTest` ; `smoke.php 42` déterministe (deux exécutions identiques, 3655 événements, test d'API mis à jour) ; audit de 7 graines : 351 sorts, 0 paiement incohérent, 17 Treasures créés = 13 sacrifiés + 4 en jeu en fin de partie, 0 jeton dans une autre zone ; `vitest` 19 tests (fixture avec Treasures), `vue-tsc` + `vite build` ; `npm run recette` sans problème inattendu.)*
   - [x] Coûts d'activation riches (mana + `{T}`, sacrifice de la source ou d'une créature, défausse : choix portés par l'action, `costChoices`), effets variés (pioche, jetons créature, bonus jusqu'à la fin du tour remis à zéro au cleanup), restriction de timing (`sorcerySpeed`), terrain à capacité (Kher Keep). Cartes : Mind Stone, Goblin Bombardment, Wild Mongrel, Kher Keep, Tome de l'Archiviste (factice). *(Vérifié le 2026-10-10 : PHPUnit 116 tests dont `ActivatedCostsTest` (6) ; `smoke.php 42` déterministe (deux exécutions identiques, 4751 événements, test d'API mis à jour) ; audit de 7 graines : 383 sorts, 0 paiement incohérent, Kher Keep 42 activations, Tome 35, Bombardment 31 (que des jetons, jamais le commandant), Mind Stone 4, Wild Mongrel 3 (que des terrains défaussés), timing de rituel toujours respecté, tous les bonus remis à zéro ; `vitest` 21 tests, `vue-tsc` + `vite build` ; `npm run recette` sans problème inattendu.)*
-  - [ ] Recette : scénario où J0 active une capacité à choix de coût (sacrifier un Treasure, défausser pour Wild Mongrel).
+  - [x] Recette : scénario où J0 active une capacité à choix de coût. *(Vérifié le 2026-10-10 : `npm run recette`, scénario 10 (seed 7) : J0 lance Goblin Bombardment, l'active vers J1 en sacrifiant Llanowar Elves ; journal #392-#403 contrôlé sur la capture (activation, « J0 sacrifie Llanowar Elves », résolution, J1 à 39 PV) ; aucun problème inattendu.)*
+  - [x] Mesures refaites après les capacités activées. *(Vérifié le 2026-10-10 : `bin/measure.php 42 6 16` ; `create` 0,36-0,45 s, fork 34-50 ms, reconstruction ≤ 27 ms, ancres ~2 Mo ; détail et causes dans `docs/SYMFONY_SETUP.md`. N = 1 conservé.)*
 - [ ] **Actions basées sur l'état** : ~~créatures létales~~ (faites avec le combat), légendes, jetons...
 - [x] Format **Commander à 4** (tranché) : 40 PV, zone de commandement, taxe de commandant, retour en zone de commandement, seuil de 21 dégâts de commandant (SBA).
 - [x] Commander : **dégâts de commandant** (via le combat, vérifié ci-dessus).
@@ -83,6 +84,7 @@
   - [x] Documenté dans `docs/ARCHITECTURE.md` et `docs/SYMFONY_SETUP.md` ; TODO de `Checkpoint.php` supprimé.
   - *Risques restants* : une évolution du format de `GameState` invalide les ancres anciennes (versionner l'état) ; en dev, recréer les parties créées avant cette migration.
 - [ ] Exécution asynchrone des grosses simulations (Symfony Messenger) + progression.
+- [ ] Profiler le moteur : depuis les capacités activées, 53 µs par événement contre 36 (seed 42) ; suspects : `AbilityManager::canActivate` (plan de paiement par capacité à coût à chaque priorité) et les combinaisons de convertisseurs.
 - [ ] Tests de propriété sur le moteur : invariants (nombre total de cartes constant, pile vide en fin d'étape, déterminisme sur N seeds).
 - [ ] CI backend : phpunit + phpstan.
 - [ ] Couverture de code PHPUnit : rapport + seuil minimal en CI.
