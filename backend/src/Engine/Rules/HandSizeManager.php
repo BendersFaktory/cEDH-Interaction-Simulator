@@ -49,9 +49,7 @@ final class HandSizeManager
                 throw new \LogicException('Une défausse est obligatoire : ' . $action::class);
             }
 
-            $card = $p->takeFromHand($action->cardId) ?? throw new \LogicException('Carte absente de la main');
-            $destination = $s->sendToGraveyard($playerId, $card);
-            $s->emit('CardDiscarded', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'hand' => count($p->hand)]);
+            $s->discard($playerId, $action->cardId);
         }
 
         throw new \LogicException('Défausse sans fin (garde-fou).');

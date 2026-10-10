@@ -1,6 +1,6 @@
 // Miroir TypeScript des structures produites par le moteur PHP (voir docs/EVENTS.md).
 
-export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact'
+export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact' | 'enchantment'
 
 /** Capacité activée d'une carte (forme sérialisée par le moteur). */
 export interface AbilityView {
@@ -11,8 +11,16 @@ export interface AbilityView {
   /** Pour un effet de mana : alternatives produites (ex. ['CC'] ou ['R', 'G']). */
   options?: string[]
   amount?: number
-  /** Coût : sacrifier la source (Treasure). */
+  /** Coût : sacrifier la source (Treasure, Mind Stone). */
   sacrifice?: boolean
+  /** Coût : sacrifier une créature (Goblin Bombardment). */
+  sacrificeCreature?: boolean
+  /** Coût : défausser N cartes (Wild Mongrel). */
+  discard?: number
+  /** Activable seulement en rituel. */
+  sorcerySpeed?: boolean
+  /** Jeton créé (`Nom:F/E`) ou bonus (`+F/+E`). */
+  spec?: string
 }
 
 export interface PublicCard {

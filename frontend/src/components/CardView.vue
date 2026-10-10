@@ -8,9 +8,20 @@ const props = defineProps<{ card: BoardCard; compact?: boolean }>()
 const symbols = computed(() => (props.card.manaCost ? [...props.card.manaCost.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]) : []))
 const symbolClass = (s: string) => (s.includes('/') ? 'hybrid' : /^[WUBRGC]$/.test(s) ? `m-${s}` : 'm-n')
 const abilityText = (a: NonNullable<BoardCard['abilities']>[number]): string => {
-  const cost = [a.manaCost, a.tap ? '{T}' : '', a.sacrifice ? 'sacrifier' : ''].filter(Boolean).join(', ')
-  const what = a.isManaAbility ? (a.options ?? []).join(' | ') : `${a.effect}${a.amount !== undefined ? ` ${a.amount}` : ''}`
-  return `${cost} : ${what}`
+  const cost = [
+    a.manaCost,
+    a.tap ? '{T}' : '',
+    a.sacrifice ? 'sacrifier' : '',
+    a.sacrificeCreature ? 'sacrifier une créature' : '',
+    a.discard ? `défausser ${a.discard}` : '',
+  ].filter(Boolean).join(', ')
+  const what = a.isManaAbility
+    ? (a.options ?? []).join(' | ')
+    : a.effect === 'draw' ? `piocher ${a.amount}`
+    : a.effect === 'token' ? `${a.amount} jeton ${(a.spec ?? '').replace(':', ' ')}`
+    : a.effect === 'pump' ? (a.spec ?? '')
+    : `${a.effect}${a.amount !== undefined ? ` ${a.amount}` : ''}`
+  return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}`
 }
 const abilitiesTitle = computed(() => (props.card.kind === 'land' ? [] : (props.card.abilities ?? [])).map(abilityText).join(' ; '))
 const landColor = computed(() => (props.card.kind === 'land' && props.card.produces?.length === 1 ? props.card.produces[0] : null))
@@ -26,7 +37,7 @@ const landColor = computed(() => (props.card.kind === 'land' && props.card.produ
     <span v-if="card.kind === 'creature'" class="card-pt">{{ card.power }}/{{ card.toughness }}</span>
     <span v-if="card.attacking !== undefined" class="card-combat">⚔ J{{ card.attacking }}</span>
     <span v-else-if="card.blocking !== undefined" class="card-combat">🛡 {{ card.blocking }}</span>
-    <span v-if="card.kind === 'artifact' && card.abilities?.length" class="card-abilities"><span v-for="(a, i) in card.abilities" :key="i" class="ability-chip" :class="{ mana: a.isManaAbility }">{{ a.isManaAbility ? '⚡' : '✦' }}</span></span>
+    <span v-if="card.kind !== 'land' && card.abilities?.length" class="card-abilities"><span v-for="(a, i) in card.abilities" :key="i" class="ability-chip" :class="{ mana: a.isManaAbility }">{{ a.isManaAbility ? '⚡' : '✦' }}</span></span>
     <!-- TODO: image Scryfall (cache local) -->
   </div>
 </template>

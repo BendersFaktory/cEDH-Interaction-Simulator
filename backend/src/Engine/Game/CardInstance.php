@@ -20,6 +20,11 @@ final class CardInstance
     public const SORCERY = 'sorcery';
     public const CREATURE = 'creature';
     public const ARTIFACT = 'artifact';
+    public const ENCHANTMENT = 'enchantment';
+
+    /** Bonus de force/endurance jusqu'à la fin du tour (`pump`), remis à zéro au cleanup. Voir power()/toughness(). */
+    public int $powerBonus = 0;
+    public int $toughnessBonus = 0;
 
     public function __construct(
         public readonly string $id,
@@ -37,7 +42,7 @@ final class CardInstance
         public readonly ?string $manaCost = null, // forme canonique `{X}{2}{R}` ; null = `{cost}` générique
         /** @var list<string> lettres des couleurs produites par un terrain ; vide = incolore (`C`) */
         public readonly array $produces = [],
-        /** @var list<ActivatedAbility> capacités activées déclarées (les terrains reçoivent les leurs de `produces`, voir abilities()) */
+        /** @var list<ActivatedAbility> capacités activées déclarées (un terrain a d'abord celles de `produces`, voir abilities()) */
         public readonly array $abilities = [],
         public readonly ?string $adds = null, // mana ajouté à la résolution d'un sort `effect 'mana'` (rituel), ex. `{R}{R}`
         public readonly bool $token = false, // jeton : cesse d'exister en quittant le champ de bataille
@@ -61,8 +66,8 @@ final class CardInstance
     }
 
     /**
-     * Capacités activées, dans un ordre stable (l'index fait partie de l'id d'action). Un terrain a une capacité de mana
-     * `{T} : {couleur}` par lettre de `produces` (`{C}` s'il est vide).
+     * Capacités activées, dans un ordre stable (l'index fait partie de l'id d'action). Un terrain a d'abord une capacité de
+     * mana `{T} : {couleur}` par lettre de `produces` (`{C}` s'il est vide), puis ses capacités déclarées (Kher Keep).
      *
      * @return list<ActivatedAbility>
      */
@@ -72,10 +77,22 @@ final class CardInstance
             return $this->abilities;
         }
 
-        return array_map(
+        return [...array_map(
             static fn (string $symbol) => ActivatedAbility::mana('{' . $symbol . '}'),
             $this->produces === [] ? ['C'] : $this->produces,
-        );
+        ), ...$this->abilities];
+    }
+
+    /** Force actuelle (bonus du tour compris). */
+    public function currentPower(): int
+    {
+        return $this->power + $this->powerBonus;
+    }
+
+    /** Endurance actuelle (bonus du tour compris). */
+    public function currentToughness(): int
+    {
+        return $this->toughness + $this->toughnessBonus;
     }
 
     /** Permanent : va sur le champ de bataille en se résolvant (créature, artefact) ou en étant joué (terrain). */
@@ -121,12 +138,14 @@ final class CardInstance
 
     public function toArray(): array
     {
-        return $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn];
+        // `boost` omis sans bonus : au-delà de 16 clés, PHP double la table (voir toPublic).
+        return $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
+            + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : []);
     }
 
     public static function fromArray(array $d): self
     {
-        return new self(
+        $card = new self(
             $d['id'],
             $d['name'],
             $d['kind'],
@@ -145,5 +164,8 @@ final class CardInstance
             $d['adds'] ?? null,
             (bool) ($d['token'] ?? false),
         );
+        [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
+
+        return $card;
     }
 }

@@ -53,9 +53,15 @@ final class Decks
         // Signet : convertisseur `{1}, {T}` -> les deux couleurs du joueur.
         $signets = ['GR' => 'Gruul Signet', 'RU' => 'Izzet Signet', 'GU' => 'Simic Signet'];
         $library[] = $make($signets[implode('', $pair)] ?? 'Signet', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', [], [ActivatedAbility::mana('{' . $colors[0] . '}{' . $colors[1] . '}', '{1}')]);
+        // Mind Stone : {T} : {C} ; {1}, {T}, sacrifier : piocher une carte.
+        $library[] = $make('Mind Stone', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', [], [ActivatedAbility::mana('{C}'), ActivatedAbility::draw(1, '{1}', true, true)]);
         $library[] = $make('Sol Ring', CardInstance::ARTIFACT, 1, null, 0, false, 0, 0, '{1}', [], [ActivatedAbility::mana('{C}{C}')]);
         $library[] = $make('Prodigal Pinger', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', [], [ActivatedAbility::pinger(1)]);
         if ($hasRed) {
+            // Kher Keep : terrain {T} : {C} ; {1}{R}, {T} : créer un jeton Kobold 0/1.
+            $library[] = $make('Kher Keep', CardInstance::LAND, 0, null, 0, false, 0, 0, null, [], [ActivatedAbility::token('Kobold:0/1', 1, '{1}{R}')]);
+            // Goblin Bombardment : sacrifier une créature : 1 dégât (à un joueur ici).
+            $library[] = $make('Goblin Bombardment', CardInstance::ENCHANTMENT, 2, null, 0, false, 0, 0, '{1}{R}', [], [ActivatedAbility::bombardment(1)]);
             for ($i = 0; $i < 6; $i++) {
                 $library[] = $make('Lightning Bolt', CardInstance::INSTANT, 1, 'damage', 3, false, 0, 0, '{R}');
             }
@@ -72,6 +78,8 @@ final class Decks
             }
         }
         if ($hasBlue) {
+            // Carte factice de démonstration : pioche activable seulement en rituel.
+            $library[] = $make("Tome de l'Archiviste", CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', [], [ActivatedAbility::draw(1, '{2}', true, false, true)]);
             for ($i = 0; $i < ($hasRed ? 3 : 5); $i++) {
                 $library[] = $make('Counterspell', CardInstance::INSTANT, 2, 'counter', 0, false, 0, 0, '{U}{U}');
             }
@@ -81,6 +89,8 @@ final class Decks
             for ($i = 0; $i < 2; $i++) {
                 $library[] = $make('Llanowar Elves', CardInstance::CREATURE, 1, null, 0, false, 1, 1, '{G}', [], [ActivatedAbility::mana('{G}')]);
             }
+            // Wild Mongrel : défausser une carte : +1/+1 jusqu'à la fin du tour.
+            $library[] = $make('Wild Mongrel', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{1}{G}', [], [ActivatedAbility::pump('+1/+1', null, 1)]);
         }
         for ($i = 0; $i < 2; $i++) {
             $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');

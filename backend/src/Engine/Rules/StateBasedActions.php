@@ -38,7 +38,7 @@ final class StateBasedActions
     {
         foreach ($s->players as $p) {
             foreach ($p->battlefield as $card) {
-                if ($card->isCreature() && $card->damage >= $card->toughness && $card->damage > 0) {
+                if ($card->isCreature() && $card->damage >= $card->currentToughness() && $card->damage > 0) {
                     $p->takeFromBattlefield($card->id);
                     $card->damage = 0;
                     $card->tapped = false;

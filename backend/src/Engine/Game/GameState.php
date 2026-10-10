@@ -168,15 +168,34 @@ final class GameState
     /** Crée un jeton Treasure sur le champ de bataille du joueur (`TokenCreated`). */
     public function createTreasure(int $playerId): CardInstance
     {
+        return $this->createToken($playerId, 'Treasure', CardInstance::ARTIFACT, abilities: [ActivatedAbility::treasure()]);
+    }
+
+    /**
+     * Crée un jeton sur le champ de bataille du joueur (id `p<joueur>_t<n>`, déterministe) et journalise `TokenCreated`.
+     *
+     * @param list<ActivatedAbility> $abilities
+     */
+    public function createToken(int $playerId, string $name, string $kind, int $power = 0, int $toughness = 0, array $abilities = []): CardInstance
+    {
         $token = new CardInstance(
-            sprintf('p%d_t%d', $playerId, $this->nextTokenId++), 'Treasure', CardInstance::ARTIFACT,
-            abilities: [ActivatedAbility::treasure()], token: true,
+            sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $kind,
+            power: $power, toughness: $toughness, abilities: $abilities, token: true,
         );
         $token->enteredTurn = $this->turn;
         $this->player($playerId)->battlefield[] = $token;
         $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()]);
 
         return $token;
+    }
+
+    /** Défausse une carte de la main (cimetière via `sendToGraveyard()`) et journalise `CardDiscarded`. Seul chemin de la défausse. */
+    public function discard(int $playerId, string $cardId): void
+    {
+        $p = $this->player($playerId);
+        $card = $p->takeFromHand($cardId) ?? throw new \DomainException("Carte à défausser absente de la main : $cardId");
+        $destination = $this->sendToGraveyard($playerId, $card);
+        $this->emit('CardDiscarded', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'hand' => count($p->hand)]);
     }
 
     public function toArray(): array

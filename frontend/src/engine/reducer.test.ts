@@ -162,4 +162,14 @@ describe('reducer — capacités et réserve de mana', () => {
     applyEvent(v, ev(6, 'PermanentSacrificed', { player: 0, card: pinger, destination: 'graveyard' }))
     expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
   })
+
+  it('CreatureBoosted fixe la force et l\'endurance (valeurs absolues)', () => {
+    const v = start()
+    const bear = { id: 'c1', name: 'Wild Mongrel', kind: 'creature' as const, cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
+    v.players[0].battlefield.push({ ...bear, tapped: false })
+    applyEvent(v, ev(4, 'CreatureBoosted', { player: 0, card: 'c1', power: 3, toughness: 3 }))
+    expect([v.players[0].battlefield[2].power, v.players[0].battlefield[2].toughness]).toEqual([3, 3])
+    applyEvent(v, ev(5, 'CreatureBoosted', { player: 0, card: 'c1', power: 2, toughness: 2 }))
+    expect(v.players[0].battlefield[2].power).toBe(2)
+  })
 })

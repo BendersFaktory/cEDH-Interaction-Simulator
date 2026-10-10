@@ -197,6 +197,16 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'CreatureBoosted': {
+      // Valeurs absolues : force/endurance actuelles (bonus du tour compris, ou remises à la base au cleanup).
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) {
+        c.power = p.power
+        c.toughness = p.toughness
+      }
+      break
+    }
+
     case 'TokenCreated':
       v.players[p.player].battlefield.push(board(p.card))
       break

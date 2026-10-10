@@ -68,6 +68,8 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
     case 'CreatureDied':
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'CreatureBoosted':
+      return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
     case 'TokenCreated':
       return `J${p.player} crée un jeton ${p.card.name}`
     case 'PermanentSacrificed':

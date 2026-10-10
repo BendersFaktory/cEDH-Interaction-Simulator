@@ -106,6 +106,7 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .mana-pool { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
 .mana-pool h4 { margin: 0 6px 0 0; }
 .card.artifact { border-style: double; border-color: var(--mana-C); }
+.card.enchantment { border-style: double; border-color: var(--mana-W); }
 .card-abilities { margin-left: 5px; display: inline-flex; gap: 2px; font-size: 10px; }
 .ability-chip { color: var(--mana-C); } .ability-chip.mana { color: var(--mana-W); }
 .stack .stack-ability { border-left: 3px solid var(--mana-U); padding-left: 6px; }
