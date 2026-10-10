@@ -154,19 +154,21 @@ async function run() {
   await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame)
   await page.waitForSelector('.actions', { timeout: TIMEOUT })
   let poolSeen = false
-  for (let i = 0; i < 60 && !poolSeen; i++) {
-    const mana = page.locator('.actions h4:has-text("Capacités") ~ button.mana-ability').first()
+  // Seuls les boutons activés comptent (pendant un chargement ils sont désactivés et le panneau se redessine) ;
+  // un clic raté est simplement retenté au tour suivant.
+  const enabled = (title) => page.locator(`.actions h4:has-text("${title}") ~ button:not([disabled])`).first()
+  const tryClick = async (b) => { try { await b.click({ timeout: 3000 }); return true } catch { return false } }
+  for (let i = 0; i < 80 && !poolSeen; i++) {
+    const mana = page.locator('.actions h4:has-text("Capacités") ~ button.mana-ability:not([disabled])').first()
     if (await mana.count()) {
-      await mana.click(); await page.waitForTimeout(300)
-      poolSeen = (await page.locator('.mana-pool').count()) > 0
-      break
-    }
-    const land = first('Terrains')
-    const pass = first('Priorité')
-    if (await land.count()) await land.click()
-    else if (await pass.count()) await pass.click()
-    else break
-    await page.waitForTimeout(150)
+      if (await tryClick(mana)) {
+        await page.waitForTimeout(300)
+        poolSeen = (await page.locator('.mana-pool').count()) > 0
+        if (poolSeen) break
+      }
+    } else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
+    else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
+    await page.waitForTimeout(200)
   }
   log('9 réserve visible après engagement manuel:', poolSeen); await shot('9-mana-manuel')
   if (!poolSeen) problems.push('recette mana : la réserve n\'apparaît pas après une capacité de mana')
