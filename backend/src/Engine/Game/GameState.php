@@ -176,10 +176,10 @@ final class GameState
      *
      * @param list<ActivatedAbility> $abilities
      */
-    public function createToken(int $playerId, string $name, string $kind, int $power = 0, int $toughness = 0, array $abilities = []): CardInstance
+    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = []): CardInstance
     {
         $token = new CardInstance(
-            sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $kind,
+            sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $type,
             power: $power, toughness: $toughness, abilities: $abilities, token: true,
         );
         $token->enteredTurn = $this->turn;

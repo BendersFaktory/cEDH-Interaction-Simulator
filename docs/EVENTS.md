@@ -1,6 +1,6 @@
 # Catalogue d'événements
 
-Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et unique le long d'une branche. Les payloads utilisent des **valeurs absolues** (PV résultants, etc.). Les cartes sont sérialisées en `PublicCard` : `{ id, name, kind, cost, effect, amount, commander, power, toughness }`. Les cibles sont des chaînes : `player:<id>` ou `stack:<stackId>`.
+Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et unique le long d'une branche. Les payloads utilisent des **valeurs absolues** (PV résultants, etc.). Les cartes sont sérialisées en `PublicCard` : `{ id, name, type, cost, effect, amount, commander, power, toughness }`. Les cibles sont des chaînes : `player:<id>` ou `stack:<stackId>`.
 
 | Type | Verbeux | Payload | Effet sur l'état affiché |
 |---|---|---|---|
@@ -44,7 +44,7 @@ Comme les déclarations de combat, la défausse n'est pas une priorité : le jou
 
 ## Cartes publiques (`card`)
 
-`toPublic()` d'une carte. `token: true` n'est présent que pour un jeton (clé omise sinon : au-delà de 16 clés par carte, PHP double la mémoire des tableaux d'état). Les capacités sérialisées portent `sacrifice` (bool : le coût sacrifie la source) et, seulement s'ils diffèrent de leur valeur par défaut, `sacrificeCreature` (bool), `discard` (nombre), `sorcerySpeed` (bool) et `spec` (`Nom:F/E` pour un jeton, `+F/+E` pour un bonus). Les effets possibles : `mana`, `damage`, `draw`, `token`, `pump`. Le genre `enchantment` s'ajoute aux genres de carte.
+`toPublic()` d'une carte. `token: true` n'est présent que pour un jeton (clé omise sinon : au-delà de 16 clés par carte, PHP double la mémoire des tableaux d'état). Les capacités sérialisées portent `sacrifice` (bool : le coût sacrifie la source) et, seulement s'ils diffèrent de leur valeur par défaut, `sacrificeCreature` (bool), `discard` (nombre), `sorcerySpeed` (bool) et `spec` (`Nom:F/E` pour un jeton, `+F/+E` pour un bonus). Les effets possibles : `mana`, `damage`, `draw`, `token`, `pump`. Le type `enchantment` s'ajoute aux types de carte.
 
 ## Ajouter un événement
 

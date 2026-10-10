@@ -29,7 +29,7 @@ final class CardInstance
     public function __construct(
         public readonly string $id,
         public readonly string $name,
-        public readonly string $kind,
+        public readonly string $type,
         public readonly int $cost = 0,
         public readonly ?string $effect = null, // 'damage' | 'counter' | 'mana' | 'treasure' | null
         public readonly int $amount = 0,
@@ -98,22 +98,22 @@ final class CardInstance
     /** Permanent : va sur le champ de bataille en se résolvant (créature, artefact) ou en étant joué (terrain). */
     public function isPermanent(): bool
     {
-        return $this->kind !== self::INSTANT && $this->kind !== self::SORCERY;
+        return $this->type !== self::INSTANT && $this->type !== self::SORCERY;
     }
 
     public function isLand(): bool
     {
-        return $this->kind === self::LAND;
+        return $this->type === self::LAND;
     }
 
     public function isCreature(): bool
     {
-        return $this->kind === self::CREATURE;
+        return $this->type === self::CREATURE;
     }
 
     public function isInstantSpeed(): bool
     {
-        return $this->kind === self::INSTANT;
+        return $this->type === self::INSTANT;
     }
 
     /** Représentation exposée dans les événements (tout est public dans ce simulateur). */
@@ -122,7 +122,7 @@ final class CardInstance
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'kind' => $this->kind,
+            'type' => $this->type,
             'cost' => $this->cost,
             'manaCost' => $this->isLand() ? null : (string) $this->manaCost(),
             'produces' => $this->produces,
@@ -148,7 +148,7 @@ final class CardInstance
         $card = new self(
             $d['id'],
             $d['name'],
-            $d['kind'],
+            $d['type'],
             (int) $d['cost'],
             $d['effect'] ?? null,
             (int) ($d['amount'] ?? 0),

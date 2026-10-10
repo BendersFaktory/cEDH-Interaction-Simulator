@@ -94,8 +94,8 @@ describe('reducer — défausse', () => {
 
 describe('reducer — capacités et réserve de mana', () => {
   const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
-  const land: PublicCard = { id: 'l1', name: 'Mountain', kind: 'land', cost: 0, effect: null, amount: 0 }
-  const pinger: PublicCard = { id: 'a1', name: 'Pinger', kind: 'artifact', cost: 2, effect: null, amount: 0 }
+  const land: PublicCard = { id: 'l1', name: 'Mountain', type: 'land', cost: 0, effect: null, amount: 0 }
+  const pinger: PublicCard = { id: 'a1', name: 'Pinger', type: 'artifact', cost: 2, effect: null, amount: 0 }
   const start = () =>
     replay([
       ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h' }, { id: 1, life: 40, library: 0, controller: 'ai' }] }),
@@ -153,7 +153,7 @@ describe('reducer — capacités et réserve de mana', () => {
 
   it('TokenCreated pose le jeton ; PermanentSacrificed le fait disparaître (destination none), une carte va au cimetière', () => {
     const v = start()
-    const treasure = { id: 'p0_t1', name: 'Treasure', kind: 'artifact' as const, cost: 0, effect: null, amount: 0, token: true }
+    const treasure = { id: 'p0_t1', name: 'Treasure', type: 'artifact' as const, cost: 0, effect: null, amount: 0, token: true }
     applyEvent(v, ev(4, 'TokenCreated', { player: 0, card: treasure }))
     expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1', 'p0_t1'])
     applyEvent(v, ev(5, 'PermanentSacrificed', { player: 0, card: treasure, destination: 'none' }))
@@ -165,7 +165,7 @@ describe('reducer — capacités et réserve de mana', () => {
 
   it('CreatureBoosted fixe la force et l\'endurance (valeurs absolues)', () => {
     const v = start()
-    const bear = { id: 'c1', name: 'Wild Mongrel', kind: 'creature' as const, cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
+    const bear = { id: 'c1', name: 'Wild Mongrel', type: 'creature' as const, cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
     v.players[0].battlefield.push({ ...bear, tapped: false })
     applyEvent(v, ev(4, 'CreatureBoosted', { player: 0, card: 'c1', power: 3, toughness: 3 }))
     expect([v.players[0].battlefield[2].power, v.players[0].battlefield[2].toughness]).toEqual([3, 3])

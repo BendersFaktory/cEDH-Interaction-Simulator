@@ -26,9 +26,9 @@ final class ActivatedCostsTest extends TestCase
 {
     private const PASS = [0 => 'ai:pass', 1 => 'ai:pass', 2 => 'ai:pass', 3 => 'ai:pass'];
 
-    private static function card(string $id, string $name, string $kind, array $abilities, int $power = 0, int $toughness = 0): CardInstance
+    private static function card(string $id, string $name, string $type, array $abilities, int $power = 0, int $toughness = 0): CardInstance
     {
-        return new CardInstance($id, $name, $kind, 0, null, 0, false, false, $power, $toughness, abilities: $abilities);
+        return new CardInstance($id, $name, $type, 0, null, 0, false, false, $power, $toughness, abilities: $abilities);
     }
 
     private static function mountain(string $id): CardInstance
@@ -168,7 +168,7 @@ final class ActivatedCostsTest extends TestCase
         $s->drainEvents();
         (new StackResolver())->resolveTop($s);
         $created = array_values(array_filter($s->drainEvents(), static fn ($e) => $e->type === 'TokenCreated'))[0];
-        $this->assertSame(['name' => 'Kobold', 'kind' => 'creature', 'power' => 0, 'toughness' => 1, 'token' => true], array_intersect_key($created->payload['card'], ['name' => 1, 'kind' => 1, 'power' => 1, 'toughness' => 1, 'token' => 1]));
+        $this->assertSame(['name' => 'Kobold', 'type' => 'creature', 'power' => 0, 'toughness' => 1, 'token' => true], array_intersect_key($created->payload['card'], ['name' => 1, 'type' => 1, 'power' => 1, 'toughness' => 1, 'token' => 1]));
         $this->assertSame(5, $s->player(0)->findOnBattlefield('p0_t1')->enteredTurn, 'Arrive avec le mal d\'invocation');
     }
 }

@@ -1,6 +1,6 @@
 // Miroir TypeScript des structures produites par le moteur PHP (voir docs/EVENTS.md).
 
-export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact' | 'enchantment'
+export type CardType = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact' | 'enchantment'
 
 /** Capacité activée d'une carte (forme sérialisée par le moteur). */
 export interface AbilityView {
@@ -26,7 +26,7 @@ export interface AbilityView {
 export interface PublicCard {
   id: string
   name: string
-  kind: CardKind
+  type: CardType
   cost: number
   effect: string | null
   /** Coût de mana canonique ('{X}{2}{R/G}{U}{U}'), null pour un terrain. */
