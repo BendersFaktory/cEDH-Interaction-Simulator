@@ -98,8 +98,14 @@ final class ActivatedAbility
     /** @return array{name: string, power: int, toughness: int} jeton décrit par `spec` (`Nom:F/E`) */
     public function tokenSpec(): array
     {
-        if (!preg_match('#^([^:]+):(\d+)/(\d+)$#', $this->spec, $m)) {
-            throw new \InvalidArgumentException("Jeton invalide : {$this->spec}");
+        return self::parseTokenSpec($this->spec);
+    }
+
+    /** @return array{name: string, power: int, toughness: int} jeton décrit par `Nom:F/E` (partagé avec `TriggeredAbility`) */
+    public static function parseTokenSpec(string $spec): array
+    {
+        if (!preg_match('#^([^:]+):(\d+)/(\d+)$#', $spec, $m)) {
+            throw new \InvalidArgumentException("Jeton invalide : $spec");
         }
 
         return ['name' => $m[1], 'power' => (int) $m[2], 'toughness' => (int) $m[3]];

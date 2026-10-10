@@ -21,7 +21,7 @@ final class StackResolver
         }
         $card = $item->card;
 
-        if ($item->isAbility()) {
+        if ($item->ability !== null) {
             // Capacité activée : la source reste où elle est, seuls les effets s'appliquent.
             $s->emit('AbilityResolved', [
                 'stackId' => $item->id,
@@ -43,8 +43,7 @@ final class StackResolver
 
         // Permanent -> champ de bataille ; sinon cimetière (ou zone de commandement pour un commandant).
         if ($card->isPermanent()) {
-            $card->enteredTurn = $s->turn;
-            $s->player($item->controller)->battlefield[] = $card;
+            $s->enterBattlefield($item->controller, $card);
             $destination = 'battlefield';
         } else {
             $destination = $s->sendToGraveyard($item->controller, $card);

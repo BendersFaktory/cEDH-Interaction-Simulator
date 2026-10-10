@@ -141,7 +141,7 @@ final class PriorityManager
     {
         $p = $s->player($a->player());
         $card = $p->takeFromHand($a->cardId) ?? throw new IllegalActionException('Terrain absent de la main');
-        $p->battlefield[] = $card;
+        $s->enterBattlefield($a->player(), $card);
         $s->landsPlayed++;
         $s->emit('LandPlayed', ['player' => $a->player(), 'card' => $card->toPublic()]);
     }

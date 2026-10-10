@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (capacités activées terminées : recette avec choix de coût, mesures refaites ; mana conditionnel reporté après les déclencheurs). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-11 (déclencheurs, étape 1/5 : modèle et file d'attente). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -26,6 +26,11 @@
   - [x] Mana de capacités non-terrain (rituels, Sol Ring), terrains multicolores/non-basiques, actions de mana manuelles. *(Vérifié le 2026-10-10 : PHPUnit 99 tests dont `AbilityTest` (11) et `ManaPaymentTest` (20) ; `smoke.php 42` déterministe (3805 événements) ; audit de 7 graines : 348 sorts, 0 paiement incohérent (couleurs, montant), 77 capacités activées toutes résolues, 7 rituels résolus, aucun mana manuel de l'IA ; `vitest` 17 tests, `vue-tsc` + `vite build` ; `npm run recette` (scénario 9 : J0 engage une terre à la main, la réserve s'affiche). Capacité de mana = capacité activée avec `isManaAbility`, résolue immédiatement sans pile.)*
   - [x] Choix de paiement par l'humain (quels terrains engager) : activer ses sources à la main, la réserve est dépensée avant tout nouvel engagement. *(Vérifié : `AbilityTest::testManualManaIsSpentBeforeUntappedLands`, recette scénario 9.)*
 - [ ] **Déclencheurs** : file d'attente dans `GameState`, ordre APNAP, ciblage, `TriggerManager`.
+  - [x] Modèle et file d'attente : `TriggeredAbility` (`etb` / `dies` / `upkeep`, effets `damage` / `draw` / `token`), `CardInstance::triggers` (omis s'il est vide), `GameState::$pendingTriggers` sérialisée (`PendingTrigger` : source en information de dernière connaissance), `GameState::enterBattlefield()` seul chemin d'entrée en jeu (sort, terrain, jeton), mort par SBA et par sacrifice (jeton compris), entretien du joueur actif. *(Vérifié le 2026-10-11 : PHPUnit 124 tests dont `TriggerQueueTest` (8) ; `smoke.php 42` identique avant/après.)*
+  - [ ] Mise sur la pile et résolution : `TriggerManager` (APNAP, boucle SBA ↔ déclencheurs), action `PutTrigger` (ordre et cible, décision hors priorité), passes remises à zéro, effets partagés avec les capacités activées, agents.
+  - [ ] Cartes de démo : Elvish Visionary, Perilous Myr, Idole de l'Érudit.
+  - [ ] Front et docs : `AbilityTriggered` (reducer, journal, `EVENTS.md`), fixture régénérée, `ARCHITECTURE.md`.
+  - [ ] Recette (J0 choisit la cible d'un déclencheur) et mesures.
 - [ ] **Mana conditionnel** (réserve à restrictions, ex. Eldrazi Temple) : reporté après les déclencheurs (touche tout le solveur de paiement).
 - [x] **Capacités activées** : socle. `ActivatedAbility` (coût `{T}`/mana, effet `mana` ou `damage`, `isManaAbility`), action `ActivateAbility`, `AbilityManager` (mana : résolution immédiate ; autre : pile, `AbilityActivated`/`AbilityResolved`), contresort qui ne cible que des sorts. *(Vérifié le 2026-10-10 : voir ci-dessus ; Prodigal Pinger activé et résolu via la pile par l'IA.)*
   - [x] Créatures à mana (Llanowar Elves) : mal d'invocation respecté par les actions **et** par l'auto-paiement (`AbilityManager::sourceReady`, partagé avec `ManaPayment`). *(Vérifié le 2026-10-10 : PHPUnit 101 tests dont 2 nouveaux dans `AbilityTest` ; `smoke.php 42` déterministe (deux exécutions identiques, 3805 événements) ; audit de 7 graines : 10 elfes résolues, 17 engagements pour payer, 0 pendant le mal d'invocation, 0 attaque ; `vitest` 17 tests, `vue-tsc` + `vite build`.)*
