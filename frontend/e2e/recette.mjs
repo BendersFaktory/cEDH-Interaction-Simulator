@@ -107,7 +107,8 @@ async function run() {
   await page.waitForSelector('.actions', { timeout: 30000 })
   log('6 fork info:', await info(), '|', await prog())
   log('6 fork actions:', (await page.locator('.actions h3').textContent()), (await page.locator('.actions button').count()), 'boutons'); await shot('6b-fork')
-  const pass2 = page.locator('.actions h4:has-text("Priorité") ~ button').first(); await pass2.click(); await page.waitForTimeout(500)
+  // Selon le point de fork, J1 est en priorité ou en déclaration de combat : on prend l'une ou l'autre décision.
+  const pass2 = page.locator('.actions h4:has-text("Priorité") ~ button, .actions h4:has-text("Terminer la déclaration") ~ button').first(); await pass2.click(); await page.waitForTimeout(500)
   log('6 fork après décision:', await prog(), await info()); await shot('6c-fork-decision')
 
   // 7 : charger
@@ -130,6 +131,8 @@ async function run() {
       // Sorts : on ne lance que des créatures (le Bolt/Contresort ne servent pas ce scénario).
       const b = title === 'Sorts' ? page.locator('.actions h4:has-text("Sorts") ~ button:is(:has-text("Grizzly"), :has-text("Commandant"))').first() : first(title)
       if (!(await b.count())) continue
+      // On ne bloque qu'une fois (pour vérifier la déclaration) : bloquer à chaque fois sacrifierait toutes les créatures de J0 avant qu'elles attaquent.
+      if (title === 'Bloquer' && sawBlock) continue
       if (title === 'Bloquer') sawBlock = true
       if (title === 'Attaquer') attacked = true
       await b.click()

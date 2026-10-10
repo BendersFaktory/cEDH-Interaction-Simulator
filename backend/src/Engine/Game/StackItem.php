@@ -14,6 +14,7 @@ final class StackItem
         public readonly CardInstance $card,
         public readonly int $controller,
         public readonly array $targets = [],
+        public readonly int $x = 0, // valeur choisie pour {X}
     ) {
     }
 
@@ -24,11 +25,12 @@ final class StackItem
             'card' => $this->card->toArray(),
             'controller' => $this->controller,
             'targets' => $this->targets,
+            'x' => $this->x,
         ];
     }
 
     public static function fromArray(array $d): self
     {
-        return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets']);
+        return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets'], (int) ($d['x'] ?? 0));
     }
 }

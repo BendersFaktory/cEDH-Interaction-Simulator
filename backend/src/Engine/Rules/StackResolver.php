@@ -34,7 +34,7 @@ final class StackResolver
         ]);
 
         match ($card->effect) {
-            'damage' => $this->damage($s, $item->targets[0] ?? '', $card->amount, $card->name),
+            'damage' => $this->damage($s, $item->targets[0] ?? '', $card->manaCost()->hasX() ? $item->x : $card->amount, $card->name),
             'counter' => $this->counter($s, $item->targets[0] ?? '', $item->id),
             default => null,
         };

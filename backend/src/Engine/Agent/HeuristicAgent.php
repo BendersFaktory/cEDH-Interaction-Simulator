@@ -67,7 +67,9 @@ final class HeuristicAgent implements PlayerAgent
                 }
             }
             if ($casts !== []) {
-                return $casts[$state->rng->int(0, count($casts) - 1)];
+                $pick = $casts[$state->rng->int(0, count($casts) - 1)];
+
+                return $this->withBestX($state, $pick, $casts);
             }
         }
 
@@ -148,6 +150,34 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return $this->finish($legal, $playerId);
+    }
+
+    /**
+     * Sort à X (une CastSpell par valeur de X) : retient la variante au X le plus grand, jamais X=0 si possible.
+     *
+     * @param list<CastSpell> $casts
+     */
+    private function withBestX(GameState $state, CastSpell $pick, array $casts): CastSpell
+    {
+        if (!property_exists($pick, 'x')) {
+            return $pick;
+        }
+        $best = $pick;
+        foreach ($casts as $c) {
+            if ($c->cardId === $pick->cardId && $c->targets === $pick->targets && $c->x > $best->x) {
+                $best = $c;
+            }
+        }
+        if ($best->x === 0) {
+            // Seule la variante X=0 existe pour cette carte : on l'évite si une autre action de lancer est possible.
+            foreach ($casts as $c) {
+                if ($c->x > 0) {
+                    return $c;
+                }
+            }
+        }
+
+        return $best;
     }
 
     /** @param list<Action> $legal */

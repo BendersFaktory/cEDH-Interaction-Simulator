@@ -70,6 +70,14 @@ Le store Pinia garde `events[]` et `cursor`. L'état affiché est **toujours dé
 - **Dégâts de commandant** : `PlayerState::$commanderDamage` + élimination à 21 (`StateBasedActions`) sont en place ; seul le combat (à venir) les alimentera.
 - **Ton siège** : `GameFactory::create($seed, [0 => 'human:auto', 1 => 'ai:heuristic', ...])`. La simulation se suspend dès que J0 a une action utile ; un fork permet ensuite de changer de ligne depuis n'importe quel checkpoint.
 
+## Mana
+
+- **Modèle** (`Engine/Mana/`) : `Color` (enum `White…Colorless`, `symbol()` = lettre WUBRGC, seul format sérialisé), `ManaCost` (générique, coloré, hybride, X ; `parse('{X}{2}{R/G}{U}')`, forme canonique via `__toString`), `ManaPool` (réserve par couleur, vide hors paiement, vidée à chaque `TurnManager::endStep`). `CardInstance` porte `manaCost` (chaîne, `null` = `{cost}` générique) et `produces` (couleurs d'un terrain ; vide = incolore) ; `cost` reste la valeur de mana entière.
+- **Auto-paiement** : `ManaPayment::plan()` choisit, sans aléa, les terrains à engager (couleurs d'abord, hybrides énumérés, générique avec la couleur la plus abondante) ; `maxX()` donne le X maximal. `LegalActionGenerator` ne propose un sort que s'il est payable, avec une action par X (0 à 10) pour un sort à {X} (`CastSpell::$x`, id `cast:…:x=N`). `PriorityManager::cast` exécute le plan (`PlayerState::payWithPlan` : les terrains alimentent la réserve, qui paie le sort). Engager un terrain pour du mana est une capacité de mana : elle ne passe pas par la pile.
+- **Taxe de commandant** : `PlayerState::castCost()` renvoie un `ManaCost` avec +2 de générique par lancement précédent.
+- **X** : la valeur choisie est portée par `StackItem::$x` ; un sort de dégâts dont le coût contient {X} inflige X.
+- **Limites** : seuls les terrains de base produisent du mana (pas de mana de capacité non-terrain, ni terrains multicolores/non-basiques), pas d'identité de couleurs. Point d'extension : `ManaPayment::takeLand`/`pickGeneric` (terrains multicolores) ; mana manuel = futures actions de mana alimentant `ManaPool`.
+
 ## Sécurité du modèle
 
 - Le client n'envoie qu'un `actionId` ; le serveur recalcule les actions légales.

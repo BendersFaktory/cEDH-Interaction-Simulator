@@ -17,6 +17,7 @@ use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
+use App\Engine\Mana\ManaPayment;
 
 /**
  * Calcule les actions légales d'un joueur À CET INSTANT (état du GameState fait foi).
@@ -25,6 +26,9 @@ use App\Engine\Game\PlayerState;
  */
 final class LegalActionGenerator
 {
+    /** Plus grand X proposé pour un sort à {X} (évite des centaines d'actions identiques). */
+    private const MAX_X = 10;
+
     /** @return list<Action> */
     public function for(GameState $s, int $playerId): array
     {
@@ -57,19 +61,24 @@ final class LegalActionGenerator
         // Le coût d'un commandant inclut la taxe : +2 par lancement précédent.
         $seen = [];
         foreach ([...$p->hand, ...$p->command] as $card) {
-            if ($card->isLand() || $p->castCost($card) > $p->availableMana()) {
+            if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed)) {
                 continue;
             }
-            if (!$card->isInstantSpeed() && !$sorcerySpeed) {
+            // Payable avec les terrains non engagés (couleurs, hybrides) ; un sort à {X} offre une action par X payable.
+            $cost = $p->castCost($card);
+            if (ManaPayment::plan($p, $cost) === null) {
                 continue;
             }
+            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost), self::MAX_X) : 0;
             foreach ($this->targetSets($s, $card) as $targets) {
-                $key = $card->name . '|' . implode(',', $targets);
-                if (isset($seen[$key])) {
-                    continue;
+                for ($x = 0; $x <= $maxX; $x++) {
+                    $key = $card->name . '|' . implode(',', $targets) . '|' . $x;
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $actions[] = new CastSpell($playerId, $card->id, $targets, $x);
                 }
-                $seen[$key] = true;
-                $actions[] = new CastSpell($playerId, $card->id, $targets);
             }
         }
 

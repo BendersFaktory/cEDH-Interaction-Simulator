@@ -25,8 +25,11 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} joue ${p.card.name}`
     case 'SpellCast': {
       const t = (p.targets as string[]).map(target).join(', ')
-      const from = p.fromCommand ? ` depuis la zone de commandement (coût ${p.cost})` : ''
-      return `J${p.player} lance ${p.card.name}${from}${t ? ` → ${t}` : ''}`
+      const from = p.fromCommand ? ' depuis la zone de commandement' : ''
+      const paid = p.manaCost
+        ? ` (coût ${p.manaCost}${p.x !== undefined && p.manaCost.includes('{X}') ? `, X=${p.x}` : ''})`
+        : p.fromCommand ? ` (coût ${p.cost})` : ''
+      return `J${p.player} lance ${p.card.name}${from}${paid}${t ? ` → ${t}` : ''}`
     }
     case 'SpellResolved':
       return `${p.card.name} se résout`

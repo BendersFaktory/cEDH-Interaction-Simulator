@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Mana\Color;
+use App\Engine\Mana\ManaCost;
+use App\Engine\Mana\ManaPool;
+
 final class PlayerState
 {
     /** Taxe de commandant : +2 par lancement précédent depuis la zone de commandement. */
@@ -34,6 +38,7 @@ final class PlayerState
         public array $command = [],
         public array $commanderCasts = [],
         public array $commanderDamage = [],
+        public ManaPool $pool = new ManaPool(),
     ) {
     }
 
@@ -104,12 +109,12 @@ final class PlayerState
         return null;
     }
 
-    /** Coût réel d'un lancement, taxe de commandant comprise (squelette : mana générique uniquement). */
-    public function castCost(CardInstance $card): int
+    /** Coût réel d'un lancement, taxe de commandant comprise (la taxe s'ajoute au mana générique). */
+    public function castCost(CardInstance $card): ManaCost
     {
         $tax = $card->commander ? self::COMMANDER_TAX * ($this->commanderCasts[$card->id] ?? 0) : 0;
 
-        return $card->cost + $tax;
+        return $card->manaCost()->withExtraGeneric($tax);
     }
 
     /** @return list<CardInstance> */
@@ -121,27 +126,34 @@ final class PlayerState
         ));
     }
 
-    /** Mana disponible : 1 par terrain non engagé (squelette : mana générique uniquement). */
-    public function availableMana(): int
+    /**
+     * Exécute un plan de ManaPayment : engage les terrains (capacité de mana, sans pile), le mana passe par la
+     * réserve puis est dépensé pour le sort (la réserve est donc vide à la fin).
+     *
+     * @param list<array{land: string, color: Color}> $plan
+     * @return array{tapped: list<string>, paid: array<string, int>} ids engagés et mana produit par couleur
+     */
+    public function payWithPlan(array $plan): array
     {
-        return count($this->untappedLands());
-    }
-
-    /** @return list<string> ids des terrains engagés */
-    public function tapLands(int $n): array
-    {
-        $ids = [];
-        foreach ($this->battlefield as $card) {
-            if (count($ids) >= $n) {
-                break;
+        $tapped = [];
+        $paid = [];
+        foreach ($plan as ['land' => $landId, 'color' => $color]) {
+            foreach ($this->battlefield as $card) {
+                if ($card->id === $landId && $card->isLand() && !$card->tapped) {
+                    $card->tapped = true;
+                    $this->pool->add($color);
+                    $tapped[] = $landId;
+                    $paid[$color->symbol()] = ($paid[$color->symbol()] ?? 0) + 1;
+                    continue 2;
+                }
             }
-            if ($card->isLand() && !$card->tapped) {
-                $card->tapped = true;
-                $ids[] = $card->id;
-            }
+            throw new \DomainException("Terrain introuvable ou déjà engagé : $landId");
+        }
+        foreach ($plan as ['color' => $color]) {
+            $this->pool->spend($color);
         }
 
-        return $ids;
+        return ['tapped' => $tapped, 'paid' => $paid];
     }
 
     /** @return list<string> ids des permanents qui étaient engagés */
@@ -173,6 +185,7 @@ final class PlayerState
             'command' => $map($this->command),
             'commanderCasts' => $this->commanderCasts,
             'commanderDamage' => $this->commanderDamage,
+            'pool' => $this->pool->toArray(),
         ];
     }
 
@@ -189,6 +202,7 @@ final class PlayerState
             $map($d['command']),
             array_map('intval', $d['commanderCasts']),
             array_map('intval', $d['commanderDamage']),
+            ManaPool::fromArray($d['pool'] ?? []),
         );
         $p->lost = (bool) $d['lost'];
 

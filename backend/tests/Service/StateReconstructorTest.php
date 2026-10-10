@@ -147,12 +147,23 @@ final class StateReconstructorTest extends KernelTestCase
 
         // Fork n°2 depuis le fils.
         $childSeqs = array_keys($ref->states);
-        $g = $childSeqs[intdiv(count($childSeqs), 2)];
+        // Point de fork à partir du milieu de la branche : on prend le premier où J2, devenu humain, ne s'arrête pas
+        // avant d'avoir produit un checkpoint (sinon il n'y a rien à comparer : pause humaine immédiate).
+        $g = null;
+        $grandRef = null;
+        $grandState = null;
+        foreach (array_slice($childSeqs, intdiv(count($childSeqs), 2)) as $candidate) {
+            $grandRef = new InMemoryCheckpoints();
+            $grandState = GameState::fromArray($ref->states[$candidate]);
+            $grandState->controllers[2] = 'human:auto';
+            (new GameEngine(new AgentRegistry(), $grandRef))->advance($grandState);
+            if ($grandRef->states !== []) {
+                $g = $candidate;
+                break;
+            }
+        }
+        self::assertNotNull($g, 'Aucun point de fork exploitable sur la branche');
         $grand = $this->simulations->fork($child, $g, [2 => 'human:auto']);
-        $grandRef = new InMemoryCheckpoints();
-        $grandState = GameState::fromArray($ref->states[$g]);
-        $grandState->controllers[2] = 'human:auto';
-        (new GameEngine(new AgentRegistry(), $grandRef))->advance($grandState);
 
         $this->assertReconstructsEverything($grand, $grandRef->states);
         $before = $this->reconstructor->at($grand, $g - 1);

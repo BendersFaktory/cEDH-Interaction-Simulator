@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (mesures taille/latence refaites). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (mana : couleurs, hybrides, X, auto-paiement). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -25,7 +25,10 @@
   - [ ] Mots-clés (vol, initiative, piétinement, célérité...) et ordre d'assignation des dégâts choisi par l'attaquant.
   - [ ] Stops configurables : `human:auto` s'arrête à chaque déclaration possible (§4).
   - [x] Mesurer taille en base / latence avec le combat. *(Couvert par la même mesure, 2026-10-10 : voir ci-dessus et `docs/SYMFONY_SETUP.md`.)*
-- [ ] **Mana** : couleurs, pool, capacités de mana (ne passent pas par la pile), coûts hybrides/X.
+- [x] **Mana** : couleurs, pool, capacités de mana (ne passent pas par la pile), coûts hybrides/X. *(Vérifié le 2026-10-10 : PHPUnit 78 tests dont `ManaPaymentTest` (10) et `ManaCastTest` (4), `smoke.php 42` déterministe (3642 événements), audit de 7 graines : 0 paiement incohérent sur 305 sorts (couleurs payées, `tapped` = coût, Fireball/hybrides/contresorts joués) ; `vitest` 10 tests, `vue-tsc` + `vite build`, `npm run recette` sans problème ; mesures refaites (`create` ~0,15 s, reconstruction 5-15 ms, ancres 1,28 Mo). Auto-paiement par `ManaPayment`, terrains de base seulement.)*
+  - [ ] Mana de capacités non-terrain (rituels, Sol Ring), terrains multicolores/non-basiques (extension : `ManaPayment::takeLand`/`pickGeneric`), actions de mana manuelles : avec « Capacités activées ».
+  - [ ] Choix de paiement par l'humain (quels terrains engager) si l'auto-paiement gêne.
+  - [ ] IA : garder de quoi contrer, jouer dans le bon ordre (§3).
 - [ ] **Déclencheurs** : file d'attente dans `GameState`, ordre APNAP, ciblage, `TriggerManager`.
 - [ ] **Capacités activées** (action légale + pile).
 - [ ] **Actions basées sur l'état** : ~~créatures létales~~ (faites avec le combat), légendes, jetons...

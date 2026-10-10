@@ -8,6 +8,10 @@ export interface PublicCard {
   kind: CardKind
   cost: number
   effect: string | null
+  /** Coût de mana canonique ('{X}{2}{R/G}{U}{U}'), null pour un terrain. */
+  manaCost?: string | null
+  /** Couleurs produites (W U B R G C) ; vide pour un terrain incolore/historique. */
+  produces?: string[]
   amount: number
   commander?: boolean
   power?: number
@@ -46,6 +50,7 @@ export interface StackItemView {
   card: PublicCard
   controller: number
   targets: string[]
+  x?: number
 }
 
 export interface DecisionRequest {

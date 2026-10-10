@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Mana\Color;
+use App\Engine\Mana\ManaCost;
+
 /**
  * Une carte physique dans une partie (pas la définition Scryfall).
  * Squelette : les effets sont de simples drapeaux ('damage', 'counter').
@@ -29,7 +32,26 @@ final class CardInstance
         public readonly int $toughness = 0,
         public int $damage = 0,        // dégâts marqués ce tour (effacés au cleanup)
         public int $enteredTurn = 0,   // tour d'arrivée sur le champ de bataille (mal d'invocation)
+        public readonly ?string $manaCost = null, // forme canonique `{X}{2}{R}` ; null = `{cost}` générique
+        /** @var list<string> lettres des couleurs produites par un terrain ; vide = incolore (`C`) */
+        public readonly array $produces = [],
     ) {
+    }
+
+    /** Coût de mana structuré (les terrains n'ont pas de coût). */
+    public function manaCost(): ManaCost
+    {
+        return ManaCost::parse($this->manaCost ?? '{' . $this->cost . '}');
+    }
+
+    /** @return list<Color> couleurs qu'un terrain peut produire (incolore par défaut) ; vide pour un non-terrain */
+    public function producedColors(): array
+    {
+        if (!$this->isLand()) {
+            return [];
+        }
+
+        return $this->produces === [] ? [Color::Colorless] : array_map(Color::fromSymbol(...), $this->produces);
     }
 
     public function isLand(): bool
@@ -55,6 +77,8 @@ final class CardInstance
             'name' => $this->name,
             'kind' => $this->kind,
             'cost' => $this->cost,
+            'manaCost' => $this->isLand() ? null : (string) $this->manaCost(),
+            'produces' => $this->produces,
             'effect' => $this->effect,
             'amount' => $this->amount,
             'commander' => $this->commander,
@@ -83,6 +107,8 @@ final class CardInstance
             (int) ($d['toughness'] ?? 0),
             (int) ($d['damage'] ?? 0),
             (int) ($d['enteredTurn'] ?? 0),
+            $d['manaCost'] ?? null,
+            $d['produces'] ?? [],
         );
     }
 }

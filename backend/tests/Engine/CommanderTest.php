@@ -105,7 +105,7 @@ final class CommanderTest extends TestCase
         $this->assertSame([], array_filter($s->player(0)->graveyard, static fn ($c) => $c->commander)); // …et pas au cimetière (d'autres cartes y arrivent par la défausse)
         // Et la taxe s'applique bien : le lancement contré compte.
         $this->assertSame(1, $s->player(0)->commanderCasts['cmd0']);
-        $this->assertSame(5, $s->player(0)->castCost($s->player(0)->command[0]));
+        $this->assertSame(5, $s->player(0)->castCost($s->player(0)->command[0])->manaValue());
     }
 
     public function testCommanderDamageEliminatesAtTwentyOne(): void

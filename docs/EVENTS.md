@@ -11,7 +11,7 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 | `PriorityGranted` | **oui** | `holder`, `passed: [id]`, `stackSize`, `checkpoint` (bool) | Détenteur de la priorité. **Point de bifurcation uniquement si `checkpoint` = true** (début de ronde ou pile non vide) |
 | `PriorityPassed` | **oui** | `player` | Marque le joueur comme ayant passé |
 | `LandPlayed` | non | `player`, `card` | Main → champ de bataille |
-| `SpellCast` | non | `player`, `card`, `stackId`, `targets`, `tapped: [id]`, `cost` (taxe incluse), `fromCommand` (bool) | Main **ou zone de commandement** → pile, engage les terrains, remet `passed` à zéro |
+| `SpellCast` | non | `player`, `card`, `stackId`, `targets`, `tapped: [id]`, `cost` (valeur de mana payée, taxe et X inclus), `manaCost` (coût canonique, taxe incluse, ex. `{X}{R}`), `x` (valeur de {X}, 0 sinon), `paid` (mana produit par les terrains engagés, ex. `{"R":1,"C":2}`), `fromCommand` (bool) | Main **ou zone de commandement** → pile, engage les terrains (auto-paiement), remet `passed` à zéro |
 | `SpellResolved` | non | `stackId`, `card`, `controller`, `destination` (`battlefield`\|`graveyard`\|`command`) | Pile → destination |
 | `SpellCountered` | non | `stackId`, `card`, `controller`, `by` (stackId du contresort), `destination` (`graveyard`\|`command`) | Pile → cimetière, ou zone de commandement si c'est un commandant |
 | `SpellFizzled` | non | `target` | Aucun (cible devenue illégale) |

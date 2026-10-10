@@ -49,7 +49,7 @@ APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php   # taille en base 
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend (64 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
+# Backend (78 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
 php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
 cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
@@ -71,24 +71,24 @@ cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API r�
 | Partie | Vérifié ? |
 |---|---|
 | Moteur PHP : partie complète via `bin/smoke.php` | Oui |
-| Tests PHP : 64 tests (moteur dont `PhasesTest`, `CombatTest` et `DiscardTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
+| Tests PHP : 78 tests (moteur dont `PhasesTest`, `CombatTest`, `DiscardTest`, `ManaPaymentTest` et `ManaCastTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
 | Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
 | Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (recette : `npm run recette`) |
-| Reducer front vs état final PHP (fixture) | Oui : `vitest` (7 tests) passe |
+| Reducer front vs état final PHP (fixture) | Oui : `vitest` (10 tests) passe |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (64 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (phases complètes + combat, mesuré le 2026-10-10, seed 42) : `create` ~0,11 s, ~1,2 Mo en base (38 ancres, MySQL 9.3), `fork` ~13 ms, reconstruction ~3 ms (`bin/measure.php`) |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (78 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (phases complètes + combat, mesuré le 2026-10-10, seed 42) : `create` ~0,15 s, ~1,5 Mo en base (38 ancres, MySQL 9.3), `fork` ~30 ms, reconstruction ~5-15 ms après le mana (`bin/measure.php`) |
 | Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
 
 Limites de comportement connues : l'IA attaque avec tout sur l'adversaire le plus faible et la partie se termine vers le tour 35-40 (seed 42 : J2 gagne). Taxe de commandant et retour en zone de commandement sont maintenant exercés en partie (vérifié sur 12 graines). Combat minimal : pas de mots-clés, un seul bloqueur côté IA, ordre d'assignation des dégâts = ordre de déclaration ; défausse à 7 : choix simple côté IA.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs et défausse à 7 sont faits. **Priorité immédiate : le mana** (couleurs, pool, capacités de mana, coûts hybrides/X), puis les déclencheurs et capacités activées. En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3).
+Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs et défausse à 7 sont faits. Le mana est fait (couleurs, hybrides, X, auto-paiement, terrains de base). **Priorité immédiate : les déclencheurs, puis les capacités activées** (avec le mana de capacités non-terrain et les terrains multicolores). En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3).
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 
 - ~~Format~~ **Tranché : Commander à 4, l'utilisateur joue un des sièges.** Reste à faire côté règles Commander : **dégâts de commandant** (structure et élimination à 21 en place, mais rien ne les alimente : il faut le combat), mulligan, ordre du tour aléatoire, couleurs d'identité.
 - **Combat** : prochaine grosse brique (déclarer attaquants/bloqueurs = nouvelles décisions pour `human`, summoning sickness, force/endurance). À lancer quand l'utilisateur le décide.
-- **Pool de cartes** : quel commandant et quelle decklist pour l'utilisateur ? (le squelette n'a que 4 cartes factices : Land, Lightning Bolt, Counterspell, Grizzly Bears, + un « Commandant J<n> » générique ; decks de 40 cartes au lieu de 100).
+- **Pool de cartes** : quel commandant et quelle decklist pour l'utilisateur ? (le squelette n'a que quelques cartes factices : terrains de base, Lightning Bolt, Counterspell, Grizzly/Mist/Hybrid Bear, Fireball, + un « Commandant J<n> » générique, 2 couleurs par joueur ; decks de 40 cartes au lieu de 100).
 - **Cartes** : handlers PHP par carte, ou petit DSL JSON/YAML pour les effets courants ?
 - **Stops de l'auto-pass** : aujourd'hui `human:auto` s'arrête dès qu'il existe une action autre que « passer ». Faut-il des stops configurables par phase ?

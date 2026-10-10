@@ -115,6 +115,10 @@ Commande : `APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php [seed..
 
 Lecture : l'hypothèse « ~2× plus d'événements » ne tient plus. Le combat termine les parties au tour ~33-48 au lieu de ~100+, ce qui compense les 9 étapes par tour : une partie a **moins** d'événements qu'avant les phases complètes (les ~2/3 sont des événements verbeux, 1 ancre par tour). Un tour fait au plus ~140 événements, la reconstruction reste à quelques ms : **N = 1 est conservé**. Limite : seules des parties « 4 IA » ont été mesurées ; la taille des ancres croîtra avec les vraies decks (100 cartes) et le mana/les déclencheurs, à remesurer à ce moment-là.
 
+#### Après le mana (couleurs, auto-paiement ; mesuré le 2026-10-10, seed 42)
+
+3642 événements, 38 ancres, 1,28 Mo d'ancres + 0,18 Mo d'événements ; `create` ~0,15 s (+35 % : le solveur de paiement est appelé pour chaque sort envisagé à chaque priorité) ; `fork` ~30 ms ; reconstruction ~5-15 ms (pire écart de 133 événements : ~14 ms) ; pic mémoire ~25 Mo. N = 1 reste adapté.
+
 ## Persistance : `json_text` et insertions par lots
 
 - Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.
