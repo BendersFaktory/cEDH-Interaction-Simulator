@@ -110,7 +110,9 @@ final class StateReconstructorTest extends KernelTestCase
 
         $sim = $this->simulations->create(7, self::HUMAN_J0);
         $decisions = 0;
+        $declarations = 0;
         while ($sim->getStatus() === Simulation::WAITING && $decisions < 80) {
+            $declarations += ($sim->getPending()['declaring'] ?? null) !== null ? 1 : 0;
             $action = $this->pickAction($ref, (int) $sim->getPending()['player'], $decisions);
             $sim = $this->simulations->decide($sim, $action->id());
             $engine->advance($ref, $action);
@@ -118,6 +120,7 @@ final class StateReconstructorTest extends KernelTestCase
         }
 
         self::assertGreaterThan(10, $decisions, 'Plusieurs pauses humaines traversées');
+        self::assertGreaterThan(0, $declarations, 'Au moins une pause pendant une déclaration de combat');
         $this->assertReconstructsEverything($sim, $dense->states);
     }
 

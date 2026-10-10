@@ -58,6 +58,10 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .card.commander { box-shadow: 0 0 0 1px var(--warn) inset; }
 .card.tapped { transform: rotate(8deg); opacity: .55; }
 .card-cost { margin-left: 5px; color: var(--muted); }
+.card-pt { margin-left: 5px; font-weight: 600; }
+.card-combat { margin-left: 5px; color: var(--warn); }
+.card.attacking { border-color: var(--bad); }
+.card.blocking { border-color: var(--accent); }
 
 .stack ol { margin: 0; padding-left: 20px; }
 .stack li small { color: var(--muted); margin-left: 6px; }

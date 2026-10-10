@@ -3,18 +3,18 @@ import { computed } from 'vue'
 import { useSimulationStore } from '../stores/simulation'
 import PlayerArea from './PlayerArea.vue'
 import StackPanel from './StackPanel.vue'
+import { phaseLabel } from '../engine/phases'
 
 const store = useSimulationStore()
 const view = computed(() => store.view)
 const players = computed(() => Object.values(view.value.players))
-const phaseLabel: Record<string, string> = { draw: 'Pioche', main: 'Principale', end: 'Fin de tour' }
 </script>
 
 <template>
   <div class="board">
     <div class="board-header">
       <strong>Tour {{ view.turn }}</strong>
-      <span>{{ phaseLabel[view.phase] ?? view.phase }}</span>
+      <span>{{ phaseLabel(view.phase) }}</span>
       <span v-if="view.over" class="badge">{{ view.winner === null ? 'Fin de partie' : `Victoire de J${view.winner}` }}</span>
     </div>
 

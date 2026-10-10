@@ -10,10 +10,16 @@ export interface PublicCard {
   effect: string | null
   amount: number
   commander?: boolean
+  power?: number
+  toughness?: number
 }
 
 export interface BoardCard extends PublicCard {
   tapped: boolean
+  /** Joueur attaqué, tant que la créature attaque (efface à la fin du combat). */
+  attacking?: number
+  /** Id de l'attaquant bloqué, tant que la créature bloque. */
+  blocking?: string
 }
 
 export interface GameEvent {
@@ -27,10 +33,12 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard'
   player: number
   cardId?: string
   targets?: string[]
+  defender?: number
+  attackerId?: string
 }
 
 export interface StackItemView {
@@ -46,6 +54,8 @@ export interface DecisionRequest {
   turn: number
   phase: string
   activePlayer: number
+  /** Déclaration de combat en cours (attaquants/bloqueurs) : le déclarant occupe `priority.holder`. */
+  declaring: 'attackers' | 'blockers' | null
   priority: { holder: number; passed: number[]; announced: boolean }
   stack: StackItemView[]
   actions: ActionView[]
@@ -76,6 +86,8 @@ export interface PlayerView {
   command: BoardCard[]
   lost: boolean
   controller: string
+  /** Dégâts de commandant subis : "propriétaire:idCommandant" => total. */
+  commanderDamage: Record<string, number>
 }
 
 export interface GameView {

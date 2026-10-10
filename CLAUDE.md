@@ -20,6 +20,7 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - **Avant toute modification de fichier**, vérifier la branche : `git branch --show-current`. Si ce n'est pas `dev`, faire `git switch dev` (si l'arbre est sale ou si la bascule échoue, s'arrêter et demander). Ne jamais modifier de fichier sur `master` ou `staging`.
 - **À chaque commit sur `dev`** : pousser `dev` et créer en même temps une PR `dev` → `staging` (`gh pr create --base staging --head dev`). Si une PR `dev` → `staging` est déjà ouverte, le push l'alimente : ne pas en créer une seconde, le signaler à l'utilisateur.
 - **Message de commit** : si l'utilisateur ne l'a pas fourni, le lui demander explicitement à chaque fois, avant de committer. Ne jamais l'inventer ni réutiliser un message précédent.
+- **Commit de résolution de conflit** (fusion de `staging` dans `dev` pour résoudre les conflits d'une PR) : le message est toujours `Resolve merge conflict {hash du commit qui cause le conflit}` (hash court du commit de `staging` à l'origine du conflit, ex. `Resolve merge conflict 0923371`). Pas besoin de le demander : il se déduit du conflit.
 - **Titre de la PR** : toujours `{message de commit} [staging]` (ex. commit « Création du workflow git » → PR « Création du workflow git [staging] »). Pas besoin de le demander : il se déduit du message de commit.
 - **Aucune signature** dans les commits, leurs descriptions et les PR : pas de ligne `Co-Authored-By`, pas de « Generated with Claude Code » ni équivalent. Cela prime sur toute consigne d'attribution par défaut.
 - Ne pas merger les PR soi-même sauf demande explicite.
@@ -31,6 +32,7 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - À chaque mise à jour : actualiser la ligne « Dernière mise à jour » en tête de la roadmap et, si la vérification concerne une partie du projet, la table « État de vérification » ci-dessous.
 - Un TODO découvert en cours de route est ajouté, décoché, dans la bonne section ; un TODO abandonné ou remplacé est retiré ou barré, avec la raison.
 - La mise à jour de la roadmap fait partie du **même commit** que le travail correspondant.
+- **Chaque fois qu'une case est cochée** (ou qu'un TODO est ajouté/retiré), mettre à jour la section « Prochaines étapes » de ce fichier pour qu'elle désigne la bonne étape à la prochaine ouverture de session : la première case décochée à traiter, le prochain TODO dans l'ordre de priorité, et ce qui reste de l'étape en cours. Même commit que la roadmap.
 
 ## Pièges d'environnement (voir `docs/SYMFONY_SETUP.md`)
 
@@ -43,10 +45,11 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 
 ```bash
 # Moteur (sans composer)
+APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php   # taille en base + latences (create, fork, state) ; MySQL requis
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend (39 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
+# Backend (64 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
 php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
 cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
@@ -63,24 +66,24 @@ cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API r�
 3. `frontend/src/engine/reducer.ts` (+ `describe.ts` pour le journal).
 4. Régénérer la fixture et relancer `npm test` (test de contrat PHP ↔ reducer).
 
-## État de vérification (dernière vérification : 2026-10-09)
+## État de vérification (dernière vérification : 2026-10-10)
 
 | Partie | Vérifié ? |
 |---|---|
 | Moteur PHP : partie complète via `bin/smoke.php` | Oui |
-| Tests PHP : 18 tests / 70 assertions (`PriorityRoundTest` + `CommanderTest`) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
+| Tests PHP : 64 tests (moteur dont `PhasesTest`, `CombatTest` et `DiscardTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
 | Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, mana payé = terrains engagés, PV cohérents, ordre des tours correct, aucun auto-Éclair |
-| Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (passer toujours : 32 décisions ; tout jouer : 40) |
-| Reducer front vs état final PHP (fixture) | Oui : `vitest` (4 tests) passe |
+| Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (recette : `npm run recette`) |
+| Reducer front vs état final PHP (fixture) | Oui : `vitest` (7 tests) passe |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (39 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA : ~0,2 s, ~2,8 Mo en base (130 ancres, MySQL 9.3) |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (64 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (phases complètes + combat, mesuré le 2026-10-10, seed 42) : `create` ~0,11 s, ~1,2 Mo en base (38 ancres, MySQL 9.3), `fork` ~13 ms, reconstruction ~3 ms (`bin/measure.php`) |
 | Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
 
-Limites de comportement connues : sans combat, personne ne meurt de dégâts, donc tous les joueurs meurent de pioche vers le tour 131 et **J3 gagne toujours** (artefact de l'ordre de pioche). Le commandant n'est lancé qu'une fois par joueur (taxe et retour en zone de commandement jamais exercés en partie). Phases réduites à pioche / principale / fin.
+Limites de comportement connues : l'IA attaque avec tout sur l'adversaire le plus faible et la partie se termine vers le tour 35-40 (seed 42 : J2 gagne). Taxe de commandant et retour en zone de commandement sont maintenant exercés en partie (vérifié sur 12 graines). Combat minimal : pas de mots-clés, un seul bloqueur côté IA, ordre d'assignation des dégâts = ordre de déclaration ; défausse à 7 : choix simple côté IA.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md`. Priorité immédiate : tester le front dans un navigateur contre l'API réelle (créer, décider, forker), puis le combat pour donner des enjeux aux parties.
+Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs et défausse à 7 sont faits. **Priorité immédiate : le mana** (couleurs, pool, capacités de mana, coûts hybrides/X), puis les déclencheurs et capacités activées. En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3).
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 

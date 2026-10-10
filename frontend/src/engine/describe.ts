@@ -1,6 +1,6 @@
 import type { GameEvent } from '../types/engine'
 
-const phaseLabel: Record<string, string> = { draw: 'Pioche', main: 'Principale', end: 'Fin de tour' }
+import { phaseLabel } from './phases'
 
 const target = (t: string): string =>
   t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`
@@ -14,7 +14,7 @@ export function describeEvent(e: GameEvent): string {
     case 'CardDrawn':
       return `J${p.player} pioche ${p.card.name}`
     case 'PhaseChanged':
-      return `Tour ${p.turn} — J${p.activePlayer} — ${phaseLabel[p.phase] ?? p.phase}`
+      return `Tour ${p.turn} — J${p.activePlayer} — ${phaseLabel(p.phase)}`
     case 'PermanentsUntapped':
       return `J${p.player} dégage ses permanents`
     case 'PriorityGranted':
@@ -35,7 +35,19 @@ export function describeEvent(e: GameEvent): string {
     case 'SpellFizzled':
       return 'Le sort n\'a plus de cible valide'
     case 'DamageDealt':
-      return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)`
+      return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)${p.commanderDamage ? ` — dégâts de commandant : ${p.commanderDamage.total}/21` : ''}`
+    case 'CardDiscarded':
+      return `J${p.player} défausse ${p.card.name} (main : ${p.hand})`
+    case 'AttackerDeclared':
+      return `J${p.player} attaque J${p.defender} avec ${p.card}`
+    case 'BlockerDeclared':
+      return `J${p.player} bloque ${p.attacker} avec ${p.blocker}`
+    case 'CreatureDamaged':
+      return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
+    case 'CreatureDied':
+      return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'CombatEnded':
+      return 'Fin du combat'
     case 'PlayerLost':
       return `J${p.player} est éliminé (${p.reason})`
     case 'GameOver':

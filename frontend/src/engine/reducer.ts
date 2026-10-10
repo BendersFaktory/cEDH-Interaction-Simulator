@@ -56,6 +56,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
           command: (pl.command ?? []).map(board),
           lost: false,
           controller: pl.controller,
+          commanderDamage: {},
         } satisfies PlayerView
       }
       break
@@ -125,8 +126,47 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'DamageDealt': {
       const id = Number(String(p.target).replace('player:', ''))
       v.players[id].life = p.life
+      if (p.commanderDamage) v.players[id].commanderDamage[p.commanderDamage.key] = p.commanderDamage.total
       break
     }
+
+    case 'CardDiscarded': {
+      const pl = v.players[p.player]
+      removeCard(pl.hand, p.card.id)
+      zoneOf(pl, p.destination).push(board(p.card))
+      break
+    }
+
+    case 'AttackerDeclared': {
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) {
+        c.tapped = p.tapped
+        c.attacking = p.defender
+      }
+      break
+    }
+
+    case 'BlockerDeclared': {
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.blocker)
+      if (c) c.blocking = p.attacker
+      break
+    }
+
+    case 'CreatureDied': {
+      const pl = v.players[p.player]
+      removeCard(pl.battlefield, p.card.id)
+      zoneOf(pl, p.destination).push(board(p.card))
+      break
+    }
+
+    case 'CombatEnded':
+      for (const pl of Object.values(v.players)) {
+        for (const c of pl.battlefield) {
+          delete c.attacking
+          delete c.blocking
+        }
+      }
+      break
 
     case 'PlayerLost':
       v.players[p.player].lost = true
@@ -137,7 +177,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.winner = p.winner
       break
 
-    // 'SpellFizzled' et autres : pas d'effet sur l'état affiché.
+    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled' et autres : pas d'effet sur l'état affiché.
   }
 
   return v

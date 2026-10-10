@@ -7,6 +7,8 @@ namespace App\Engine\Game;
 use App\Engine\Action\Action;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Decision\DecisionRequired;
+use App\Engine\Rules\CombatManager;
+use App\Engine\Rules\HandSizeManager;
 use App\Engine\Rules\LegalActionGenerator;
 use App\Engine\Rules\PriorityManager;
 use App\Engine\Rules\StackResolver;
@@ -26,6 +28,8 @@ final class GameEngine
 
     private readonly TurnManager $turns;
     private readonly PriorityManager $priority;
+    private readonly CombatManager $combat;
+    private readonly HandSizeManager $handSize;
 
     public function __construct(
         AgentRegistry $agents,
@@ -33,10 +37,13 @@ final class GameEngine
         ?LegalActionGenerator $legal = null,
     ) {
         $sba = new StateBasedActions();
-        $this->turns = new TurnManager($sba);
+        $legal ??= new LegalActionGenerator();
+        $this->combat = new CombatManager($agents, $legal);
+        $this->handSize = new HandSizeManager($agents, $legal);
+        $this->turns = new TurnManager($sba, $this->combat);
         $this->priority = new PriorityManager(
             $agents,
-            $legal ?? new LegalActionGenerator(),
+            $legal,
             $sba,
             new StackResolver(),
             new TriggerManager(),
@@ -56,7 +63,18 @@ final class GameEngine
                 if (!$s->stepStarted) {
                     $this->turns->beginStep($s);
                 }
-                $this->priority->runRound($s, $injected);
+                if ($s->phase->hasPriority()) {
+                    if ($s->combat->declaring !== null) {
+                        $this->combat->runDeclaration($s, $injected);
+                    }
+                    // Aucun attaquant déclaré : l'étape n'ouvre pas de ronde de priorité.
+                    if (!($s->phase === Phase::DeclareAttackers && $s->combat->attackers === [])) {
+                        $this->priority->runRound($s, $injected);
+                    }
+                }
+                if ($s->phase === Phase::Cleanup) {
+                    $this->handSize->run($s, $injected);
+                }
                 if ($s->over) {
                     break;
                 }

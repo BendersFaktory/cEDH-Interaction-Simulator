@@ -230,6 +230,6 @@ final class PriorityRoundTest extends TestCase
 
         $this->assertNotNull($result->pending);
         $this->assertSame(1, $result->pending->player);
-        $this->assertGreaterThan($at, $result->pending->eventSeq - 1);
+        $this->assertGreaterThanOrEqual($at, $result->pending->eventSeq);
     }
 }

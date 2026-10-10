@@ -10,6 +10,8 @@ final class PlayerState
     public const COMMANDER_TAX = 2;
     /** Un joueur ayant subi 21 dégâts d'un même commandant est éliminé. */
     public const COMMANDER_DAMAGE_LIMIT = 21;
+    /** Taille de main maximale à la fin du tour (défausse au cleanup). */
+    public const MAX_HAND_SIZE = 7;
 
     public bool $lost = false;
 
@@ -68,6 +70,19 @@ final class PlayerState
         foreach ($this->hand as $i => $card) {
             if ($card->id === $cardId) {
                 array_splice($this->hand, $i, 1);
+
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
+    public function takeFromBattlefield(string $cardId): ?CardInstance
+    {
+        foreach ($this->battlefield as $i => $card) {
+            if ($card->id === $cardId) {
+                array_splice($this->battlefield, $i, 1);
 
                 return $card;
             }

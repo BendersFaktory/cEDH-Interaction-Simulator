@@ -6,11 +6,17 @@ namespace App\Engine\Rules;
 
 use App\Engine\Action\Action;
 use App\Engine\Action\CastSpell;
+use App\Engine\Action\Discard;
+use App\Engine\Action\DeclareAttacker;
+use App\Engine\Action\DeclareBlocker;
+use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
+use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
+use App\Engine\Game\PlayerState;
 
 /**
  * Calcule les actions légales d'un joueur À CET INSTANT (état du GameState fait foi).
@@ -22,10 +28,19 @@ final class LegalActionGenerator
     /** @return list<Action> */
     public function for(GameState $s, int $playerId): array
     {
+        if ($s->combat->declaring !== null) {
+            return $this->declarationActions($s, $playerId);
+        }
+
+        if ($s->phase === Phase::Cleanup && $playerId === $s->activePlayer
+            && count($s->player($playerId)->hand) > PlayerState::MAX_HAND_SIZE) {
+            return $this->discardActions($s, $playerId);
+        }
+
         $p = $s->player($playerId);
         $actions = [new PassPriority($playerId)];
 
-        $sorcerySpeed = $playerId === $s->activePlayer && $s->phase === Phase::Main && $s->stack === [];
+        $sorcerySpeed = $playerId === $s->activePlayer && $s->phase->isMain() && $s->stack === [];
 
         // Terrain : action spéciale, une par tour, timing sorcery.
         if ($sorcerySpeed && $s->landsPlayed < 1) {
@@ -59,6 +74,119 @@ final class LegalActionGenerator
         }
 
         return $actions;
+    }
+
+    /**
+     * Défausse obligatoire (main > 7 au cleanup) : une action par nom de carte, pas de « passer ».
+     *
+     * @return list<Action>
+     */
+    private function discardActions(GameState $s, int $playerId): array
+    {
+        $actions = [];
+        $seen = [];
+        foreach ($s->player($playerId)->hand as $card) {
+            if (!isset($seen[$card->name])) {
+                $seen[$card->name] = true;
+                $actions[] = new Discard($playerId, $card->id);
+            }
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Pendant une déclaration (attaquants ou bloqueurs) : un choix par action, puis FinishDeclaration.
+     * Seul le déclarant courant a des choix ; la liste est recalculée après chaque déclaration.
+     *
+     * @return list<Action>
+     */
+    private function declarationActions(GameState $s, int $playerId): array
+    {
+        $choices = $s->combat->declaring === 'attackers' ? $this->attackActions($s, $playerId) : $this->blockActions($s, $playerId);
+
+        return [...$choices, new FinishDeclaration($playerId)];
+    }
+
+    /**
+     * Attaquants possibles du joueur actif : créature non engagée, arrivée avant ce tour (mal d'invocation),
+     * pas déjà déclarée, vers chaque adversaire en vie.
+     *
+     * @return list<DeclareAttacker>
+     */
+    public function attackActions(GameState $s, int $playerId): array
+    {
+        if ($playerId !== $s->activePlayer) {
+            return [];
+        }
+        $actions = [];
+        foreach ($s->player($playerId)->battlefield as $card) {
+            if (!$card->isCreature() || $card->tapped || $card->enteredTurn >= $s->turn || isset($s->combat->attackers[$card->id])) {
+                continue;
+            }
+            foreach ($s->alivePlayerIds() as $defender) {
+                if ($defender !== $playerId) {
+                    $actions[] = new DeclareAttacker($playerId, $card->id, $defender);
+                }
+            }
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Bloqueurs possibles : créature non engagée du défenseur, qui ne bloque pas déjà, sur un attaquant qui le vise.
+     *
+     * @return list<DeclareBlocker>
+     */
+    public function blockActions(GameState $s, int $playerId): array
+    {
+        $attackers = [];
+        foreach ($s->combat->attackers as $attackerId => $defender) {
+            if ($defender === $playerId && $this->onBattlefield($s, $s->activePlayer, $attackerId)) {
+                $attackers[] = $attackerId;
+            }
+        }
+        $actions = [];
+        foreach ($s->player($playerId)->battlefield as $card) {
+            if (!$card->isCreature() || $card->tapped || $s->combat->isBlocking($card->id)) {
+                continue;
+            }
+            foreach ($attackers as $attackerId) {
+                $actions[] = new DeclareBlocker($playerId, $card->id, $attackerId);
+            }
+        }
+
+        return $actions;
+    }
+
+    private function onBattlefield(GameState $s, int $playerId, string $cardId): bool
+    {
+        foreach ($s->player($playerId)->battlefield as $card) {
+            if ($card->id === $cardId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Retrouve, parmi les actions légales, celle que $injected désigne (jamais de confiance au client).
+     *
+     * @param list<Action> $legal
+     */
+    public function match(Action $injected, int $holder, array $legal): Action
+    {
+        if ($injected->player() === $holder) {
+            foreach ($legal as $candidate) {
+                if ($candidate->id() === $injected->id()) {
+                    return $candidate;
+                }
+            }
+        }
+
+        throw new IllegalActionException(sprintf('Action illégale pour le joueur %d : %s', $holder, $injected->id()));
     }
 
     /** @return list<list<string>> */
