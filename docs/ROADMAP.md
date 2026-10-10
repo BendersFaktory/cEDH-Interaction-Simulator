@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (README général + guide d'installation `docs/INSTALL.md`). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (TODO regroupés par section ; Mana terminé). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -17,22 +17,17 @@
 - [x] **Phases complètes** : untap, upkeep, pioche, main 1, début/fin de combat, main 2, fin, cleanup ; untap et cleanup sans priorité. *(Vérifié le 2026-10-10 : `smoke.php 42` déterministe (9861 événements, 1 terrain/tour, ordre des étapes correct), PHPUnit 45 tests dont `PhasesTest` (6) et `StateReconstructorTest` inchangé, `vue-tsc` + vitest, `npm run recette` sans problème.)*
   - [x] Étapes déclaration d'attaquants / bloqueurs / dégâts (entre `BeginCombat` et `EndCombat`) : faites avec le combat, sautées sans attaquant.
   - [x] Défausse à 7 cartes au cleanup (décision hors priorité du joueur actif, `Discard` / `CardDiscarded`, `HandSizeManager`). *(Vérifié le 2026-10-10 : PHPUnit 63 tests dont `DiscardTest` (7), `smoke.php 42` déterministe, une défausse observée sur les graines 6, 16 et 22 ; `vue-tsc` + vitest 7 tests ; `npm run recette` sans problème. La partie seed 42 ne comporte aucune défausse : le reducer est couvert par un test dédié.)*
-  - [ ] Choix de défausse de l'IA plus fin (garder les contresorts, mana) : §3.
   - [x] Mesurer à nouveau taille en base / latence (`docs/SYMFONY_SETUP.md`). *(Vérifié le 2026-10-10 : `php backend/bin/measure.php` (graines 42, 6, 16) + `curl` ; seed 42 : 3294 événements, 38 ancres, 1,2 Mo en base, `create` ~0,11 s, `fork` ~13 ms, reconstruction ~3 ms, N = 1 conservé. L'hypothèse « ~2× plus d'événements » est fausse : les parties sont plus courtes avec le combat.)*
   - [x] Le tour 1 pioche : règle Commander exacte (CR 103.8, multijoueur : personne ne saute la pioche). *(Vérifié le 2026-10-10 : `PhasesTest::testEveryPlayerDrawsOnTheirFirstTurn`, PHPUnit 64 tests, `smoke.php 42` inchangé : 3294 événements.)*
 - [x] **Combat à 4 joueurs** : déclarer attaquants (vers un joueur précis) et bloqueurs = décisions séquentielles pour `human` ; force/endurance, mal d'invocation, `CombatManager` + `CombatResolver`, mort des créatures (SBA), commandant mort → zone de commandement. *(Vérifié le 2026-10-10 : `smoke.php 42` déterministe (3294 événements, partie finie au tour 38, 28 morts de créatures), 12 graines : commandants morts, relances avec taxe, 2 éliminations par `commander_damage` ; PHPUnit 56 tests dont `CombatTest` (11) ; `StateReconstructorTest` vert avec pauses humaines pendant déclaration ; `vue-tsc` + vitest 6 tests ; `npm run recette` : J0 déclare une attaque (scénario 8).)*
-  - [ ] IA d'attaque / blocage fine (menace, ne pas envoyer le commandant au casse-pipe, blocage multiple) : §3.
   - [ ] Mots-clés (vol, initiative, piétinement, célérité...) et ordre d'assignation des dégâts choisi par l'attaquant.
-  - [ ] Stops configurables : `human:auto` s'arrête à chaque déclaration possible (§4).
   - [x] Mesurer taille en base / latence avec le combat. *(Couvert par la même mesure, 2026-10-10 : voir ci-dessus et `docs/SYMFONY_SETUP.md`.)*
 - [x] **Mana** : couleurs, pool, capacités de mana (ne passent pas par la pile), coûts hybrides/X. *(Vérifié le 2026-10-10 : PHPUnit 78 tests dont `ManaPaymentTest` (10) et `ManaCastTest` (4), `smoke.php 42` déterministe (3642 événements), audit de 7 graines : 0 paiement incohérent sur 305 sorts (couleurs payées, `tapped` = coût, Fireball/hybrides/contresorts joués) ; `vitest` 10 tests, `vue-tsc` + `vite build`, `npm run recette` sans problème ; mesures refaites (`create` ~0,15 s, reconstruction 5-15 ms, ancres 1,28 Mo). Auto-paiement par `ManaPayment`, terrains de base seulement.)*
   - [x] Mana de capacités non-terrain (rituels, Sol Ring), terrains multicolores/non-basiques, actions de mana manuelles. *(Vérifié le 2026-10-10 : PHPUnit 99 tests dont `AbilityTest` (11) et `ManaPaymentTest` (20) ; `smoke.php 42` déterministe (3805 événements) ; audit de 7 graines : 348 sorts, 0 paiement incohérent (couleurs, montant), 77 capacités activées toutes résolues, 7 rituels résolus, aucun mana manuel de l'IA ; `vitest` 17 tests, `vue-tsc` + `vite build` ; `npm run recette` (scénario 9 : J0 engage une terre à la main, la réserve s'affiche). Capacité de mana = capacité activée avec `isManaAbility`, résolue immédiatement sans pile.)*
   - [x] Choix de paiement par l'humain (quels terrains engager) : activer ses sources à la main, la réserve est dépensée avant tout nouvel engagement. *(Vérifié : `AbilityTest::testManualManaIsSpentBeforeUntappedLands`, recette scénario 9.)*
-  - [ ] Capacités de mana avec coût de mana (Signets), mana conditionnel/Treasure, créatures à mana (mal d'invocation géré mais non exercé) : avec « Capacités activées ».
-  - [ ] IA : ne pas gaspiller le surplus de mana (Sol Ring pour un coût impair : 17 mana perdus sur 348 sorts, 7 graines).
-  - [ ] IA : garder de quoi contrer, jouer dans le bon ordre (§3).
 - [ ] **Déclencheurs** : file d'attente dans `GameState`, ordre APNAP, ciblage, `TriggerManager`.
 - [x] **Capacités activées** : socle. `ActivatedAbility` (coût `{T}`/mana, effet `mana` ou `damage`, `isManaAbility`), action `ActivateAbility`, `AbilityManager` (mana : résolution immédiate ; autre : pile, `AbilityActivated`/`AbilityResolved`), contresort qui ne cible que des sorts. *(Vérifié le 2026-10-10 : voir ci-dessus ; Prodigal Pinger activé et résolu via la pile par l'IA.)*
+  - [ ] Capacités de mana avec coût de mana (Signets), mana conditionnel/Treasure, créatures à mana (mal d'invocation géré mais non exercé).
   - [ ] Coûts d'activation riches (mana + `{T}`, sacrifice, défausse), capacités à effets variés (pioche, jeton, bonus), restriction de timing (rapidité de rituel), créatures à capacité `{T}` exercées en jeu.
 - [ ] **Actions basées sur l'état** : ~~créatures létales~~ (faites avec le combat), légendes, jetons...
 - [x] Format **Commander à 4** (tranché) : 40 PV, zone de commandement, taxe de commandant, retour en zone de commandement, seuil de 21 dégâts de commandant (SBA).
@@ -44,24 +39,32 @@
 - [ ] `CardDefinition` + `Ability` à la place des flags `damage`/`counter` de `CardInstance`.
 - [ ] Un handler PHP par carte **ou** un DSL JSON/YAML pour les effets courants (dégâts, pioche, jeton, déclencheur d'entrée) + handlers pour les cas particuliers. Ne pas interpréter le texte Oracle automatiquement.
 - [ ] `DeckLoader` : import d'une decklist, métadonnées + images via Scryfall, cache local en base (respecter les limites de l'API).
-- [ ] Afficher les images dans `CardView`.
+  - [ ] **Connecteur Scryfall** : interroger Scryfall à la demande au lieu d'héberger toute la base de cartes.
+    - Récupération groupée avant la partie via `POST /cards/collection` (75 cartes max par requête : 4 decks de 100 ≈ 6 requêtes espacées de 100 ms, < 1 s ; moins après déduplication des terrains de base et des cartes communes).
+    - Cache en base des seules cartes utilisées (métadonnées + URL d'images, rafraîchi au plus toutes les 24 h) : un processus PHP ne garde rien entre deux requêtes.
+    - Respect des limites (~10 req/s, en-têtes `User-Agent` / `Accept` requis) ; fonctionnement dégradé si Scryfall est indisponible.
+    - Le moteur reste sans I/O : les données de cartes lui sont injectées avant la partie.
+- [ ] Afficher les arts des cartes dans `CardView` via Scryfall : URL d'images fournies par le connecteur, chargement paresseux, cache navigateur, image de repli si absente.
 
 ## 3. IA
 
 - [ ] Évaluateur de menace (ne pas contrer n'importe quoi).
 - [ ] Gestion du mana (garder de quoi contrer, jouer dans le bon ordre).
-- [ ] Choix d'attaque/blocage.
+  - [ ] IA : ne pas gaspiller le surplus de mana (Sol Ring pour un coût impair : 17 mana perdus sur 348 sorts, 7 graines).
+- [ ] Choix d'attaque / blocage fin (menace, ne pas envoyer le commandant au casse-pipe, blocage multiple).
+- [ ] Choix de défausse plus fin (garder les contresorts, le mana).
 - [ ] Plusieurs profils d'agents (`ai:aggro`, `ai:control`...) sélectionnables par joueur.
 
 ## 4. Fork & UX
 
 - [ ] **Stops configurables** pour `human:auto` (par phase, par type de sort adverse) au lieu de « dès qu'une action existe ».
+  - [ ] S'arrêter à chaque déclaration d'attaquants / bloqueurs possible.
 - [ ] `TargetPicker` : choisir la cible en cliquant sur le plateau plutôt qu'une action par cible.
 - [ ] `BranchTree` : arbre des branches pour naviguer entre scénarios et les comparer.
 - [ ] Rendre la main à l'IA depuis une branche (bouton « reprendre la simulation automatique »).
 - [ ] Raccourcis clavier pour le replay.
 
-## 5. Technique
+## 5. Backend
 
 - [x] Colonnes `json_text` (LONGTEXT) + insertions par lots (`BulkInserter`) : création d'une partie 4 IA de ~1,9 s à ~0,7 s (MySQL).
 - [x] **Checkpoints épars + re-simulation déterministe** *(vérifié le 2026-10-09 : 39 tests PHPUnit verts, `schema:validate` OK, `npm run recette` sans problème ; 897 → 130 lignes, 28,5 → 2,6 Mo, `POST` ~0,68 → ~0,2 s, `fork` ~20-25 ms, mesures dans `docs/SYMFONY_SETUP.md`)* :
@@ -77,8 +80,12 @@
   - *Risques restants* : une évolution du format de `GameState` invalide les ancres anciennes (versionner l'état) ; en dev, recréer les parties créées avant cette migration.
 - [ ] Exécution asynchrone des grosses simulations (Symfony Messenger) + progression.
 - [ ] Tests de propriété sur le moteur : invariants (nombre total de cartes constant, pile vide en fin d'étape, déterminisme sur N seeds).
-- [ ] CI : phpunit + phpstan + `vue-tsc` + `vitest`.
-- [ ] Vérifier que la fixture du front est régénérée en CI (le test de contrat doit casser si le format d'événements dérive).
+- [ ] CI backend : phpunit + phpstan.
+- [ ] Couverture de code PHPUnit : rapport + seuil minimal en CI.
+- [ ] phpstan sur `src/` (niveau à fixer).
+- [ ] Versionner le format de `GameState` dans les ancres (une évolution du format invalide les ancres anciennes).
+- [ ] Montées de version : PHPUnit 12, Symfony 8 quand Doctrine sera compatible (`var-exporter` 8), MySQL.
+- [ ] `composer audit` et dépendances à jour.
 
 ### Acquis d'environnement (faits et vérifiés le 2026-10-09)
 
@@ -87,3 +94,43 @@
 - [x] Base MySQL 9.3 à la place de SQLite (mot de passe dans `.env.local` / `.env.test.local`, non versionnés).
 - [x] Workflow Git `dev` → `staging` (PR à chaque commit), `master` réservée à l'utilisateur.
 - [x] README général (sans tâches restantes) + guide d'installation `docs/INSTALL.md` (2026-10-10 : suivi pas à pas vérifié — migration, `POST` 201 sur :8000, proxy Vite :5173 → 200, 99 tests PHP, 17 tests Vitest, build).
+
+## 6. Frontend
+
+### Technique
+
+- [ ] CI front : `vue-tsc` + `vitest` + `vite build`.
+- [ ] Vérifier que la fixture du front est régénérée en CI (le test de contrat doit casser si le format d'événements dérive).
+- [ ] Couverture Vitest + tests de composants (Vue Test Utils).
+- [ ] ESLint + Prettier.
+- [ ] Montées de version : Vite 5, Vitest 2 et Pinia 2 vers les versions actuelles ; `npm audit`.
+
+### Plateau
+
+- [ ] **Pile repositionnée au-dessus des joueurs** (centre du plateau, toujours visible ; aujourd'hui `StackPanel` est sous la grille des joueurs dans `GameBoard.vue`).
+- [ ] 4 sièges disposés autour d'une table, siège humain en bas.
+- [ ] Zones distinctes par joueur : terrains / créatures / autres permanents, main, cimetière, exil, zone de commandement.
+- [ ] Cartes engagées pivotées.
+- [ ] PV, dégâts de commandant et réserve de mana bien visibles ; indicateurs joueur actif / priorité / a passé plus marqués.
+
+### Cartes (affichage)
+
+- [ ] Rendu lisible : symboles de mana, type, force/endurance, cadre coloré.
+- [ ] Aperçu agrandi au survol.
+- [ ] Mise en évidence des cartes jouables (d'après les actions légales envoyées par le serveur).
+
+### Ergonomie
+
+- [ ] Actions au clic sur la carte (menu) en plus de la liste.
+- [ ] Confirmation avant de passer quand la pile n'est pas vide.
+- [ ] Frise du tour : phases et checkpoints cliquables.
+- [ ] Vitesse de lecture réglable.
+- [ ] Journal filtrable (joueur, type) et cliquable pour sauter à l'événement.
+
+### Graphisme
+
+- [ ] Animations (pioche, pile, résolution, dégâts, mort), désactivables.
+- [ ] Notifications (ex. « J2 contre ton sort »).
+- [ ] Thème clair / sombre.
+- [ ] Responsive (petits écrans).
+- [ ] Accessibilité : contraste, navigation clavier, libellés.
