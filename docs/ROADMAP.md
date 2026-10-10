@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (Signets : capacités de mana à coût de mana ; créatures à mana exercées ; mana conditionnel reporté après les déclencheurs). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (Treasure : jetons, sacrifice comme coût ; Signets ; créatures à mana ; mana conditionnel reporté après les déclencheurs). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -30,7 +30,7 @@
 - [x] **Capacités activées** : socle. `ActivatedAbility` (coût `{T}`/mana, effet `mana` ou `damage`, `isManaAbility`), action `ActivateAbility`, `AbilityManager` (mana : résolution immédiate ; autre : pile, `AbilityActivated`/`AbilityResolved`), contresort qui ne cible que des sorts. *(Vérifié le 2026-10-10 : voir ci-dessus ; Prodigal Pinger activé et résolu via la pile par l'IA.)*
   - [x] Créatures à mana (Llanowar Elves) : mal d'invocation respecté par les actions **et** par l'auto-paiement (`AbilityManager::sourceReady`, partagé avec `ManaPayment`). *(Vérifié le 2026-10-10 : PHPUnit 101 tests dont 2 nouveaux dans `AbilityTest` ; `smoke.php 42` déterministe (deux exécutions identiques, 3805 événements) ; audit de 7 graines : 10 elfes résolues, 17 engagements pour payer, 0 pendant le mal d'invocation, 0 attaque ; `vitest` 17 tests, `vue-tsc` + `vite build`.)*
   - [x] Capacités de mana avec coût de mana (Signets) : paiement manuel (coût payé par les autres sources, jamais par le Signet lui-même) et auto-paiement (« convertisseurs » de `ManaPayment`, au plus 3, sans chaînage Signet → Signet ; utilisés seulement s'ils font strictement mieux). *(Vérifié le 2026-10-10 : PHPUnit 107 tests dont 5 nouveaux dans `ManaPaymentTest` et 1 dans `AbilityTest` ; `smoke.php 42` déterministe (deux exécutions identiques, 3457 événements, test d'API mis à jour) ; audit de 7 graines : 316 sorts, 0 paiement incohérent (mana dépensé = coût + 1 par Signet, couleurs couvertes), 11 Signets résolus, 24 utilisations par l'auto-paiement ; `vitest` 17 tests, `vue-tsc` + `vite build`.)*
-  - [ ] Treasure : jetons, sacrifice comme coût, sort qui crée un Treasure.
+  - [x] Treasure : jetons (`CardInstance::token`, `sendToGraveyard` → `none`), sacrifice de la source comme coût (`GameState::sacrifice()`, `PermanentSacrificed`), sort Strike It Rich (`TokenCreated`) ; l'auto-paiement ne sacrifie qu'en dernier recours (critère « sacrifices » avant « engagements »). *(Vérifié le 2026-10-10 : PHPUnit 110 tests dont 3 nouveaux dans `AbilityTest` ; `smoke.php 42` déterministe (deux exécutions identiques, 3655 événements, test d'API mis à jour) ; audit de 7 graines : 351 sorts, 0 paiement incohérent, 17 Treasures créés = 13 sacrifiés + 4 en jeu en fin de partie, 0 jeton dans une autre zone ; `vitest` 19 tests (fixture avec Treasures), `vue-tsc` + `vite build` ; `npm run recette` sans problème inattendu.)*
   - [ ] Coûts d'activation riches (mana + `{T}`, sacrifice, défausse), capacités à effets variés (pioche, jeton, bonus), restriction de timing (rapidité de rituel), créatures à capacité `{T}` exercées en jeu.
 - [ ] **Actions basées sur l'état** : ~~créatures létales~~ (faites avec le combat), légendes, jetons...
 - [x] Format **Commander à 4** (tranché) : 40 PV, zone de commandement, taxe de commandant, retour en zone de commandement, seuil de 21 dégâts de commandant (SBA).
@@ -87,6 +87,7 @@
 - [ ] Couverture de code PHPUnit : rapport + seuil minimal en CI.
 - [ ] phpstan sur `src/` (niveau à fixer).
 - [ ] Versionner le format de `GameState` dans les ancres (une évolution du format invalide les ancres anciennes).
+- [ ] Mémoire des états : `CardInstance::toArray()` est à 16 clés ; une clé de plus double la table PHP (mesuré : pic de `smoke.php 42` de 93 à 156 Mo, `token` est donc omis quand il est faux). Avant d'ajouter des champs (bonus de force/endurance...), regrouper les clés rares ou omettre les valeurs par défaut.
 - [ ] Montées de version : PHPUnit 12, Symfony 8 quand Doctrine sera compatible (`var-exporter` 8), MySQL.
 - [ ] `composer audit` et dépendances à jour.
 

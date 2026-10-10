@@ -150,4 +150,16 @@ describe('reducer — capacités et réserve de mana', () => {
     applyEvent(v, ev(4, 'SpellResolved', { stackId: 's9', controller: 1, card: pinger, destination: 'battlefield' }))
     expect(v.players[1].battlefield.map((c) => c.id)).toEqual(['a1'])
   })
+
+  it('TokenCreated pose le jeton ; PermanentSacrificed le fait disparaître (destination none), une carte va au cimetière', () => {
+    const v = start()
+    const treasure = { id: 'p0_t1', name: 'Treasure', kind: 'artifact' as const, cost: 0, effect: null, amount: 0, token: true }
+    applyEvent(v, ev(4, 'TokenCreated', { player: 0, card: treasure }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1', 'p0_t1'])
+    applyEvent(v, ev(5, 'PermanentSacrificed', { player: 0, card: treasure, destination: 'none' }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1'])
+    expect(v.players[0].graveyard).toEqual([])
+    applyEvent(v, ev(6, 'PermanentSacrificed', { player: 0, card: pinger, destination: 'graveyard' }))
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
+  })
 })

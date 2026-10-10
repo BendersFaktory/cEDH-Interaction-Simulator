@@ -11,6 +11,8 @@ export interface AbilityView {
   /** Pour un effet de mana : alternatives produites (ex. ['CC'] ou ['R', 'G']). */
   options?: string[]
   amount?: number
+  /** Coût : sacrifier la source (Treasure). */
+  sacrifice?: boolean
 }
 
 export interface PublicCard {
@@ -30,6 +32,8 @@ export interface PublicCard {
   abilities?: AbilityView[]
   /** Mana ajouté par un rituel (effet 'mana'). */
   adds?: string[] | string
+  /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
+  token?: boolean
 }
 
 export interface BoardCard extends PublicCard {

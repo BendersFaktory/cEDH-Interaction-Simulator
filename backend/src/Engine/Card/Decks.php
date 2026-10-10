@@ -62,6 +62,10 @@ final class Decks
             for ($i = 0; $i < 2; $i++) {
                 $library[] = $make('Rite of Flame', CardInstance::INSTANT, 1, 'mana', 0, false, 0, 0, '{R}', [], [], '{R}{R}');
             }
+            // Strike It Rich : rituel qui crée un jeton Treasure ({T}, sacrifier : un mana de la couleur de son choix).
+            for ($i = 0; $i < 2; $i++) {
+                $library[] = $make('Strike It Rich', CardInstance::SORCERY, 1, 'treasure', 0, false, 0, 0, '{R}');
+            }
             // Boule de feu : X dégâts, X choisi au lancement (montant 0 = résolu à partir de X).
             for ($i = 0; $i < 2; $i++) {
                 $library[] = $make('Fireball', CardInstance::INSTANT, 1, 'damage', 0, false, 0, 0, '{X}{R}');

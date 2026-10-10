@@ -164,7 +164,7 @@ final class PriorityManager
             $card = $p->takeFromCommand($a->cardId);
             $fromCommand = true;
         }
-        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool] = $p->payWithPlan($plan);
+        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice] = $p->payWithPlan($plan);
         if ($fromCommand) {
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
@@ -186,6 +186,7 @@ final class PriorityManager
             'pool' => $p->pool->toArray(),
             'fromCommand' => $fromCommand,
         ]);
+        $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût
 
         // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
         $s->priority->passed = [];

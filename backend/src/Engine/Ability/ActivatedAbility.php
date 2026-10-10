@@ -14,7 +14,7 @@ use App\Engine\Mana\ManaCost;
  *
  * Effets : `mana` (ajoute au pool : `options` = alternatives, chacune = ce que produit UN engagement) ou `damage`
  * (`amount` dégâts à un joueur ciblé).
- * Coût : `tap` ({T}) et/ou `manaCost`. Une capacité de mana à coût de mana (Signet) paie ce coût avec les AUTRES sources ;
+ * Coût : `tap` ({T}), `manaCost` et/ou `sacrifice` (sacrifier la source, ex. Treasure : `GameState::sacrifice()`). Une capacité de mana à coût de mana (Signet) paie ce coût avec les AUTRES sources ;
  * l'auto-paiement la traite en « convertisseur » (`ManaPayment`).
  *
  * Forme sérialisée (`toArray`) : les options sont des chaînes `{R}{R}` ; seules les lettres WUBRGC sont écrites.
@@ -31,6 +31,7 @@ final class ActivatedAbility
         public readonly ?ManaCost $manaCost = null,
         public readonly array $options = [],
         public readonly int $amount = 0,
+        public readonly bool $sacrifice = false,
     ) {
     }
 
@@ -41,6 +42,12 @@ final class ActivatedAbility
     public static function mana(string $spec, ?string $cost = null): self
     {
         return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), array_map(self::parseOption(...), explode('|', $spec)));
+    }
+
+    /** Treasure : `{T}, sacrifier : un mana de la couleur de son choix`. */
+    public static function treasure(): self
+    {
+        return new self(true, 'mana', true, null, array_map(self::parseOption(...), ['{W}', '{U}', '{B}', '{R}', '{G}']), 0, true);
     }
 
     /** `{T}: $amount dégâts à un joueur` (capacité non-mana, passe par la pile). */
@@ -71,10 +78,14 @@ final class ActivatedAbility
         return $out;
     }
 
-    /** Libellé court, ex. `{T} : {R}`, `{1}, {T} : {U}{R}` ou `{T} : 1 dégât`. */
+    /** Libellé court, ex. `{T} : {R}`, `{1}, {T} : {U}{R}`, `{T}, sacrifier : {G}` ou `{T} : 1 dégât`. */
     public function label(int $option = 0): string
     {
-        $cost = implode(', ', array_filter([$this->manaCost !== null ? (string) $this->manaCost : '', $this->tap ? '{T}' : ''], static fn (string $p) => $p !== ''));
+        $cost = implode(', ', array_filter([
+            $this->manaCost !== null ? (string) $this->manaCost : '',
+            $this->tap ? '{T}' : '',
+            $this->sacrifice ? 'sacrifier' : '',
+        ], static fn (string $p) => $p !== ''));
         if ($this->effect === 'mana') {
             $gain = implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? []));
 
@@ -96,6 +107,7 @@ final class ActivatedAbility
                 $this->options,
             ),
             'amount' => $this->amount,
+            'sacrifice' => $this->sacrifice,
         ];
     }
 
@@ -108,6 +120,7 @@ final class ActivatedAbility
             isset($d['manaCost']) ? ManaCost::parse($d['manaCost']) : null,
             array_map(self::parseOption(...), $d['options'] ?? []),
             (int) ($d['amount'] ?? 0),
+            (bool) ($d['sacrifice'] ?? false),
         );
     }
 }

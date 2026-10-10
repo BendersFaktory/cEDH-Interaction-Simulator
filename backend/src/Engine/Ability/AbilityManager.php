@@ -67,9 +67,13 @@ final class AbilityManager
             }
             // Coût de mana (Signet) : payé par les autres sources avant l'activation ; elles sont journalisées dans `tapped`.
             $payers = [];
+            $sacrifice = [];
             if ($ability->manaCost !== null) {
                 $plan = self::costPlan($s, $p, $card, $ability) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
-                $payers = $p->payWithPlan($plan)['tapped'];
+                ['tapped' => $payers, 'sacrifice' => $sacrifice] = $p->payWithPlan($plan);
+            }
+            if ($ability->sacrifice) {
+                $sacrifice[] = $card->id; // Treasure : sacrifié une fois le mana produit
             }
             $mana = $p->activateManaSource($card, $ability, $a->option);
             $s->emit('ManaAbilityActivated', [
@@ -82,14 +86,16 @@ final class AbilityManager
                 'tapped' => [...($ability->tap ? [$card->id] : []), ...$payers],
                 'pool' => $p->pool->toArray(),
             ], verbose: true);
+            $s->sacrifice($a->player(), $sacrifice);
 
             return; // résolue sur-le-champ : la pile et les passes ne sont pas touchées
         }
 
         $tapped = [];
+        $sacrifice = [];
         if ($ability->manaCost !== null) {
             $plan = self::costPlan($s, $p, $card, $ability) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
-            $tapped = $p->payWithPlan($plan)['tapped'];
+            ['tapped' => $tapped, 'sacrifice' => $sacrifice] = $p->payWithPlan($plan);
         }
         if ($ability->tap) {
             $card->tapped = true;
@@ -107,6 +113,7 @@ final class AbilityManager
             'targets' => $a->targets,
             'tapped' => $tapped,
         ]);
+        $s->sacrifice($a->player(), $sacrifice);
 
         $s->priority->passed = [];
         $s->priority->announced = false; // l'activateur reçoit la priorité en premier

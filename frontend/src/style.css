@@ -58,6 +58,8 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .card.creature { border-color: #d08a4e; }
 .card.commander { box-shadow: 0 0 0 1px var(--warn) inset; }
 .card.tapped { transform: rotate(8deg); opacity: .55; }
+.card.token { border-style: dashed; }
+.card-token { margin-left: 5px; font-size: .75em; font-style: italic; opacity: .8; }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) { --mana-W: #d9cf8f; --mana-U: #3b8ad1; --mana-B: #8a7d9a; --mana-R: #d9573a; --mana-G: #3f9a4b; --mana-C: #aeb2bd; --mana-N: #8a91a2; }
 }

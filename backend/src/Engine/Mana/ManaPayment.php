@@ -26,7 +26,7 @@ use App\Engine\Game\PlayerState;
  *  3. Backtracking sur les permanents simples (ordre du champ de bataille) pour couvrir le besoin résiduel.
  *
  * Critère (lexicographique, plus petit = mieux) : plus de réserve dépensée, moins de mana gaspillé (produit non dépensé),
- * moins d'engagements (convertisseurs compris), moins de sources à plusieurs alternatives engagées, puis ordre du champ de
+ * moins de sacrifices (un Treasure ne sert qu'en dernier recours), moins d'engagements (convertisseurs compris), moins de sources à plusieurs alternatives engagées, puis ordre du champ de
  * bataille / WUBRGC / masque d'hybrides (le premier trouvé gagne : un convertisseur n'est utilisé que s'il fait strictement
  * mieux). Élagage par bornes ; au plus NODE_LIMIT nœuds explorés par appel, au-delà on renvoie le meilleur plan trouvé (ou null).
  */
@@ -122,7 +122,7 @@ final class ManaPayment
                         continue;
                     }
                     $first = $ability->options[$oi][0]->symbol();
-                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first]];
+                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice ? 1 : 0];
                     if ($withCost) {
                         $choice['cost'] = $ability->manaCost;
                         $choice['costTotal'] = $ability->manaCost->manaValue();
@@ -263,7 +263,7 @@ final class ManaPayment
                 }
 
                 $waste = $found['waste'] + array_sum($outLeft);
-                $key = [-$poolUsed, $waste, $found['taps'] + count($combo), $found['multi'], $mask];
+                $key = [-$poolUsed, $waste, $found['sac'], $found['taps'] + count($combo), $found['multi'], $mask];
                 if ($best === null || self::less($key, $best['key'])) {
                     $best = ['key' => $key, 'plan' => self::build($found['picks'], $residual, $g, $poolSpend, $combo, $outSpend, $restColored)];
                 }
@@ -279,13 +279,13 @@ final class ManaPayment
     /**
      * Meilleure couverture de `$residual` (colorés) + `$generic` par des engagements.
      *
-     * @return array{waste: int, taps: int, multi: int, picks: list<array{card: string, ability: int, option: int, prod: array<string,int>}>}|null
+     * @return array{waste: int, sac: int, taps: int, multi: int, picks: list<array{card: string, ability: int, option: int, prod: array<string,int>}>}|null
      */
     private static function cover(array $sources, array $residual, int $generic, array &$state): ?array
     {
         $need = array_sum($residual) + $generic;
         if ($need === 0) {
-            return ['waste' => 0, 'taps' => 0, 'multi' => 0, 'picks' => []];
+            return ['waste' => 0, 'sac' => 0, 'taps' => 0, 'multi' => 0, 'picks' => []];
         }
 
         $n = count($sources);
@@ -312,7 +312,7 @@ final class ManaPayment
         $picks = [];
         $have = [];
 
-        $search = function (int $i, int $total, int $multi) use (&$search, &$best, &$picks, &$have, &$state, $sources, $residual, $need, $n, $sufTotal, $sufMax, $sufColor): void {
+        $search = function (int $i, int $total, int $multi, int $sac) use (&$search, &$best, &$picks, &$have, &$state, $sources, $residual, $need, $n, $sufTotal, $sufMax, $sufColor): void {
             if ($state['nodes']++ >= self::NODE_LIMIT) {
                 return;
             }
@@ -330,9 +330,9 @@ final class ManaPayment
             $taps = count($picks);
 
             if ($totalDeficit === 0) {
-                $key = [$total - $need, $taps, $multi];
+                $key = [$total - $need, $sac, $taps, $multi];
                 if ($best === null || self::less($key, $best['key'])) {
-                    $best = ['key' => $key, 'waste' => $total - $need, 'taps' => $taps, 'multi' => $multi, 'picks' => $picks];
+                    $best = ['key' => $key, 'waste' => $total - $need, 'sac' => $sac, 'taps' => $taps, 'multi' => $multi, 'picks' => $picks];
                 }
 
                 return;
@@ -341,7 +341,7 @@ final class ManaPayment
                 return;
             }
             if ($best !== null) {
-                $lb = [max($total, $need) - $need, $taps + intdiv($totalDeficit + $sufMax[$i] - 1, $sufMax[$i]), $multi];
+                $lb = [max($total, $need) - $need, $sac, $taps + intdiv($totalDeficit + $sufMax[$i] - 1, $sufMax[$i]), $multi];
                 if (!self::less($lb, $best['key'])) {
                     return;
                 }
@@ -353,15 +353,15 @@ final class ManaPayment
                 foreach ($c['prod'] as $s => $v) {
                     $have[$s] = ($have[$s] ?? 0) + $v;
                 }
-                $search($i + 1, $total + $c['total'], $multi + ($src['multi'] ? 1 : 0));
+                $search($i + 1, $total + $c['total'], $multi + ($src['multi'] ? 1 : 0), $sac + $c['sac']);
                 foreach ($c['prod'] as $s => $v) {
                     $have[$s] -= $v;
                 }
                 array_pop($picks);
             }
-            $search($i + 1, $total, $multi);
+            $search($i + 1, $total, $multi, $sac);
         };
-        $search(0, 0, 0);
+        $search(0, 0, 0, 0);
 
         return $best;
     }

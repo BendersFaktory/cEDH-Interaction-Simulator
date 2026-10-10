@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Event\GameEvent;
 
 /**
@@ -21,6 +22,7 @@ final class GameState
     public array $stack = [];
     public int $landsPlayed = 0;
     public int $nextStackId = 1;
+    public int $nextTokenId = 1;
     public int $eventSeq = 0;
     public bool $over = false;
     public ?int $winner = null;
@@ -128,10 +130,14 @@ final class GameState
 
     /**
      * Envoie une carte au cimetière de son propriétaire, SAUF un commandant qui retourne en zone de commandement
-     * (règle de remplacement de Commander). Retourne la destination réelle : 'graveyard' | 'command'.
+     * (règle de remplacement de Commander) et un jeton qui cesse d'exister (règle 111.7).
+     * Retourne la destination réelle : 'graveyard' | 'command' | 'none'.
      */
     public function sendToGraveyard(int $ownerId, CardInstance $card): string
     {
+        if ($card->token) {
+            return 'none';
+        }
         if ($card->commander) {
             $this->player($ownerId)->command[] = $card;
 
@@ -140,6 +146,37 @@ final class GameState
         $this->player($ownerId)->graveyard[] = $card;
 
         return 'graveyard';
+    }
+
+    /**
+     * Sacrifie des permanents du joueur (coût déjà payé : ex. Treasure engagé par `payWithPlan`) : champ de bataille ->
+     * cimetière via `sendToGraveyard()`, un événement `PermanentSacrificed` par permanent. Seul chemin du sacrifice.
+     *
+     * @param list<string> $cardIds
+     */
+    public function sacrifice(int $playerId, array $cardIds): void
+    {
+        $p = $this->player($playerId);
+        foreach ($cardIds as $id) {
+            $card = $p->takeFromBattlefield($id) ?? throw new \DomainException("Permanent à sacrifier introuvable : $id");
+            $card->tapped = false;
+            $destination = $this->sendToGraveyard($playerId, $card);
+            $this->emit('PermanentSacrificed', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination]);
+        }
+    }
+
+    /** Crée un jeton Treasure sur le champ de bataille du joueur (`TokenCreated`). */
+    public function createTreasure(int $playerId): CardInstance
+    {
+        $token = new CardInstance(
+            sprintf('p%d_t%d', $playerId, $this->nextTokenId++), 'Treasure', CardInstance::ARTIFACT,
+            abilities: [ActivatedAbility::treasure()], token: true,
+        );
+        $token->enteredTurn = $this->turn;
+        $this->player($playerId)->battlefield[] = $token;
+        $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()]);
+
+        return $token;
     }
 
     public function toArray(): array
@@ -154,6 +191,7 @@ final class GameState
             'stack' => array_map(static fn (StackItem $i) => $i->toArray(), $this->stack),
             'landsPlayed' => $this->landsPlayed,
             'nextStackId' => $this->nextStackId,
+            'nextTokenId' => $this->nextTokenId,
             'eventSeq' => $this->eventSeq,
             'over' => $this->over,
             'winner' => $this->winner,
@@ -185,6 +223,7 @@ final class GameState
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];
+        $s->nextTokenId = (int) ($d['nextTokenId'] ?? 1);
         $s->eventSeq = (int) $d['eventSeq'];
         $s->over = (bool) $d['over'];
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];

@@ -22,12 +22,15 @@ export function initialView(): GameView {
 
 const board = (card: PublicCard): BoardCard => ({ ...card, tapped: false })
 
-function zoneOf(pl: PlayerView, destination: string): BoardCard[] {
+/** Zone d'arrivée ; `null` pour 'none' (un jeton qui quitte le champ de bataille cesse d'exister). */
+function zoneOf(pl: PlayerView, destination: string): BoardCard[] | null {
   switch (destination) {
     case 'battlefield':
       return pl.battlefield
     case 'command':
       return pl.command
+    case 'none':
+      return null
     default:
       return pl.graveyard
   }
@@ -147,14 +150,14 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
     case 'SpellResolved': {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
-      zoneOf(v.players[p.controller], p.destination).push(board(p.card))
+      zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
       break
     }
 
     case 'SpellCountered': {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
       // Un commandant contré retourne en zone de commandement (règle de remplacement).
-      zoneOf(v.players[p.controller], p.destination).push(board(p.card))
+      zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
       break
     }
 
@@ -168,7 +171,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'CardDiscarded': {
       const pl = v.players[p.player]
       removeCard(pl.hand, p.card.id)
-      zoneOf(pl, p.destination).push(board(p.card))
+      zoneOf(pl, p.destination)?.push(board(p.card))
       break
     }
 
@@ -190,7 +193,18 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'CreatureDied': {
       const pl = v.players[p.player]
       removeCard(pl.battlefield, p.card.id)
-      zoneOf(pl, p.destination).push(board(p.card))
+      zoneOf(pl, p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'TokenCreated':
+      v.players[p.player].battlefield.push(board(p.card))
+      break
+
+    case 'PermanentSacrificed': {
+      const pl = v.players[p.player]
+      removeCard(pl.battlefield, p.card.id)
+      zoneOf(pl, p.destination)?.push(board(p.card))
       break
     }
 

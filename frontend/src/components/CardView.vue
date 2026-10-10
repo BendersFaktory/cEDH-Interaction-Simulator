@@ -8,7 +8,7 @@ const props = defineProps<{ card: BoardCard; compact?: boolean }>()
 const symbols = computed(() => (props.card.manaCost ? [...props.card.manaCost.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]) : []))
 const symbolClass = (s: string) => (s.includes('/') ? 'hybrid' : /^[WUBRGC]$/.test(s) ? `m-${s}` : 'm-n')
 const abilityText = (a: NonNullable<BoardCard['abilities']>[number]): string => {
-  const cost = [a.manaCost, a.tap ? '{T}' : ''].filter(Boolean).join('')
+  const cost = [a.manaCost, a.tap ? '{T}' : '', a.sacrifice ? 'sacrifier' : ''].filter(Boolean).join(', ')
   const what = a.isManaAbility ? (a.options ?? []).join(' | ') : `${a.effect}${a.amount !== undefined ? ` ${a.amount}` : ''}`
   return `${cost} : ${what}`
 }
@@ -17,8 +17,9 @@ const landColor = computed(() => (props.card.kind === 'land' && props.card.produ
 </script>
 
 <template>
-  <div class="card" :class="[card.kind, { tapped: card.tapped, [`land-${landColor}`]: landColor, compact, commander: card.commander, attacking: card.attacking !== undefined, blocking: card.blocking !== undefined }]" :title="`${card.name} — coût ${card.cost}${card.kind === 'creature' ? ` — ${card.power}/${card.toughness}` : ''}${abilitiesTitle ? ` — ${abilitiesTitle}` : ''}`">
+  <div class="card" :class="[card.kind, { tapped: card.tapped, [`land-${landColor}`]: landColor, compact, commander: card.commander, token: card.token, attacking: card.attacking !== undefined, blocking: card.blocking !== undefined }]" :title="`${card.name} — coût ${card.cost}${card.kind === 'creature' ? ` — ${card.power}/${card.toughness}` : ''}${abilitiesTitle ? ` — ${abilitiesTitle}` : ''}`">
     <span class="card-name">{{ card.name }}</span>
+    <span v-if="card.token" class="card-token">jeton</span>
     <span v-if="card.kind === 'land' && card.produces?.length" class="mana-sym" :class="landColor ? `m-${landColor}` : 'hybrid'">{{ card.produces.join('') }}</span>
     <span v-if="symbols.length" class="card-mana"><span v-for="(s, i) in symbols" :key="i" class="mana-sym" :class="symbolClass(s)">{{ s }}</span></span>
     <span v-else-if="card.cost > 0" class="card-cost">{{ card.cost }}</span>

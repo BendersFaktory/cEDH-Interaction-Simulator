@@ -26,7 +26,7 @@ final class CardInstance
         public readonly string $name,
         public readonly string $kind,
         public readonly int $cost = 0,
-        public readonly ?string $effect = null, // 'damage' | 'counter' | null
+        public readonly ?string $effect = null, // 'damage' | 'counter' | 'mana' | 'treasure' | null
         public readonly int $amount = 0,
         public bool $tapped = false,
         public readonly bool $commander = false,
@@ -40,6 +40,7 @@ final class CardInstance
         /** @var list<ActivatedAbility> capacités activées déclarées (les terrains reçoivent les leurs de `produces`, voir abilities()) */
         public readonly array $abilities = [],
         public readonly ?string $adds = null, // mana ajouté à la résolution d'un sort `effect 'mana'` (rituel), ex. `{R}{R}`
+        public readonly bool $token = false, // jeton : cesse d'exister en quittant le champ de bataille
     ) {
     }
 
@@ -115,7 +116,7 @@ final class CardInstance
             'commander' => $this->commander,
             'power' => $this->power,
             'toughness' => $this->toughness,
-        ];
+        ] + ($this->token ? ['token' => true] : []); // omis si faux : au-delà de 16 clés, PHP double la table (+75 % de mémoire par état)
     }
 
     public function toArray(): array
@@ -142,6 +143,7 @@ final class CardInstance
             $d['produces'] ?? [],
             array_map([ActivatedAbility::class, 'fromArray'], $d['abilities'] ?? []),
             $d['adds'] ?? null,
+            (bool) ($d['token'] ?? false),
         );
     }
 }
