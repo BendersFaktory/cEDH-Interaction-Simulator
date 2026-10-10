@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-10 (README général + guide d'installation `docs/INSTALL.md`). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-10 (sections Backend / Frontend, priorité : finir le mana). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -61,7 +61,7 @@
 - [ ] Rendre la main à l'IA depuis une branche (bouton « reprendre la simulation automatique »).
 - [ ] Raccourcis clavier pour le replay.
 
-## 5. Technique
+## 5. Backend
 
 - [x] Colonnes `json_text` (LONGTEXT) + insertions par lots (`BulkInserter`) : création d'une partie 4 IA de ~1,9 s à ~0,7 s (MySQL).
 - [x] **Checkpoints épars + re-simulation déterministe** *(vérifié le 2026-10-09 : 39 tests PHPUnit verts, `schema:validate` OK, `npm run recette` sans problème ; 897 → 130 lignes, 28,5 → 2,6 Mo, `POST` ~0,68 → ~0,2 s, `fork` ~20-25 ms, mesures dans `docs/SYMFONY_SETUP.md`)* :
@@ -77,8 +77,17 @@
   - *Risques restants* : une évolution du format de `GameState` invalide les ancres anciennes (versionner l'état) ; en dev, recréer les parties créées avant cette migration.
 - [ ] Exécution asynchrone des grosses simulations (Symfony Messenger) + progression.
 - [ ] Tests de propriété sur le moteur : invariants (nombre total de cartes constant, pile vide en fin d'étape, déterminisme sur N seeds).
-- [ ] CI : phpunit + phpstan + `vue-tsc` + `vitest`.
-- [ ] Vérifier que la fixture du front est régénérée en CI (le test de contrat doit casser si le format d'événements dérive).
+- [ ] CI backend : phpunit + phpstan.
+- [ ] Couverture de code PHPUnit : rapport + seuil minimal en CI.
+- [ ] phpstan sur `src/` (niveau à fixer).
+- [ ] Versionner le format de `GameState` dans les ancres (une évolution du format invalide les ancres anciennes).
+- [ ] Montées de version : PHPUnit 12, Symfony 8 quand Doctrine sera compatible (`var-exporter` 8), MySQL.
+- [ ] `composer audit` et dépendances à jour.
+- [ ] **Connecteur Scryfall** (socle technique du `DeckLoader` de §2) : interroger Scryfall à la demande au lieu d'héberger toute la base de cartes.
+  - Récupération groupée avant la partie via `POST /cards/collection` (75 cartes max par requête : 4 decks de 100 ≈ 6 requêtes espacées de 100 ms, < 1 s ; moins après déduplication des terrains de base et des cartes communes).
+  - Cache en base des seules cartes utilisées (métadonnées + URL d'images, rafraîchi au plus toutes les 24 h) : un processus PHP ne garde rien entre deux requêtes.
+  - Respect des limites (~10 req/s, en-têtes `User-Agent` / `Accept` requis) ; fonctionnement dégradé si Scryfall est indisponible.
+  - Le moteur reste sans I/O : les données de cartes lui sont injectées avant la partie.
 
 ### Acquis d'environnement (faits et vérifiés le 2026-10-09)
 
@@ -87,3 +96,44 @@
 - [x] Base MySQL 9.3 à la place de SQLite (mot de passe dans `.env.local` / `.env.test.local`, non versionnés).
 - [x] Workflow Git `dev` → `staging` (PR à chaque commit), `master` réservée à l'utilisateur.
 - [x] README général (sans tâches restantes) + guide d'installation `docs/INSTALL.md` (2026-10-10 : suivi pas à pas vérifié — migration, `POST` 201 sur :8000, proxy Vite :5173 → 200, 99 tests PHP, 17 tests Vitest, build).
+
+## 6. Frontend
+
+### Technique
+
+- [ ] CI front : `vue-tsc` + `vitest` + `vite build`.
+- [ ] Vérifier que la fixture du front est régénérée en CI (le test de contrat doit casser si le format d'événements dérive).
+- [ ] Couverture Vitest + tests de composants (Vue Test Utils).
+- [ ] ESLint + Prettier.
+- [ ] Montées de version : Vite 5, Vitest 2 et Pinia 2 vers les versions actuelles ; `npm audit`.
+
+### Plateau
+
+- [ ] **Pile repositionnée au-dessus des joueurs** (centre du plateau, toujours visible ; aujourd'hui `StackPanel` est sous la grille des joueurs dans `GameBoard.vue`).
+- [ ] 4 sièges disposés autour d'une table, siège humain en bas.
+- [ ] Zones distinctes par joueur : terrains / créatures / autres permanents, main, cimetière, exil, zone de commandement.
+- [ ] Cartes engagées pivotées.
+- [ ] PV, dégâts de commandant et réserve de mana bien visibles ; indicateurs joueur actif / priorité / a passé plus marqués.
+
+### Cartes (affichage)
+
+- [ ] **Arts des cartes via Scryfall** : URL d'images fournies par le connecteur backend (§5), chargement paresseux, cache navigateur, image de repli si absente.
+- [ ] Rendu lisible : symboles de mana, type, force/endurance, cadre coloré.
+- [ ] Aperçu agrandi au survol.
+- [ ] Mise en évidence des cartes jouables (d'après les actions légales envoyées par le serveur).
+
+### Ergonomie
+
+- [ ] Actions au clic sur la carte (menu) en plus de la liste.
+- [ ] Confirmation avant de passer quand la pile n'est pas vide.
+- [ ] Frise du tour : phases et checkpoints cliquables.
+- [ ] Vitesse de lecture réglable.
+- [ ] Journal filtrable (joueur, type) et cliquable pour sauter à l'événement.
+
+### Graphisme
+
+- [ ] Animations (pioche, pile, résolution, dégâts, mort), désactivables.
+- [ ] Notifications (ex. « J2 contre ton sort »).
+- [ ] Thème clair / sombre.
+- [ ] Responsive (petits écrans).
+- [ ] Accessibilité : contraste, navigation clavier, libellés.

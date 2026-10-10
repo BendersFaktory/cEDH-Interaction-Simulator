@@ -84,7 +84,7 @@ Limites de comportement connues : l'IA attaque avec tout sur l'adversaire le plu
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs, défausse à 7, mana (couleurs, hybrides, X, auto-paiement, sources non-terrain, duals, mana manuel) et socle des capacités activées sont faits. **Priorité immédiate : les déclencheurs** (file d'attente, ordre APNAP, ciblage), puis les restes des capacités activées (coûts d'activation riches, Signets, mana conditionnel). En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3) ; IA : gestion du surplus de mana (§3).
+Voir `docs/ROADMAP.md`. Phases complètes, combat à 4 joueurs, défausse à 7, mana (couleurs, hybrides, X, auto-paiement, sources non-terrain, duals, mana manuel) et socle des capacités activées sont faits. **Priorité immédiate : finir entièrement « Mana » (§1) et ses sous-tâches décochées**, dans l'ordre : (1) capacités de mana avec coût de mana (Signets), mana conditionnel / Treasure, créatures à mana exercées en jeu ; (2) IA : ne pas gaspiller le surplus de mana ; (3) IA : garder de quoi contrer, jouer dans le bon ordre. Ensuite : les déclencheurs (file d'attente, ordre APNAP, ciblage), puis les restes des capacités activées (coûts d'activation riches). En parallèle : restes du combat (IA d'attaque/blocage fine §3, stops configurables §4, mots-clés), choix de défausse de l'IA (§3) ; front : pile au-dessus des joueurs puis refonte du plateau (§6) ; technique : CI, couverture, connecteur Scryfall (§5).
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 
