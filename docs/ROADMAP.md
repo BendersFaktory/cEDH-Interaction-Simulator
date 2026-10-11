@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-11 (triggers terminés : recette avec choix de cible, mesures refaites ; TODO cibles partiellement invalides ajouté). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-11 (pile repositionnée au-dessus des joueurs ; mana conditionnel en cours). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -121,7 +121,7 @@
 
 ### Plateau
 
-- [ ] **Pile repositionnée au-dessus des joueurs** (centre du plateau, toujours visible ; aujourd'hui `StackPanel` est sous la grille des joueurs dans `GameBoard.vue`).
+- [x] **Pile repositionnée au-dessus des joueurs** (entre l'en-tête et la grille dans `GameBoard.vue`, centrée ; collée en haut au défilement quand elle n'est pas vide, une ligne « Pile vide » sinon ; dessus de la pile mis en évidence). *(Vérifié le 2026-10-11 : `vue-tsc --noEmit`, vitest 24 tests, `vite build` ; captures Chrome d'une pile de 3 éléments avant et après défilement ; `npm run recette` sans problème inattendu, capture du scénario 11 contrôlée : la pile vide ne recouvre plus les joueurs.)*
 - [ ] 4 sièges disposés autour d'une table, siège humain en bas.
 - [ ] Zones distinctes par joueur : terrains / créatures / autres permanents, main, cimetière, exil, zone de commandement.
 - [ ] Cartes engagées pivotées.
