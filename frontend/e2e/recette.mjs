@@ -129,6 +129,9 @@ async function run() {
   let attacked = false, sawBlock = false
   for (let i = 0; i < 400 && !attacked; i++) {
     if (!(await page.locator('.actions').count())) break
+    // Les boutons sont désactivés pendant une décision en vol (store.loading) : on attend qu'ils soient réactivés
+    // avant de les chercher, sans avaler l'erreur si l'état reste bloqué.
+    await page.waitForFunction(() => !document.querySelector('.actions button:disabled'), null, { timeout: TIMEOUT })
     const order = ['Défausser', 'Attaquer', 'Bloquer', 'Terrains', 'Sorts', 'Terminer la déclaration', 'Priorité']
     for (const title of order) {
       // Sorts : on ne lance que des créatures (le Bolt/Contresort ne servent pas ce scénario).
