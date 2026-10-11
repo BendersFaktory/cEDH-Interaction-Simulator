@@ -59,15 +59,6 @@ final class ActivatedAbility
         return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), array_map(self::parseOption(...), explode('|', $spec)));
     }
 
-    /**
-     * `{T}: ajoute …` ; `$spec` = alternatives séparées par `|`, ex. `{C}{C}` ou `{R}|{G}`. `$cost` = coût de mana en plus du
-     * `{T}` (Signet : `{1}`).
-     */
-    public static function mana(string $spec, ?string $cost = null): self
-    {
-        return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), array_map(self::parseOption(...), explode('|', $spec)));
-    }
-
     /** Treasure : `{T}, sacrifier : un mana de la couleur de son choix`. */
     public static function treasure(): self
     {
