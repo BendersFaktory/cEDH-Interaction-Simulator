@@ -4,7 +4,7 @@ import type { StackItemView } from '../types/engine'
 defineProps<{ stack: StackItemView[] }>()
 
 const abilityLabel = (item: StackItemView): string => {
-  if (item.trigger) return `Déclencheur : ${item.label ?? item.trigger.effect}`
+  if (item.trigger) return `Trigger : ${item.label ?? item.trigger.effect}`
   const a = item.ability
   if (!a) return ''
   return a.effect === 'damage' && a.amount !== undefined ? `Capacité : ${a.amount} dégât${a.amount > 1 ? 's' : ''}` : `Capacité (${a.effect})`

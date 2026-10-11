@@ -18,7 +18,7 @@ use App\Engine\Rules\StackResolver;
 use App\Engine\Rules\StateBasedActions;
 use PHPUnit\Framework\TestCase;
 
-/** Détection des capacités déclenchées : mise en file à l'entrée en jeu, à la mort et au début de l'entretien. */
+/** Détection des triggers : mise en file à l'entrée en jeu, à la mort et au début de l'entretien. */
 final class TriggerQueueTest extends TestCase
 {
     private const AI = [0 => 'ai:pass', 1 => 'ai:pass', 2 => 'ai:pass', 3 => 'ai:pass'];

@@ -14,7 +14,7 @@ Vue (reducer, store)  ──HTTP──►  SimulationController
                                   ├── HandSizeManager    défausse à 7 au cleanup (décision hors priorité)
                                   ├── StackResolver      résolution du sommet de pile
                                   ├── StateBasedActions  vérifiées avant chaque octroi de priorité
-                                  ├── TriggerManager     (stub) déclencheurs, ordre APNAP
+                                  ├── TriggerManager     triggers, ordre APNAP
                                   ├── LegalActionGenerator
                                   └── AgentRegistry → AutoPassAgent | HeuristicAgent | HumanAgent
 ```
@@ -31,7 +31,7 @@ Fait avancer la partie jusqu'à sa fin **ou** jusqu'à ce qu'un `HumanAgent` doi
 
 À chaque tour de boucle :
 
-1. Si la priorité du détenteur n'a pas été « annoncée », ou si des déclencheurs attendent : actions basées sur l'état → déclencheurs sur la pile (voir ci-dessous) → réparation du détenteur s'il a été éliminé → événement `PriorityGranted` → **checkpoint** si c'est un début de ronde (personne n'a encore passé) ou si la pile n'est pas vide.
+1. Si la priorité du détenteur n'a pas été « annoncée », ou si des triggers attendent : actions basées sur l'état → triggers sur la pile (voir ci-dessous) → réparation du détenteur s'il a été éliminé → événement `PriorityGranted` → **checkpoint** si c'est un début de ronde (personne n'a encore passé) ou si la pile n'est pas vide.
 2. Les actions légales du détenteur sont calculées ; son agent décide (ou la décision injectée est validée).
 3. Selon l'action :
    - **Passer** : ajouté à `passed`. Si tous les joueurs en vie ont passé : pile vide → fin de l'étape ; sinon résolution du sommet, puis nouvelle ronde commençant par le joueur actif. Sinon la priorité passe au joueur suivant.
@@ -40,13 +40,13 @@ Fait avancer la partie jusqu'à sa fin **ou** jusqu'à ce qu'un `HumanAgent` doi
 
 `PriorityState::$announced` évite de ré-émettre `PriorityGranted` quand une simulation suspendue est reprise : c'est ce qui rend la reprise identique à une exécution continue.
 
-## Capacités déclenchées
+## Triggers
 
 - **Détection explicite**, jamais par lecture du journal : `GameState::enterBattlefield()` (seul chemin d'entrée en jeu : sort résolu, terrain joué, jeton créé) met en file les `etb` ; la mort par SBA et `GameState::sacrifice()` d'une créature (jeton compris) les `dies` ; `TurnManager::beginStep` à l'entretien les `upkeep` des permanents du joueur actif.
-- **File sérialisée** `GameState::$pendingTriggers` (`PendingTrigger` : contrôleur, copie de la source, rang du déclencheur). La source est une copie : information de dernière connaissance pour une créature morte, et aucun état partagé avec le champ de bataille (sinon un état reconstruit depuis une ancre divergerait). Même règle pour la source d'une capacité activée sur la pile.
-- **Mise sur la pile** (`TriggerManager`, avant chaque `PriorityGranted`) : APNAP — le joueur actif pose tous les siens, puis chaque joueur dans le sens du tour. Choix d'ordre ou de cible = décision hors priorité, comme la défausse : le contrôleur occupe `priority->holder`, l'ancien détenteur est gardé dans `triggerResumeHolder` et retrouve la priorité ensuite, passes remises à zéro. Un seul choix possible : posé sans décision. Les déclencheurs d'un joueur éliminé disparaissent.
-- **Résolution** : `StackResolver` traite un déclencheur comme une capacité activée (mêmes effets : `damage`, `draw`, `token`). Un contresort ne le cible pas.
-- Pas encore : déclencheurs pendant le cleanup (règle 514.3a), autres événements (attaque, fin de tour, sort lancé).
+- **File sérialisée** `GameState::$pendingTriggers` (`PendingTrigger` : contrôleur, copie de la source, rang du trigger). La source est une copie : information de dernière connaissance pour une créature morte, et aucun état partagé avec le champ de bataille (sinon un état reconstruit depuis une ancre divergerait). Même règle pour la source d'une capacité activée sur la pile.
+- **Mise sur la pile** (`TriggerManager`, avant chaque `PriorityGranted`) : APNAP — le joueur actif pose tous les siens, puis chaque joueur dans le sens du tour. Choix d'ordre ou de cible = décision hors priorité, comme la défausse : le contrôleur occupe `priority->holder`, l'ancien détenteur est gardé dans `triggerResumeHolder` et retrouve la priorité ensuite, passes remises à zéro. Un seul choix possible : posé sans décision. Les triggers d'un joueur éliminé disparaissent.
+- **Résolution** : `StackResolver` traite un trigger comme une capacité activée (mêmes effets : `damage`, `draw`, `token`). Un contresort ne le cible pas.
+- Pas encore : triggers pendant le cleanup (règle 514.3a), autres événements (attaque, fin de tour, sort lancé).
 
 ## Suspension et reprise (le joueur humain)
 

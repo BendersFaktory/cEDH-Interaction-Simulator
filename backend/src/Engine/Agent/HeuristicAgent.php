@@ -27,7 +27,7 @@ use App\Engine\Mana\ManaPayment;
  *  2. joue un terrain ;
  *  3. à son tour, en phase principale, pile vide : lance un sort au hasard (jamais sur soi-même) ;
  *  4. sinon passe.
- * Déclencheurs : posés dans l'ordre de la file ; une cible de dégâts est l'adversaire vivant le plus faible.
+ * Triggers : posés dans l'ordre de la file ; une cible de dégâts est l'adversaire vivant le plus faible.
  * Défausse (main > 7) : un terrain en surplus (≥ 5 en jeu), sinon la carte la plus chère, à égalité le plus petit id.
  * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible ; bloque quand le bloqueur survit
  * ou tue l'attaquant (un seul bloqueur par attaquant), et chump-bloque seulement si l'attaque est létale.
@@ -183,7 +183,7 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
-     * Premier déclencheur de la file ; s'il cible, l'adversaire vivant le plus faible (égalité : plus petit id), jamais soi-même
+     * Premier trigger de la file ; s'il cible, l'adversaire vivant le plus faible (égalité : plus petit id), jamais soi-même
      * s'il y a un autre choix.
      *
      * @param list<PutTrigger> $triggers

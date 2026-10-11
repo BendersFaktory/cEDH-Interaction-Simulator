@@ -23,7 +23,7 @@ export interface AbilityView {
   spec?: string
 }
 
-/** Capacité déclenchée d'une carte (forme sérialisée par le moteur). */
+/** Trigger d'une carte (forme sérialisée par le moteur). */
 export interface TriggerView {
   /** `etb` (entrée en jeu), `dies` (mort) ou `upkeep` (début de l'entretien de son contrôleur). */
   event: 'etb' | 'dies' | 'upkeep'
@@ -52,7 +52,7 @@ export interface PublicCard {
   adds?: string[] | string
   /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
   token?: boolean
-  /** Capacités déclenchées (absent = aucune). */
+  /** Triggers (absent = aucun). */
   triggers?: TriggerView[]
 }
 
@@ -86,7 +86,7 @@ export interface ActionView {
   option?: number
   /** Action `ability` : vrai pour une capacité de mana. */
   mana?: boolean
-  /** Action `trigger` : déclencheur en attente à mettre sur la pile. */
+  /** Action `trigger` : trigger en attente à mettre sur la pile. */
   pendingId?: string
 }
 
@@ -98,9 +98,9 @@ export interface StackItemView {
   x?: number
   /** Présent pour une capacité activée (la carte est sa source). */
   ability?: AbilityView
-  /** Présent pour une capacité déclenchée (la carte est sa source, telle qu'au déclenchement). */
+  /** Présent pour un trigger (la carte est sa source, telle qu'au moment du trigger). */
   trigger?: TriggerView
-  /** Libellé du déclencheur, fourni par le moteur. */
+  /** Libellé du trigger, fourni par le moteur. */
   label?: string
 }
 

@@ -12,7 +12,7 @@ const groups = computed(() => {
     { title: 'Bloquer', items: actions.filter((a) => a.type === 'block') },
     { title: 'Terminer la déclaration', items: actions.filter((a) => a.type === 'done') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
-    { title: 'Déclencheurs à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
+    { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },
     { title: 'Capacités', items: actions.filter((a) => a.type === 'ability') },
     { title: 'Sorts', items: actions.filter((a) => a.type === 'cast') },

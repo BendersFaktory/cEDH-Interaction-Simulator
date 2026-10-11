@@ -11,7 +11,7 @@ final class StackItem
 {
     /**
      * Sort (`$ability` et `$trigger` null), capacité activée (la carte reste sur le champ de bataille, ne change pas de
-     * zone) ou capacité déclenchée (`$trigger` ; la source peut avoir quitté le champ de bataille). `$abilityIndex` est le
+     * zone) ou trigger (`$trigger` ; la source peut avoir quitté le champ de bataille). `$abilityIndex` est le
      * rang de la capacité dans `abilities()` ou dans `triggers`.
      *
      * @param list<string> $targets ex: ['player:1'] ou ['stack:s3']
@@ -28,7 +28,7 @@ final class StackItem
     ) {
     }
 
-    /** Capacité (activée ou déclenchée) : un contresort ne la cible pas. */
+    /** Capacité activée ou trigger : un contresort ne la cible pas. */
     public function isAbility(): bool
     {
         return $this->ability !== null || $this->trigger !== null;

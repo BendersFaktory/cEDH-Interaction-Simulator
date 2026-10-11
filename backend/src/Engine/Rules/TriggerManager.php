@@ -13,13 +13,13 @@ use App\Engine\Game\PriorityState;
 use App\Engine\Game\StackItem;
 
 /**
- * Capacités déclenchées. Appelé avant chaque octroi de priorité (après les SBA) : les déclencheurs en attente rejoignent
+ * Triggers. Appelé avant chaque octroi de priorité (après les SBA) : les triggers en attente rejoignent
  * la pile dans l'ordre APNAP (règle 603.3b) — le joueur actif pose tous les siens, puis chaque autre joueur dans le sens
  * du tour ; ceux du joueur actif sont donc en dessous et se résolvent en dernier.
  *
  * Choix d'ordre et de cible : comme la défausse, ce n'est PAS une priorité. Le contrôleur occupe `priority->holder` (le
  * serveur et le rejeu retrouvent l'action via LegalActionGenerator::for) et l'ancien détenteur est gardé dans
- * `GameState::$triggerResumeHolder`. Sans alternative (une seule action possible), le déclencheur est posé sans décision.
+ * `GameState::$triggerResumeHolder`. Sans alternative (une seule action possible), le trigger est posé sans décision.
  */
 final class TriggerManager
 {
@@ -32,18 +32,18 @@ final class TriggerManager
     }
 
     /**
-     * Peut lever DecisionRequired (état intact, repris via $injected). Si au moins un déclencheur a été posé, la priorité
+     * Peut lever DecisionRequired (état intact, repris via $injected). Si au moins un trigger a été posé, la priorité
      * revient au joueur qui allait la recevoir et les passes sont remises à zéro (nouvel objet sur la pile).
      */
     public function putPendingOnStack(GameState $s, ?Action &$injected): void
     {
-        // Les déclencheurs d'un joueur éliminé quittent la partie avec lui (règle 800.4a).
+        // Les triggers d'un joueur éliminé quittent la partie avec lui (règle 800.4a).
         $s->pendingTriggers = array_values(array_filter($s->pendingTriggers, static fn (PendingTrigger $t) => !$s->player($t->controller)->lost));
 
         $put = false;
         for ($i = 0; $s->pendingTriggers !== []; $i++) {
             if ($i > self::MAX_TRIGGERS) {
-                throw new \LogicException('Déclencheurs sans fin (garde-fou).');
+                throw new \LogicException('Triggers sans fin (garde-fou).');
             }
             $controller = $this->nextController($s);
             $legal = $this->legal->triggerActions($s, $controller);
@@ -62,7 +62,7 @@ final class TriggerManager
                     $action = $this->agents->get($s->controllers[$controller])->decide($s, $controller, $legal);
                 }
                 if (!$action instanceof PutTrigger) {
-                    throw new \LogicException('Un déclencheur doit être mis sur la pile : ' . $action::class);
+                    throw new \LogicException('Un trigger doit être mis sur la pile : ' . $action::class);
                 }
             }
 
@@ -79,7 +79,7 @@ final class TriggerManager
         }
     }
 
-    /** Premier joueur, à partir du joueur actif et dans le sens du tour, qui a des déclencheurs en attente. */
+    /** Premier joueur, à partir du joueur actif et dans le sens du tour, qui a des triggers en attente. */
     private function nextController(GameState $s): int
     {
         $ids = array_keys($s->players);
@@ -93,7 +93,7 @@ final class TriggerManager
             }
         }
 
-        throw new \LogicException('Aucun déclencheur en attente.');
+        throw new \LogicException('Aucun trigger en attente.');
     }
 
     private function put(GameState $s, PutTrigger $a): void
@@ -107,7 +107,7 @@ final class TriggerManager
             }
         }
         if ($pending === null) {
-            throw new \LogicException("Déclencheur en attente introuvable : {$a->pendingId}");
+            throw new \LogicException("Trigger en attente introuvable : {$a->pendingId}");
         }
 
         $ability = $pending->ability();

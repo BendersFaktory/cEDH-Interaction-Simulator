@@ -129,7 +129,7 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1'])
   })
 
-  it('AbilityTriggered pose le déclencheur sur la pile (source hors du champ de bataille possible), AbilityResolved le retire', () => {
+  it('AbilityTriggered pose le trigger sur la pile (source hors du champ de bataille possible), AbilityResolved le retire', () => {
     const v = start()
     v.priority.passed = [1, 2]
     const myr = { id: 'm1', name: 'Perilous Myr', type: 'creature' as const, cost: 2, effect: null, amount: 0 }

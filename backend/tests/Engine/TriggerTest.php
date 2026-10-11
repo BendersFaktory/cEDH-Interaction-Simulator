@@ -20,7 +20,7 @@ use App\Engine\Game\Phase;
 use App\Engine\Game\StackItem;
 use PHPUnit\Framework\TestCase;
 
-/** Mise sur la pile des capacités déclenchées (APNAP, choix d'ordre et de cible hors priorité) et résolution. */
+/** Mise sur la pile des triggers (APNAP, choix d'ordre et de cible hors priorité) et résolution. */
 final class TriggerTest extends TestCase
 {
     private const J0_HUMAN = [0 => 'human', 1 => 'ai:pass', 2 => 'ai:pass', 3 => 'ai:pass'];
@@ -123,7 +123,7 @@ final class TriggerTest extends TestCase
         $this->assertSame(0, $r->pending->toArray()['priority']['holder']);
 
         $r = $engine->advance($s, new PassPriority(0));
-        $this->assertSame(['player:0'], array_column(array_column($this->of($r->events, 'DamageDealt'), 'payload'), 'target'), 'le déclencheur de J2 se résout d\'abord');
+        $this->assertSame(['player:0'], array_column(array_column($this->of($r->events, 'DamageDealt'), 'payload'), 'target'), 'le trigger de J2 se résout d\'abord');
     }
 
     public function testControllerOrdersDistinctTriggersAndIdenticalOnesNeedNoChoice(): void
@@ -141,7 +141,7 @@ final class TriggerTest extends TestCase
         $this->assertSame(['Idole B', 'Idole A'], array_map(static fn (StackItem $i) => $i->card->name, $s->stack), 'le premier choisi va en dessous');
         $this->assertSame(0, $r->pending->toArray()['priority']['holder']);
 
-        // Deux déclencheurs identiques : leur ordre est indifférent, aucune décision.
+        // Deux triggers identiques : leur ordre est indifférent, aucune décision.
         $s = (new ScenarioBuilder())->permanent(0, TriggerQueueTest::idol('a'))->permanent(0, TriggerQueueTest::idol('b'))->build(self::J0_HUMAN);
         $s->phase = Phase::Upkeep;
         $s->stepStarted = false;

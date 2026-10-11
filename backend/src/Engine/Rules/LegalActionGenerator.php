@@ -151,7 +151,7 @@ final class LegalActionGenerator
     }
 
     /**
-     * Déclencheurs en attente du joueur : un choix par déclencheur et par cible, pas de « passer ». Deux déclencheurs
+     * Triggers en attente du joueur : un choix par trigger et par cible, pas de « passer ». Deux triggers
      * identiques (même source par le nom, même capacité) ne donnent qu'un seul choix : leur ordre relatif est indifférent.
      *
      * @return list<PutTrigger>

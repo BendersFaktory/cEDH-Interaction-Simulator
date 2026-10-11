@@ -29,7 +29,7 @@ final class TurnManager
             }
         }
 
-        // Déclencheurs « au début de votre entretien » : mis sur la pile avant la première priorité de l'étape.
+        // Triggers « au début de votre entretien » : mis sur la pile avant la première priorité de l'étape.
         if ($s->phase === Phase::Upkeep) {
             foreach ($s->player($s->activePlayer)->battlefield as $card) {
                 $s->queueTriggers($s->activePlayer, $card, TriggeredAbility::UPKEEP);

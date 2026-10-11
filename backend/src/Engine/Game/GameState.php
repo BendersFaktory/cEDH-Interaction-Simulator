@@ -28,10 +28,10 @@ final class GameState
     public bool $over = false;
     public ?int $winner = null;
     public CombatState $combat;
-    /** @var list<PendingTrigger> capacités déclenchées en attente, dans l'ordre de déclenchement (voir TriggerManager) */
+    /** @var list<PendingTrigger> triggers en attente, dans l'ordre où ils surviennent (voir TriggerManager) */
     public array $pendingTriggers = [];
     public int $nextTriggerId = 1;
-    /** Détenteur de priorité à rétablir après un choix de déclencheurs en cours ; null hors de ce choix. */
+    /** Détenteur de priorité à rétablir après un choix de triggers en cours ; null hors de ce choix. */
     public ?int $triggerResumeHolder = null;
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
@@ -199,7 +199,7 @@ final class GameState
 
     /**
      * Seul chemin d'entrée sur le champ de bataille (sort résolu, terrain joué, jeton créé) : note le tour d'arrivée (mal
-     * d'invocation) et met en file les déclencheurs `etb` de la carte. L'appelant journalise.
+     * d'invocation) et met en file les triggers `etb` de la carte. L'appelant journalise.
      */
     public function enterBattlefield(int $playerId, CardInstance $card): void
     {
@@ -209,7 +209,7 @@ final class GameState
     }
 
     /**
-     * Met en file les capacités de `$card` déclenchées par `$event` (`TriggeredAbility::ETB|DIES|UPKEEP`). La source est
+     * Met en file les triggers de `$card` pour l'événement `$event` (`TriggeredAbility::ETB|DIES|UPKEEP`). La source est
      * copiée (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
      */
     public function queueTriggers(int $controller, CardInstance $card, string $event): void

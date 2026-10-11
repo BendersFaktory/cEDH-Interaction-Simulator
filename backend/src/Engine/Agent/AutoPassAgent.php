@@ -35,7 +35,7 @@ final class AutoPassAgent implements PlayerAgent
             }
         }
 
-        // Défausse obligatoire / déclencheur à poser : le premier choix proposé (déterministe).
+        // Défausse obligatoire / trigger à poser : le premier choix proposé (déterministe).
         foreach ($legal as $action) {
             if ($action instanceof Discard || $action instanceof PutTrigger) {
                 return $action;

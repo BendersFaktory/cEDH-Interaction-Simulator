@@ -47,7 +47,7 @@ final class CardInstance
         public readonly array $abilities = [],
         public readonly ?string $adds = null, // mana ajouté à la résolution d'un sort `effect 'mana'` (rituel), ex. `{R}{R}`
         public readonly bool $token = false, // jeton : cesse d'exister en quittant le champ de bataille
-        /** @var list<TriggeredAbility> capacités déclenchées (l'index fait partie de l'id d'action PutTrigger) */
+        /** @var list<TriggeredAbility> triggers (l'index fait partie de l'id d'action PutTrigger) */
         public readonly array $triggers = [],
     ) {
     }

@@ -202,8 +202,8 @@ async function run() {
   await page.locator('text=/J0 sacrifie/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('10-cout-sacrifice')
   if (!sacrificed) problems.push('recette coût : J0 n\'a pas pu sacrifier une créature au Goblin Bombardment')
 
-  // 11 : déclencheur à cible (seed 11 : J0 a Goblin Bombardment, Perilous Myr et Sol Ring en main de départ).
-  // J0 lance Bombardment et le Myr, sacrifie le Myr (1 dégât à J1), puis choisit J2 comme cible du déclencheur « meurt ».
+  // 11 : trigger à cible (seed 11 : J0 a Goblin Bombardment, Perilous Myr et Sol Ring en main de départ).
+  // J0 lance Bombardment et le Myr, sacrifie le Myr (1 dégât à J1), puis choisit J2 comme cible du trigger « meurt ».
   const prevGame11 = (await info()).match(/#(\d+)/)[1]
   await page.fill('input[placeholder="aléatoire"]', '11')
   await page.click('text=Nouvelle partie Commander')
@@ -212,13 +212,13 @@ async function run() {
   let triggered = false
   for (let i = 0; i < 300 && !triggered; i++) {
     if (!(await page.locator('.actions').count())) break
-    const put = page.locator('.actions h4:has-text("Déclencheurs à mettre sur la pile") ~ button:not([disabled]):has-text("Perilous Myr"):has-text("→ joueur 2")').first()
+    const put = page.locator('.actions h4:has-text("Triggers à mettre sur la pile") ~ button:not([disabled]):has-text("Perilous Myr"):has-text("→ joueur 2")').first()
     const sac = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("en sacrifiant Perilous Myr"):has-text("→ joueur 1")').first()
     const spell = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):is(:has-text("Sol Ring"), :has-text("Goblin Bombardment"), :has-text("Perilous Myr"))').first()
     if (await put.count()) {
       if (await tryClick(put)) {
         await page.waitForTimeout(400)
-        triggered = (await page.locator('text=/Déclencheur de Perilous Myr \\(J0\\).*→ J2/').count()) > 0
+        triggered = (await page.locator('text=/Trigger de Perilous Myr \\(J0\\).*→ J2/').count()) > 0
       }
     } else if (await sac.count()) await tryClick(sac)
     else if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
@@ -229,10 +229,10 @@ async function run() {
     await page.waitForTimeout(150)
   }
   const stackShown = triggered ? (await page.locator('.stack').textContent())?.replace(/\s+/g, ' ').trim() : '(absent)'
-  const trigLine = triggered ? (await page.locator('text=/Déclencheur de Perilous Myr \\(J0\\)/').first().textContent())?.replace(/\s+/g, ' ').trim() : '(absent)'
-  log('11 cible du déclencheur choisie par J0 :', triggered, '| journal :', trigLine, '| pile :', stackShown, '|', await info())
+  const trigLine = triggered ? (await page.locator('text=/Trigger de Perilous Myr \\(J0\\)/').first().textContent())?.replace(/\s+/g, ' ').trim() : '(absent)'
+  log('11 cible du trigger choisie par J0 :', triggered, '| journal :', trigLine, '| pile :', stackShown, '|', await info())
   await shot('11-declencheur')
-  if (!triggered) problems.push('recette déclencheur : J0 n\'a pas pu choisir la cible du déclencheur de Perilous Myr')
+  if (!triggered) problems.push('recette trigger : J0 n\'a pas pu choisir la cible du trigger de Perilous Myr')
 
   // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
   const unexpected = problems.filter((p) => !/404/.test(p))

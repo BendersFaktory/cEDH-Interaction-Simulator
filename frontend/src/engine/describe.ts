@@ -46,10 +46,10 @@ export function describeEvent(e: GameEvent): string {
     }
     case 'AbilityTriggered': {
       const t = ((p.targets ?? []) as string[]).map(target).join(', ')
-      return `Déclencheur de ${p.card.name} (J${p.player}) : ${p.label}${t ? ` → ${t}` : ''}`
+      return `Trigger de ${p.card.name} (J${p.player}) : ${p.label}${t ? ` → ${t}` : ''}`
     }
     case 'AbilityResolved':
-      return p.trigger ? `Déclencheur de ${p.card.name} résolu` : `Capacité de ${p.card.name} résolue`
+      return p.trigger ? `Trigger de ${p.card.name} résolu` : `Capacité de ${p.card.name} résolue`
     case 'ManaAdded':
       return `J${p.player} gagne ${manaStr(p.mana)}`
     case 'ManaPoolEmptied':

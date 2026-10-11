@@ -7,8 +7,8 @@ namespace App\Engine\Action;
 use App\Engine\Game\GameState;
 
 /**
- * Met sur la pile une capacité déclenchée en attente (`GameState::$pendingTriggers`), avec sa cible éventuelle.
- * Décision hors priorité, comme la défausse : son contrôleur choisit un déclencheur à la fois, le premier choisi va
+ * Met sur la pile un trigger en attente (`GameState::$pendingTriggers`), avec sa cible éventuelle.
+ * Décision hors priorité, comme la défausse : son contrôleur choisit un trigger à la fois, le premier choisi va
  * en dessous (ordre de résolution inverse).
  */
 final class PutTrigger implements Action

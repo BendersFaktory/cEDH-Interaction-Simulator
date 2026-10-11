@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Engine\Ability;
 
 /**
- * Capacité déclenchée d'un permanent (objet valeur). `event` : `etb` (la carte entre sur le champ de bataille), `dies`
+ * Trigger d'un permanent (objet valeur). `event` : `etb` (la carte entre sur le champ de bataille), `dies`
  * (la créature meurt : champ de bataille -> cimetière, jeton compris) ou `upkeep` (début de l'entretien de son
- * contrôleur). Une fois déclenchée, elle attend dans `GameState::$pendingTriggers` jusqu'à ce qu'un joueur reçoive la
+ * contrôleur). Une fois survenu, le trigger attend dans `GameState::$pendingTriggers` jusqu'à ce qu'un joueur reçoive la
  * priorité ; `TriggerManager` la met alors sur la pile (ordre APNAP).
  *
  * Effets (même vocabulaire que `ActivatedAbility`) : `damage` (`amount` dégâts à un joueur ciblé), `draw` (piocher
@@ -31,10 +31,10 @@ final class TriggeredAbility
         public readonly string $spec = '',
     ) {
         if (!in_array($event, self::EVENTS, true)) {
-            throw new \InvalidArgumentException("Événement déclencheur inconnu : $event");
+            throw new \InvalidArgumentException("Événement de trigger inconnu : $event");
         }
         if (!in_array($effect, self::EFFECTS, true)) {
-            throw new \InvalidArgumentException("Effet de déclencheur inconnu : $effect");
+            throw new \InvalidArgumentException("Effet de trigger inconnu : $effect");
         }
         if ($effect === 'token') {
             ActivatedAbility::parseTokenSpec($spec);

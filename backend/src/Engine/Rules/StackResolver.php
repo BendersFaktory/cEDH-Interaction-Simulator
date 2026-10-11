@@ -10,7 +10,7 @@ use App\Engine\Game\GameState;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
 
-/** Résout le sommet de la pile (sort, capacité activée ou déclenchée). TODO: dispatch par carte (handlers) au lieu de flags 'damage'/'counter'. */
+/** Résout le sommet de la pile (sort, capacité activée ou trigger). TODO: dispatch par carte (handlers) au lieu de flags 'damage'/'counter'. */
 final class StackResolver
 {
     public function resolveTop(GameState $s): void
@@ -22,7 +22,7 @@ final class StackResolver
         $card = $item->card;
 
         if ($item->isAbility()) {
-            // Capacité activée ou déclenchée : la source reste où elle est (ou l'a déjà quitté), seuls les effets s'appliquent.
+            // Capacité activée ou trigger : la source reste où elle est (ou l'a déjà quitté), seuls les effets s'appliquent.
             $s->emit('AbilityResolved', [
                 'stackId' => $item->id,
                 'controller' => $item->controller,

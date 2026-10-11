@@ -7,8 +7,8 @@ namespace App\Engine\Game;
 use App\Engine\Ability\TriggeredAbility;
 
 /**
- * Capacité déclenchée en attente d'être mise sur la pile (`GameState::$pendingTriggers`). `source` est la carte telle
- * qu'elle était au déclenchement (information de dernière connaissance : une créature morte n'est plus sur le champ de
+ * Trigger en attente d'être mis sur la pile (`GameState::$pendingTriggers`). `source` est la carte telle
+ * qu'elle était au moment du trigger (information de dernière connaissance : une créature morte n'est plus sur le champ de
  * bataille, un jeton a cessé d'exister).
  */
 final class PendingTrigger
