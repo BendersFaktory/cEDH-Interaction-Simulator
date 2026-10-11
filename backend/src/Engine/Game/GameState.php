@@ -208,12 +208,15 @@ final class GameState
         $this->queueTriggers($playerId, $card, TriggeredAbility::ETB);
     }
 
-    /** Met en file les capacités de `$card` déclenchées par `$event` (`TriggeredAbility::ETB|DIES|UPKEEP`). */
+    /**
+     * Met en file les capacités de `$card` déclenchées par `$event` (`TriggeredAbility::ETB|DIES|UPKEEP`). La source est
+     * copiée (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
+     */
     public function queueTriggers(int $controller, CardInstance $card, string $event): void
     {
         foreach ($card->triggers as $index => $trigger) {
             if ($trigger->event === $event) {
-                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, $card, $index);
+                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index);
             }
         }
     }

@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-11 (déclencheurs, étape 2/5 : mise sur la pile et résolution). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-11 (déclencheurs, étape 3/5 : cartes de démo). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -29,7 +29,7 @@
   - [x] Modèle et file d'attente : `TriggeredAbility` (`etb` / `dies` / `upkeep`, effets `damage` / `draw` / `token`), `CardInstance::triggers` (omis s'il est vide), `GameState::$pendingTriggers` sérialisée (`PendingTrigger` : source en information de dernière connaissance), `GameState::enterBattlefield()` seul chemin d'entrée en jeu (sort, terrain, jeton), mort par SBA et par sacrifice (jeton compris), entretien du joueur actif. *(Vérifié le 2026-10-11 : PHPUnit 124 tests dont `TriggerQueueTest` (8) ; `smoke.php 42` identique avant/après.)*
   - [x] Mise sur la pile et résolution : `TriggerManager` (APNAP, déclencheurs d'un joueur éliminé retirés), action `PutTrigger` (ordre et cible ; décision hors priorité, détenteur gardé dans `triggerResumeHolder` ; aucune décision s'il n'y a qu'un choix, deux déclencheurs identiques n'en font qu'un), passes remises à zéro, `AbilityTriggered` / `AbilityResolved` (`trigger: true`), effets partagés avec les capacités activées, agents (IA : adversaire le plus faible ; `ai:pass` : premier choix ; `human` : s'arrête). *(Vérifié le 2026-10-11 : PHPUnit 131 tests dont `TriggerTest` (7 : entrée en jeu, cible choisie par l'humain avec reprise depuis un état sérialisé, APNAP, ordre choisi, sacrifice comme coût, Counterspell, joueur éliminé) et `StateReconstructorTest` vert ; `smoke.php 42` identique.)*
   - [ ] Déclencheurs pendant le cleanup (règle 514.3a : une ronde de priorité s'ouvre) et autres événements (attaque, fin de tour, sorts lancés).
-  - [ ] Cartes de démo : Elvish Visionary, Perilous Myr, Idole de l'Érudit.
+  - [x] Cartes de démo : Elvish Visionary (entrée : piocher 1, decks verts), Perilous Myr (mort : 2 dégâts à un joueur ciblé) et Idole de l'Érudit (factice, entretien : piocher 1) dans tous les decks ; un Lightning Bolt de moins dans les decks rouges (taille 39 conservée). Correctif au passage : l'objet mis sur la pile (capacité activée) ou en file (déclencheur) est une **copie** de la carte source ; partager l'objet du champ de bataille faisait diverger un état reconstruit d'un état réel (bonus de Wild Mongrel appliqué après l'activation, révélé par `StateReconstructorTest`). *(Vérifié le 2026-10-11 : PHPUnit 131 tests, `StateReconstructorTest` compris ; `smoke.php 42` déterministe (deux exécutions identiques, 4429 événements, 41 tours, J1 gagne ; test d'API mis à jour) ; audit de 7 graines : 65 déclencheurs posés (Visionary 7, Idole 52, Myr 6), 64 résolus + 1 resté sur la pile à la fin de la partie, aucun déclencheur en attente à un checkpoint, Visionary : 1 déclenchement par entrée, Idole seulement à l'entretien de son contrôleur, Myr jamais sur soi, 1 Myr mort avec un joueur éliminé sans déclenchement, ordre APNAP respecté, effet attendu après chaque résolution.)*
   - [ ] Front et docs : `AbilityTriggered` (reducer, journal, `EVENTS.md`), fixture régénérée, `ARCHITECTURE.md`.
   - [ ] Recette (J0 choisit la cible d'un déclencheur) et mesures.
 - [ ] **Mana conditionnel** (réserve à restrictions, ex. Eldrazi Temple) : reporté après les déclencheurs (touche tout le solveur de paiement).
@@ -96,7 +96,7 @@
 - [ ] Couverture de code PHPUnit : rapport + seuil minimal en CI.
 - [ ] phpstan sur `src/` (niveau à fixer).
 - [ ] Versionner le format de `GameState` dans les ancres (une évolution du format invalide les ancres anciennes).
-- [ ] Mémoire des états : `CardInstance::toArray()` est à 16 clés ; une clé de plus double la table PHP (mesuré : pic de `smoke.php 42` de 93 à 156 Mo). `token` et `boost` sont donc omis à leur valeur par défaut. Avant d'ajouter des champs, regrouper les clés rares ou omettre les valeurs par défaut. `smoke.php` ne garde plus les états des checkpoints (il les compte) : la partie seed 42 dure maintenant 49 tours.
+- [ ] Mémoire des états : `CardInstance::toArray()` est à 16 clés ; une clé de plus double la table PHP (mesuré : pic de `smoke.php 42` de 93 à 156 Mo). `token` et `boost` sont donc omis à leur valeur par défaut. Avant d'ajouter des champs, regrouper les clés rares ou omettre les valeurs par défaut. `smoke.php` ne garde plus les états des checkpoints (il les compte) : la partie seed 42 dure maintenant 41 tours (depuis les cartes à déclencheurs).
 - [ ] Montées de version : PHPUnit 12, Symfony 8 quand Doctrine sera compatible (`var-exporter` 8), MySQL.
 - [ ] `composer audit` et dépendances à jour.
 

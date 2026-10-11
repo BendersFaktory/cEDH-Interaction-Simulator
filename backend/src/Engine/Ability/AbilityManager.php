@@ -168,7 +168,9 @@ final class AbilityManager
         if ($ability->tap) {
             $card->tapped = true;
         }
-        $item = new StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, 0, $ability, $a->abilityIndex);
+        // Copie de la source : l'objet sur la pile ne doit pas partager l'état de la carte du champ de bataille (sinon un
+        // bonus ultérieur le modifierait en partie réelle mais pas dans un état reconstruit depuis une ancre).
+        $item = new StackItem('s' . $s->nextStackId++, clone $card, $a->player(), $a->targets, 0, $ability, $a->abilityIndex);
         $s->stack[] = $item;
         $s->emit('AbilityActivated', [
             'player' => $a->player(),

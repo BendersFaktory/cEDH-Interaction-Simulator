@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Card;
 
 use App\Engine\Ability\ActivatedAbility;
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Game\CardInstance;
 
 /**
@@ -34,8 +35,8 @@ final class Decks
         $basics = ['W' => 'Plains', 'U' => 'Island', 'B' => 'Swamp', 'R' => 'Mountain', 'G' => 'Forest'];
 
         $n = 0;
-        $make = static function (string $name, string $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null) use ($playerId, &$n): CardInstance {
-            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds);
+        $make = static function (string $name, string $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = []) use ($playerId, &$n): CardInstance {
+            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds, false, $triggers);
         };
 
         $commander = $make("Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, true, 3, 3, '{1}{' . $colors[0] . '}{' . $colors[1] . '}');
@@ -62,7 +63,7 @@ final class Decks
             $library[] = $make('Kher Keep', CardInstance::LAND, 0, null, 0, false, 0, 0, null, [], [ActivatedAbility::token('Kobold:0/1', 1, '{1}{R}')]);
             // Goblin Bombardment : sacrifier une créature : 1 dégât (à un joueur ici).
             $library[] = $make('Goblin Bombardment', CardInstance::ENCHANTMENT, 2, null, 0, false, 0, 0, '{1}{R}', [], [ActivatedAbility::bombardment(1)]);
-            for ($i = 0; $i < 6; $i++) {
+            for ($i = 0; $i < 5; $i++) {
                 $library[] = $make('Lightning Bolt', CardInstance::INSTANT, 1, 'damage', 3, false, 0, 0, '{R}');
             }
             for ($i = 0; $i < 2; $i++) {
@@ -91,7 +92,13 @@ final class Decks
             }
             // Wild Mongrel : défausser une carte : +1/+1 jusqu'à la fin du tour.
             $library[] = $make('Wild Mongrel', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{1}{G}', [], [ActivatedAbility::pump('+1/+1', null, 1)]);
+            // Elvish Visionary : quand elle entre sur le champ de bataille, piocher une carte.
+            $library[] = $make('Elvish Visionary', CardInstance::CREATURE, 2, null, 0, false, 1, 1, '{1}{G}', triggers: [new TriggeredAbility(TriggeredAbility::ETB, 'draw', 1)]);
         }
+        // Perilous Myr : quand il meurt, 2 dégâts (à un joueur ciblé ici).
+        $library[] = $make('Perilous Myr', CardInstance::CREATURE, 2, null, 0, false, 1, 1, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DIES, 'damage', 2)]);
+        // Carte factice de démonstration : au début de votre entretien, piocher une carte.
+        $library[] = $make("Idole de l'Érudit", CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::UPKEEP, 'draw', 1)]);
         for ($i = 0; $i < 2; $i++) {
             $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');
         }
