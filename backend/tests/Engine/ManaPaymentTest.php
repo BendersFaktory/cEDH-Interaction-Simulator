@@ -179,6 +179,29 @@ final class ManaPaymentTest extends TestCase
         $this->assertSame(['l1'], $this->cards(ManaPayment::plan($this->player(['RG', 'U']), ManaCost::parse('{1}'))));
     }
 
+    public function testColorFoundLateIsTappedWithoutWaste(): void
+    {
+        // Les bornes du solveur élaguent les engagements inutiles (G) : seule la source R est engagée, et le terrain simple
+        // passe avant le dual.
+        $this->assertSame(['l4'], $this->cards(ManaPayment::plan($this->player(['G', 'G', 'G', 'RG', 'R']), ManaCost::parse('{R}'))));
+        // À égalité, le premier permanent du champ de bataille paie le générique.
+        $this->assertSame(['l0', 'l4'], $this->cards(ManaPayment::plan($this->player(['G', 'G', 'G', 'RG', 'R']), ManaCost::parse('{1}{R}'))));
+    }
+
+    public function testForcedDualKeepsMinimalTaps(): void
+    {
+        // Le dual est indispensable (seule source R) : il est engagé, avec les premiers terrains pour le générique.
+        $plan = ManaPayment::plan($this->player(['G', 'G', 'G', 'G', 'RG']), ManaCost::parse('{2}{R}'));
+        $this->assertSame(['l0', 'l1', 'l4'], $this->cards($plan));
+        $this->assertSame(['R' => 1, 'G' => 2], $plan->spend);
+    }
+
+    public function testLateSolRingMinimisesTaps(): void
+    {
+        // {3} : Sol Ring (en dernier) + le premier terrain, plutôt que trois terrains.
+        $this->assertSame(['l0', 'a4'], $this->cards(ManaPayment::plan($this->player(['R', 'G', 'G', 'G', 'SOL']), ManaCost::parse('{3}'))));
+    }
+
     public function testSolRingPaysTwoWithoutWaste(): void
     {
         $plan = ManaPayment::plan($this->player(['SOL', 'R']), ManaCost::parse('{2}'));

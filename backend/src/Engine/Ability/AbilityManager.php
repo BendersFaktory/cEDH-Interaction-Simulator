@@ -10,6 +10,7 @@ use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PlayerState;
 use App\Engine\Game\StackItem;
+use App\Engine\Mana\ManaContext;
 use App\Engine\Mana\ManaPayment;
 use App\Engine\Mana\ManaPlan;
 
@@ -27,7 +28,7 @@ final class AbilityManager
      * Peut-on activer cette capacité maintenant (timing, coût payable, source prête, choix de coût possibles) ? Hors
      * `sorcerySpeed`, le timing est celui de l'instant (priorité).
      */
-    public static function canActivate(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability): bool
+    public static function canActivate(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability, ?ManaContext $mana = null): bool
     {
         if (!self::sourceReady($card, $ability, $s->turn)) {
             return false;
@@ -39,7 +40,7 @@ final class AbilityManager
         if (self::costChoices($p, $card, $ability) === []) {
             return false;
         }
-        if ($ability->manaCost !== null && self::costPlan($s, $p, $card, $ability) === null) {
+        if ($ability->manaCost !== null && self::costPlan($s, $p, $card, $ability, $mana) === null) {
             return false;
         }
 
@@ -108,9 +109,9 @@ final class AbilityManager
     }
 
     /** Plan de paiement du coût de mana d'une capacité ; la source ne paie jamais son propre coût. */
-    private static function costPlan(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability): ?ManaPlan
+    private static function costPlan(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability, ?ManaContext $mana = null): ?ManaPlan
     {
-        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id, $card);
+        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id, $card, $mana);
     }
 
     public static function activate(GameState $s, ActivateAbility $a): void

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Engine\Mana;
 
-use App\Engine\Ability\AbilityManager;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\PlayerState;
 
@@ -41,24 +40,36 @@ final class ManaPayment
 {
     private const NODE_LIMIT = 50000;
     private const MAX_CONVERTERS = 3;
+    /** Symboles dans l'ordre de `Color::cases()` (évite d'appeler `symbol()` dans les boucles chaudes). */
+    private const WUBRGC = ['W', 'U', 'B', 'R', 'G', 'C'];
+    /** Ordre dans lequel on dépense le mana pour du générique : incolore d'abord (garde les couleurs), puis WUBRG. */
+    private const GENERIC_ORDER = ['C', 'W', 'U', 'B', 'R', 'G'];
 
-    public static function plan(PlayerState $p, ManaCost $cost, int $x = 0, ?int $turn = null, ?string $exclude = null, ?CardInstance $for = null): ?ManaPlan
+    public static function plan(PlayerState $p, ManaCost $cost, int $x = 0, ?int $turn = null, ?string $exclude = null, ?CardInstance $for = null, ?ManaContext $ctx = null): ?ManaPlan
     {
+        $ctx ??= new ManaContext($p, $turn);
         $state = ['nodes' => 0];
 
-        return self::solve(self::sources($p, $turn, $exclude, $for), self::converters($p, $turn, $exclude), $p->pool->toArray(), self::restrictedPool($p, $for), $cost, $x, $state);
+        return self::solve($ctx->sources($exclude, $for), $ctx->converters($exclude, self::MAX_CONVERTERS), $ctx->pool(), $ctx->restrictedPool($for), $cost, $x, $state);
+    }
+
+    /** Photo du mana de `$p` à passer à `plan()`/`maxX()` pour scanner le champ de bataille une seule fois (état inchangé). */
+    public static function context(PlayerState $p, ?int $turn): ManaContext
+    {
+        return new ManaContext($p, $turn);
     }
 
     /** Plus grand X payable avec la réserve et les sources non engagées (0 si le sort n'a pas de {X}). */
-    public static function maxX(PlayerState $p, ManaCost $cost, ?int $turn = null, ?CardInstance $for = null): int
+    public static function maxX(PlayerState $p, ManaCost $cost, ?int $turn = null, ?CardInstance $for = null, ?ManaContext $ctx = null): int
     {
         if (!$cost->hasX()) {
             return 0;
         }
-        $sources = self::sources($p, $turn, null, $for);
-        $converters = self::converters($p, $turn, null);
-        $pool = $p->pool->toArray();
-        $restricted = self::restrictedPool($p, $for);
+        $ctx ??= new ManaContext($p, $turn);
+        $sources = $ctx->sources(null, $for);
+        $converters = $ctx->converters(null, self::MAX_CONVERTERS);
+        $pool = $ctx->pool();
+        $restricted = $ctx->restrictedPool($for);
 
         // Borne haute : tout le mana potentiel, divisé par le nombre de {X}. Le coût croît avec X, donc faisable est monotone.
         $potential = array_sum($pool) + array_sum(array_map('array_sum', $restricted));
@@ -81,93 +92,6 @@ final class ManaPayment
         }
 
         return $best;
-    }
-
-    /**
-     * Mana restreint de la réserve dont la restriction admet `$for`, par restriction puis par symbole.
-     *
-     * @return array<string, array<string, int>>
-     */
-    private static function restrictedPool(PlayerState $p, ?CardInstance $for): array
-    {
-        $out = [];
-        foreach ($p->pool->restrictedToArray() as $kind => $amounts) {
-            if ((new ManaRestriction($kind))->allows($for)) {
-                $out[$kind] = $amounts;
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * Permanents prêts (voir `AbilityManager::sourceReady`) avec au moins une capacité de mana `{T}` sans coût de mana.
-     * Une option restreinte n'est retenue que si sa restriction admet `$for` (`rk` = sa restriction, null sinon).
-     *
-     * @return list<array{card: string, multi: bool, choices: list<array{ability: int, option: int, prod: array<string,int>, total: int, rk: ?string}>}>
-     */
-    private static function sources(PlayerState $p, ?int $turn, ?string $exclude, ?CardInstance $for): array
-    {
-        return self::collect($p, $turn, $exclude, false, $for);
-    }
-
-    /**
-     * Convertisseurs prêts (capacité de mana `{T}` avec un coût de mana sans hybride ni X), au plus MAX_CONVERTERS.
-     *
-     * @return list<array{card: string, multi: bool, choices: list<array{ability: int, option: int, prod: array<string,int>, total: int, cost: ManaCost, costTotal: int}>}>
-     */
-    private static function converters(PlayerState $p, ?int $turn, ?string $exclude): array
-    {
-        return array_slice(self::collect($p, $turn, $exclude, true), 0, self::MAX_CONVERTERS);
-    }
-
-    private static function collect(PlayerState $p, ?int $turn, ?string $exclude, bool $withCost, ?CardInstance $for = null): array
-    {
-        $order = [];
-        foreach (Color::cases() as $i => $color) {
-            $order[$color->symbol()] = $i;
-        }
-
-        $sources = [];
-        foreach ($p->battlefield as $card) {
-            if ($card->id === $exclude) {
-                continue;
-            }
-            $choices = [];
-            foreach ($card->abilities() as $ai => $ability) {
-                if (!$ability->isManaAbility || $ability->effect !== 'mana' || !$ability->tap
-                    || ($ability->manaCost !== null) !== $withCost
-                    || ($withCost && ($ability->manaCost->hybrid !== [] || $ability->manaCost->x > 0))
-                    || !AbilityManager::sourceReady($card, $ability, $turn)) {
-                    continue;
-                }
-                foreach ($ability->options as $oi => $_) {
-                    $restriction = $ability->restriction($oi);
-                    if ($restriction !== null && ($withCost || !$restriction->allows($for))) {
-                        continue;
-                    }
-                    $prod = $ability->produced($oi);
-                    $total = array_sum($prod);
-                    if ($total === 0) {
-                        continue;
-                    }
-                    $first = $ability->options[$oi][0]->symbol();
-                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice ? 1 : 0, 'rk' => $restriction?->kind];
-                    if ($withCost) {
-                        $choice['cost'] = $ability->manaCost;
-                        $choice['costTotal'] = $ability->manaCost->manaValue();
-                    }
-                    $choices[] = $choice;
-                }
-            }
-            if ($choices === []) {
-                continue;
-            }
-            usort($choices, static fn (array $a, array $b) => $a['k'] <=> $b['k']); // stable (PHP 8) : WUBRGC puis ordre déclaré
-            $sources[] = ['card' => $card->id, 'multi' => count($choices) > 1, 'choices' => $choices];
-        }
-
-        return $sources;
     }
 
     /**
@@ -203,7 +127,7 @@ final class ManaPayment
     {
         $h = count($cost->hybrid);
         $best = null; // ['key' => list<int>, 'plan' => ManaPlan]
-        $freeSources = $converters === [] ? $sources : self::withoutRestricted($sources);
+        $freeSources = null; // sources sans options restreintes, calculées au premier convertisseur engagé
 
         foreach (self::combinations($converters) as $combo) {
             // Production des convertisseurs (réservée au coût demandé) et coût cumulé des convertisseurs.
@@ -221,7 +145,7 @@ final class ManaPayment
                 }
                 $convGeneric += $conv['cost']->generic;
             }
-            $simple = $used === [] ? $sources : array_values(array_filter($freeSources, static fn (array $src) => !isset($used[$src['card']])));
+            $simple = $used === [] ? $sources : array_values(array_filter($freeSources ??= self::withoutRestricted($sources), static fn (array $src) => !isset($used[$src['card']])));
 
             for ($mask = 0; $mask < (1 << $h); $mask++) {
                 $colored = $cost->colored;
@@ -245,7 +169,7 @@ final class ManaPayment
                     }
                 }
                 $restGeneric = $cost->generic + $x * $cost->x;
-                foreach (self::genericOrder() as $sym) {
+                foreach (self::GENERIC_ORDER as $sym) {
                     $use = min($restGeneric, $outLeft[$sym] ?? 0);
                     if ($use > 0) {
                         $outSpend[$sym] = ($outSpend[$sym] ?? 0) + $use;
@@ -274,7 +198,7 @@ final class ManaPayment
                         }
                     }
                     foreach ($rLeft as $kind => $amounts) {
-                        foreach (self::genericOrder() as $sym) {
+                        foreach (self::GENERIC_ORDER as $sym) {
                             $use = min($restGeneric, $amounts[$sym] ?? 0);
                             if ($use > 0) {
                                 $rSpend[$kind][$sym] = ($rSpend[$kind][$sym] ?? 0) + $use;
@@ -292,8 +216,7 @@ final class ManaPayment
                 $poolSpend = [];
                 $poolLeft = $pool;
                 $residual = [];
-                foreach (Color::cases() as $color) {
-                    $sym = $color->symbol();
+                foreach (self::WUBRGC as $sym) {
                     $need = $needColored[$sym] ?? 0;
                     $use = min($need, $poolLeft[$sym] ?? 0);
                     if ($use > 0) {
@@ -305,7 +228,7 @@ final class ManaPayment
                     }
                 }
                 $g = $restGeneric + $convGeneric;
-                foreach (self::genericOrder() as $sym) {
+                foreach (self::GENERIC_ORDER as $sym) {
                     $use = min($g, $poolLeft[$sym] ?? 0);
                     if ($use > 0) {
                         $poolSpend[$sym] = ($poolSpend[$sym] ?? 0) + $use;
@@ -376,82 +299,319 @@ final class ManaPayment
             return ['waste' => 0, 'sac' => 0, 'taps' => 0, 'multi' => 0, 'picks' => []];
         }
 
-        $n = count($sources);
-        // Bornes de suffixe : production maximale restante (totale, par couleur, par engagement).
-        $sufTotal = array_fill(0, $n + 1, 0);
-        $sufMax = array_fill(0, $n + 1, 0);
-        $sufColor = array_fill(0, $n + 1, []);
-        for ($i = $n - 1; $i >= 0; $i--) {
-            $sufTotal[$i] = $sufTotal[$i + 1] + max(array_column($sources[$i]['choices'], 'total'));
-            $sufMax[$i] = max($sufMax[$i + 1], max(array_column($sources[$i]['choices'], 'total')));
-            $sufColor[$i] = $sufColor[$i + 1];
-            $per = [];
-            foreach ($sources[$i]['choices'] as $c) {
-                foreach ($c['prod'] as $s => $v) {
-                    $per[$s] = max($per[$s] ?? 0, $v);
-                }
-            }
-            foreach ($per as $s => $v) {
-                $sufColor[$i][$s] = ($sufColor[$i][$s] ?? 0) + $v;
-            }
+        // Couleurs du besoin résiduel, indexées 0..r-1 : seules elles comptent pour le déficit (le reste ne compte que
+        // dans le total produit).
+        $rSym = [];
+        $rv = [];
+        foreach ($residual as $s => $v) {
+            $rSym[] = $s;
+            $rv[] = $v;
         }
+        $r = count($rv);
 
-        $best = null;
-        $picks = [];
-        $have = [];
-
-        $search = function (int $i, int $total, int $multi, int $sac) use (&$search, &$best, &$picks, &$have, &$state, $sources, $residual, $need, $n, $sufTotal, $sufMax, $sufColor): void {
-            if ($state['nodes']++ >= self::NODE_LIMIT) {
-                return;
-            }
-            $deficit = 0;
-            foreach ($residual as $s => $r) {
-                $d = $r - ($have[$s] ?? 0);
-                if ($d > 0) {
-                    $deficit += $d;
-                    if (($sufColor[$i][$s] ?? 0) < $d) {
-                        return;
+        // Bornes de suffixe : production maximale restante des sources i..n-1 (totale, par couleur du besoin) ; nombre de
+        // choix et production maximale de chaque source. Les données d'un choix ne sont lues qu'à son engagement.
+        $n = count($sources);
+        $zero = $r === 0 ? [] : array_fill(0, $r, 0);
+        $nc = [];
+        $srcMax = [];
+        $sufTotal = [$n => 0];
+        $sufColor = [$n => $zero];
+        $anySac = $anyMulti = false;
+        $tot = 0;
+        $col = $zero;
+        for ($i = $n - 1; $i >= 0; $i--) {
+            $src = $sources[$i];
+            $nc[$i] = count($src['choices']);
+            $anyMulti = $anyMulti || $src['multi'];
+            $max = 0;
+            $per = $zero;
+            foreach ($src['choices'] as $c) {
+                if ($c['total'] > $max) {
+                    $max = $c['total'];
+                }
+                if ($c['sac'] !== 0) {
+                    $anySac = true;
+                }
+                for ($j = 0; $j < $r; $j++) {
+                    $v = $c['prod'][$rSym[$j]] ?? 0;
+                    if ($v > $per[$j]) {
+                        $per[$j] = $v;
                     }
                 }
             }
-            $totalDeficit = max($deficit, $need - $total);
-            $taps = count($picks);
-
-            if ($totalDeficit === 0) {
-                $key = [$total - $need, $sac, $taps, $multi];
-                if ($best === null || self::less($key, $best['key'])) {
-                    $best = ['key' => $key, 'waste' => $total - $need, 'sac' => $sac, 'taps' => $taps, 'multi' => $multi, 'picks' => $picks];
-                }
-
-                return;
+            for ($j = 0; $j < $r; $j++) {
+                $col[$j] += $per[$j];
             }
-            if ($i >= $n || $need - $total > $sufTotal[$i] || $sufMax[$i] === 0) {
-                return;
-            }
-            if ($best !== null) {
-                $lb = [max($total, $need) - $need, $sac, $taps + intdiv($totalDeficit + $sufMax[$i] - 1, $sufMax[$i]), $multi];
-                if (!self::less($lb, $best['key'])) {
-                    return;
+            $srcMax[$i] = $max;
+            $tot += $max;
+            $sufTotal[$i] = $tot;
+            $sufColor[$i] = $col;
+        }
+
+        // Parcours en profondeur itératif, dans l'ordre de la recherche exhaustive : à chaque niveau i, les choix de la
+        // source i dans l'ordre, puis « ne pas l'engager » (le niveau d'un nœud est l'indice de sa source). Chaque nœud
+        // visité compte pour NODE_LIMIT. Clé du meilleur plan (gaspillage, sacrifices, engagements, multi) comparée
+        // lexicographiquement, en ligne. Les engagements empilés sont codés `source * 256 + choix`.
+        // Borne des engagements : il faut au moins `$minTaps[$i][$d]` sources parmi i..n-1 pour produire encore `$d`
+        // (les plus grosses d'abord). Calculée à la demande, niveau par niveau.
+        $minTaps = [];
+        $sufNS = $sufNSColor = $sufSg = $sufSgColor = null; // mêmes bornes, sans sacrifice / sans source multi (à la demande)
+        $best = null;
+        $bw = $bs = $bt = $bm = 0;
+        $picks = [];
+        $have = array_fill(0, $r, 0);
+        $nodes = $state['nodes'];
+        $limit = self::NODE_LIMIT;
+        $T = [0];   // total produit à l'entrée du niveau
+        $M = [0];   // sources à plusieurs alternatives engagées
+        $S = [0];   // sacrifices
+        $ci = [];   // choix courant de chaque niveau ($nc[$i] = « ne pas l'engager »)
+        $P = [];    // production du choix engagé à chaque niveau, sur les couleurs du besoin
+        $taps = 0;
+        $i = 0;
+
+        while (true) {
+            // Visite du nœud (niveau $i) : faut-il explorer ses enfants ?
+            $expand = false;
+            if ($nodes++ < $limit) {
+                $total = $T[$i];
+                $deficit = 0;
+                $feasible = true;
+                for ($j = 0; $j < $r; $j++) {
+                    $d = $rv[$j] - $have[$j];
+                    if ($d > 0) {
+                        $deficit += $d;
+                        if ($sufColor[$i][$j] < $d) {
+                            $feasible = false;
+                            break;
+                        }
+                    }
+                }
+                if ($feasible) {
+                    $totalDeficit = $need - $total > $deficit ? $need - $total : $deficit;
+                    if ($totalDeficit === 0) {
+                        $waste = $total - $need;
+                        $sac = $S[$i];
+                        $multi = $M[$i];
+                        if ($best === null
+                            || $waste < $bw || ($waste === $bw && ($sac < $bs || ($sac === $bs && ($taps < $bt || ($taps === $bt && $multi < $bm)))))) {
+                            $bw = $waste;
+                            $bs = $sac;
+                            $bt = $taps;
+                            $bm = $multi;
+                            $best = $picks;
+                        }
+                    } elseif ($totalDeficit <= $sufTotal[$i]) {
+                        // (Chaque engagement ajoute au plus le total de sa source : au-delà de `$sufTotal`, aucune feuille.)
+                        $expand = true;
+                        if ($best !== null) {
+                            // Borne basse de la clé de toute feuille du sous-arbre, composante par composante : il faut
+                            // encore produire au moins `$totalDeficit` (gaspillage final ≥ total + déficit − besoin), avec au
+                            // moins `$minTaps` sources. On n'explore que si elle est strictement meilleure que le meilleur plan :
+                            // un sous-arbre élagué ne contient aucune feuille strictement meilleure, donc le plan retenu
+                            // (meilleure clé, premier trouvé à égalité) est le même, et les nœuds visités sont un
+                            // sous-ensemble de ceux d'une borne plus faible (NODE_LIMIT n'est pas atteint plus tôt).
+                            // Sacrifices / multi : +1 si les sources restantes ne couvrent pas le déficit sans un choix à
+                            // sacrifice / sans une source à plusieurs alternatives.
+                            $lw = $total + $totalDeficit - $need;
+                            if ($lw !== $bw) {
+                                $expand = $lw < $bw;
+                            } else {
+                                if ($sufNS === null) {
+                                    [$sufNS, $sufNSColor] = $anySac ? self::suffixes($sources, $rSym, true) : [$sufTotal, $sufColor];
+                                    [$sufSg, $sufSgColor] = $anyMulti ? self::suffixes($sources, $rSym, false) : [$sufTotal, $sufColor];
+                                }
+                                $ls = $S[$i];
+                                if ($totalDeficit > $sufNS[$i]) {
+                                    $ls++;
+                                } else {
+                                    for ($j = 0; $j < $r; $j++) {
+                                        if ($rv[$j] - $have[$j] > $sufNSColor[$i][$j]) {
+                                            $ls++;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if ($ls !== $bs) {
+                                    $expand = $ls < $bs;
+                                } else {
+                                    if (!isset($minTaps[$i])) {
+                                        $rest = [];
+                                        for ($q = $i; $q < $n; $q++) {
+                                            $rest[] = $srcMax[$q];
+                                        }
+                                        $minTaps[$i] = self::minTaps($rest);
+                                    }
+                                    $lt = $taps + $minTaps[$i][$totalDeficit];
+                                    if ($lt !== $bt) {
+                                        $expand = $lt < $bt;
+                                    } else {
+                                        $lm = $M[$i];
+                                        if ($totalDeficit > $sufSg[$i]) {
+                                            $lm++;
+                                        } else {
+                                            for ($j = 0; $j < $r; $j++) {
+                                                if ($rv[$j] - $have[$j] > $sufSgColor[$i][$j]) {
+                                                    $lm++;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        $expand = $lm < $bm;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            $src = $sources[$i];
-            foreach ($src['choices'] as $c) {
-                $picks[] = ['card' => $src['card'], 'ability' => $c['ability'], 'option' => $c['option'], 'prod' => $c['prod'], 'rk' => $c['rk']];
-                foreach ($c['prod'] as $s => $v) {
-                    $have[$s] = ($have[$s] ?? 0) + $v;
+            if ($expand) {
+                $p = $i;
+                $k = 0;
+            } else {
+                // Retour au parent : on défait son choix courant et on passe au suivant.
+                $p = $i - 1;
+                if ($p < 0) {
+                    break;
                 }
-                $search($i + 1, $total + $c['total'], $multi + ($src['multi'] ? 1 : 0), $sac + $c['sac']);
-                foreach ($c['prod'] as $s => $v) {
-                    $have[$s] -= $v;
+                $k = $ci[$p];
+                if ($k < $nc[$p]) {
+                    $prod = $P[$p];
+                    for ($j = 0; $j < $r; $j++) {
+                        $have[$j] -= $prod[$j];
+                    }
+                    array_pop($picks);
+                    $taps--;
                 }
-                array_pop($picks);
+                $k++;
             }
-            $search($i + 1, $total, $multi, $sac);
-        };
-        $search(0, 0, 0, 0);
 
-        return $best;
+            // Enfant suivant du niveau $p, en remontant tant qu'un niveau n'a plus d'enfant.
+            while (true) {
+                if ($k < $nc[$p]) {
+                    $ci[$p] = $k;
+                    $c = $sources[$p]['choices'][$k];
+                    $prod = $zero;
+                    for ($j = 0; $j < $r; $j++) {
+                        $prod[$j] = $c['prod'][$rSym[$j]] ?? 0;
+                        $have[$j] += $prod[$j];
+                    }
+                    $P[$p] = $prod;
+                    $picks[] = $p * 256 + $k;
+                    $taps++;
+                    $i = $p + 1;
+                    $T[$i] = $T[$p] + $c['total'];
+                    $M[$i] = $sources[$p]['multi'] ? $M[$p] + 1 : $M[$p];
+                    $S[$i] = $S[$p] + $c['sac'];
+                    continue 2;
+                }
+                if ($k === $nc[$p]) {
+                    $ci[$p] = $k;
+                    $i = $p + 1;
+                    $T[$i] = $T[$p];
+                    $M[$i] = $M[$p];
+                    $S[$i] = $S[$p];
+                    continue 2;
+                }
+                $p--;
+                if ($p < 0) {
+                    break 2;
+                }
+                $k = $ci[$p];
+                if ($k < $nc[$p]) {
+                    $prod = $P[$p];
+                    for ($j = 0; $j < $r; $j++) {
+                        $have[$j] -= $prod[$j];
+                    }
+                    array_pop($picks);
+                    $taps--;
+                }
+                $k++;
+            }
+        }
+        $state['nodes'] = $nodes;
+        if ($best === null) {
+            return null;
+        }
+
+        $out = [];
+        foreach ($best as $code) {
+            $src = $sources[$code >> 8];
+            $c = $src['choices'][$code & 255];
+            $out[] = ['card' => $src['card'], 'ability' => $c['ability'], 'option' => $c['option'], 'prod' => $c['prod'], 'rk' => $c['rk']];
+        }
+
+        return ['waste' => $bw, 'sac' => $bs, 'taps' => $bt, 'multi' => $bm, 'picks' => $out];
+    }
+
+    /**
+     * Bornes de suffixe de `cover()` (production maximale des sources i..n-1, totale et par couleur `$rSym`, indice n = 0)
+     * restreintes aux choix sans sacrifice (`$noSacrifice`), ou aux sources à une seule alternative.
+     *
+     * @param list<string> $rSym
+     * @return array{0: array<int, int>, 1: array<int, list<int>>}
+     */
+    private static function suffixes(array $sources, array $rSym, bool $noSacrifice): array
+    {
+        $n = count($sources);
+        $r = count($rSym);
+        $tot = 0;
+        $col = $r === 0 ? [] : array_fill(0, $r, 0);
+        $total = [$n => 0];
+        $color = [$n => $col];
+        for ($i = $n - 1; $i >= 0; $i--) {
+            if ($noSacrifice || !$sources[$i]['multi']) {
+                $max = 0;
+                $per = $r === 0 ? [] : array_fill(0, $r, 0);
+                foreach ($sources[$i]['choices'] as $c) {
+                    if ($noSacrifice && $c['sac'] !== 0) {
+                        continue;
+                    }
+                    if ($c['total'] > $max) {
+                        $max = $c['total'];
+                    }
+                    for ($j = 0; $j < $r; $j++) {
+                        $v = $c['prod'][$rSym[$j]] ?? 0;
+                        if ($v > $per[$j]) {
+                            $per[$j] = $v;
+                        }
+                    }
+                }
+                $tot += $max;
+                for ($j = 0; $j < $r; $j++) {
+                    $col[$j] += $per[$j];
+                }
+            }
+            $total[$i] = $tot;
+            $color[$i] = $col;
+        }
+
+        return [$total, $color];
+    }
+
+    /**
+     * Pour chaque production `$d` (1..somme), le plus petit nombre de sources qui peuvent la fournir : on prend les plus
+     * grosses d'abord. `$max` = production maximale de chaque source restante.
+     *
+     * @param list<int> $max
+     * @return array<int, int>
+     */
+    private static function minTaps(array $max): array
+    {
+        rsort($max);
+        $out = [];
+        $sum = 0;
+        $d = 1;
+        foreach ($max as $k => $v) {
+            $sum += $v;
+            for (; $d <= $sum; $d++) {
+                $out[$d] = $k + 1;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -496,7 +656,7 @@ final class ManaPayment
             }
         }
         foreach ($producedR as $kind => $amounts) {
-            foreach (self::genericOrder() as $s) {
+            foreach (self::GENERIC_ORDER as $s) {
                 $use = min($generic, $amounts[$s] ?? 0);
                 if ($use > 0) {
                     $real[$s] = ($real[$s] ?? 0) + $use;
@@ -506,7 +666,7 @@ final class ManaPayment
                 }
             }
         }
-        foreach (self::genericOrder() as $s) {
+        foreach (self::GENERIC_ORDER as $s) {
             $use = min($generic, $produced[$s] ?? 0);
             if ($use > 0) {
                 $real[$s] = ($real[$s] ?? 0) + $use;
@@ -527,7 +687,7 @@ final class ManaPayment
                 $left[$s] -= $n;
             }
             $g = $conv['cost']->generic;
-            foreach (self::genericOrder() as $s) {
+            foreach (self::GENERIC_ORDER as $s) {
                 $use = min($g, $left[$s] ?? 0);
                 if ($use > 0) {
                     $spend[$s] = ($spend[$s] ?? 0) + $use;
@@ -564,19 +724,13 @@ final class ManaPayment
     private static function ordered(array $amounts): array
     {
         $ordered = [];
-        foreach (Color::cases() as $color) {
-            if (($amounts[$color->symbol()] ?? 0) > 0) {
-                $ordered[$color->symbol()] = $amounts[$color->symbol()];
+        foreach (self::WUBRGC as $s) {
+            if (($amounts[$s] ?? 0) > 0) {
+                $ordered[$s] = $amounts[$s];
             }
         }
 
         return $ordered;
-    }
-
-    /** Ordre dans lequel on dépense le mana pour du générique : incolore d'abord (garde les couleurs), puis WUBRG. */
-    private static function genericOrder(): array
-    {
-        return ['C', 'W', 'U', 'B', 'R', 'G'];
     }
 
     /** @param list<int> $a @param list<int> $b */

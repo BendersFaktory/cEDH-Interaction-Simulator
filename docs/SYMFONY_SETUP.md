@@ -71,6 +71,37 @@ curl localhost:8000/api/simulations/2/pending
 curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: application/json' -d '{"actionId":"pass:1"}'
 ```
 
+## Profiler le moteur (SPX)
+
+Outil : [php-spx](https://github.com/NoiseByNorthwest/php-spx). Il n'est pas disponible via PECL sur macOS (Homebrew, PHP 8.4) : compilation depuis les sources.
+
+```bash
+git clone https://github.com/NoiseByNorthwest/php-spx && cd php-spx
+phpize
+./configure --with-zlib-dir=$(xcrun --show-sdk-path)/usr
+make
+mkdir -p /opt/homebrew/lib/php/pecl/20240924   # le dossier n'existe pas : make install échoue sur le lien pecl
+cp modules/spx.so /opt/homebrew/lib/php/pecl/20240924/
+echo 'extension=spx.so' > /opt/homebrew/etc/php/8.4/conf.d/ext-spx.ini
+```
+
+Piège : les scripts autoconf de Homebrew ont un shebang cassé (`/usr/bin/perl5.30`) ; les lancer avec `/usr/bin/perl <script>`.
+
+Usage (inactif sans `SPX_ENABLED`, le rapport plat part sur stderr) :
+
+```bash
+SPX_ENABLED=1 SPX_FP_LIMIT=30 php backend/bin/smoke.php 16 > /dev/null
+SPX_ENABLED=1 SPX_FP_INC=1 SPX_FP_LIMIT=30 php backend/bin/smoke.php 16 > /dev/null   # trié par temps inclusif
+```
+
+Les gains se mesurent **sans** SPX (le profileur ralentit l'exécution). Pour vérifier qu'une optimisation ne change aucun événement, `bin/bench.php` donne durée, nombre d'événements, µs par événement et sha1 du flux d'événements par graine (défaut : 42 6 16) :
+
+```bash
+php backend/bin/bench.php 1..20 42
+```
+
+Les empreintes doivent rester identiques avant et après l'optimisation ; sinon le jeu a changé.
+
 ## Mesures (seed 42, 4 IA)
 
 | | SQLite (au départ) | MySQL, colonnes `JSON` natives | **MySQL, `json_text` + insertions par lots** (actuel) |
@@ -162,6 +193,15 @@ Lecture : le coût par événement de `create` ne bouge pas (seed 42 : ~96 µs p
 | `state@` (pire écart entre ancres) | ~44 ms | ~22 ms | ~42 ms |
 
 Lecture : les decks ont changé (un terrain de base remplacé par Eldrazi Temple, un Hybrid Bear par Eldrazi Mimic), donc les parties ne sont pas comparables une à une avec le tableau précédent. Seeds 42 et 6 : ~77-100 µs par événement, comme avant. **Seed 16 : ~226 µs par événement** (partie de 59 tours, jusqu'à 24 permanents par joueur) : le solveur de paiement (`ManaPayment`, appelé à chaque priorité via `AbilityManager::canActivate` et le générateur d'actions) coûte plus cher sur un grand plateau. Sur des decks identiques, la restriction seule ajoute ~5 % (mesure de l'agent d'implémentation sur 7 parties). Voir l'item « Profiler le moteur » de la roadmap. N = 1 conservé (reconstruction ≤ 44 ms).
+
+#### Après le profilage et l'optimisation du solveur (mesuré le 2026-10-12, graines 42 / 6 / 16, MySQL 9.3)
+
+Decks inchangés depuis la mesure précédente, donc comparables. Médianes de `bin/measure.php` :
+
+- `create()` : seed 42 ~0,22 s, seed 6 ~0,25 s, **seed 16 ~0,70 s** (était ~1,45 s).
+- `fork` au milieu : ~11 à 66 ms ; reconstruction (`state@`, pire écart entre ancres) : ≤ 32 ms ; taille en base : ~1,5 à 3,0 Mo (inchangée).
+
+Lecture : seul le moteur a changé. Les événements sont identiques (empreintes sha1 de `bin/bench.php`, 21 graines). N = 1 conservé.
 
 ## Persistance : `json_text` et insertions par lots
 

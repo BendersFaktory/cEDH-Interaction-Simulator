@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-12 (mana conditionnel terminé : Eldrazi Temple / Eldrazi Mimic, sous-types rattachés à leur type, recette scénario 12, mesures ; TODO cartes multi-types ajouté ; profilage devenu nécessaire). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-12 (moteur profilé et optimisé : `ManaContext`, solveur de paiement itératif, `ActivatedAbility::mana()` mémoïsée ; seed 16 1,14 → 0,44 s dans `bin/bench.php`, empreintes d'événements identiques ; mana conditionnel terminé : Eldrazi Temple / Eldrazi Mimic, sous-types rattachés à leur type, recette scénario 12 ; TODO cartes multi-types ajouté). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -92,12 +92,13 @@
   - [x] Documenté dans `docs/ARCHITECTURE.md` et `docs/SYMFONY_SETUP.md` ; TODO de `Checkpoint.php` supprimé.
   - *Risques restants* : une évolution du format de `GameState` invalide les ancres anciennes (versionner l'état) ; en dev, recréer les parties créées avant cette migration.
 - [ ] Exécution asynchrone des grosses simulations (Symfony Messenger) + progression.
-- [ ] **Profiler le moteur** (devenu prioritaire) : depuis les capacités activées, 53 µs par événement contre 36 (seed 42) ; après le mana conditionnel, la seed 16 (59 tours, grands plateaux) monte à ~226 µs par événement et `create` à ~1,45 s (seeds 42 / 6 : ~0,30 s). Suspects : `ManaPayment` appelé à chaque priorité par `AbilityManager::canActivate` et le générateur d'actions (plan de paiement par capacité à coût), les combinaisons de convertisseurs, le backtracking `cover` sur beaucoup de sources.
+- [x] **Profiler le moteur** *(Vérifié le 2026-10-12 : SPX sur la seed 16 avant optimisation : `ManaPayment::plan` ≈ 75 % du temps (`cover` 412 K appels, `CardInstance::abilities` 171 K appels, `Color::fromSymbol` ~390 ms) ; corrigé par `ManaContext` (plateau scanné une fois par `LegalActionGenerator::for()`), `cover()` itératif avec bornes inférieures plus fortes (même plan choisi), `ActivatedAbility::mana()` mémoïsée, `Color::fromSymbol` en `match`. `php backend/bin/bench.php 1..20 42` : seed 16 1144 → 437 ms (178 → 68 µs par événement), seed 42 150 → 89 ms, seed 6 134 → 88 ms, 21 graines 7,15 → 3,69 s ; **21 empreintes sha1 du flux d'événements identiques** (seeds 1..20 + 42). Nœuds du solveur sur la seed 16 : 411 773 → 85 506. PHPUnit 150 tests OK (3 nouveaux dans `ManaPaymentTest`), `smoke.php 42` inchangé (30 tours, J2 gagne), vitest 25 tests (fixture non régénérée). MySQL (`bin/measure.php`) : `create` seed 42 ~0,22 s, seed 6 ~0,25 s, seed 16 ~0,70 s (était ~1,45 s) ; fork 11-66 ms ; reconstruction ≤ 32 ms. Réserve : `ManaPayment::NODE_LIMIT` (50 000) n'est jamais atteint (max 24 780 nœuds avant, 136 après), mais s'il l'était, le nouveau solveur peut choisir un autre plan : voir « Versionner le format de `GameState` ».)*
 - [ ] Tests de propriété sur le moteur : invariants (nombre total de cartes constant, pile vide en fin d'étape, déterminisme sur N seeds).
 - [ ] CI backend : phpunit + phpstan.
 - [ ] Couverture de code PHPUnit : rapport + seuil minimal en CI.
 - [ ] phpstan sur `src/` (niveau à fixer).
 - [ ] Versionner le format de `GameState` dans les ancres (une évolution du format invalide les ancres anciennes).
+  - *Note (2026-10-12)* : une partie qui atteint `ManaPayment::NODE_LIMIT` (50 000 nœuds) peut rejouer différemment depuis le profilage (solveur à moins de nœuds, plan éventuellement meilleur) ; une ancre issue d'une telle partie n'est donc pas garantie de rejouer à l'identique. À traiter avec ce versionnage.
 - [ ] Mémoire des états : `CardInstance::toArray()` est à 16 clés ; une clé de plus double la table PHP (mesuré : pic de `smoke.php 42` de 93 à 156 Mo). `token` et `boost` sont donc omis à leur valeur par défaut. Avant d'ajouter des champs, regrouper les clés rares ou omettre les valeurs par défaut. `smoke.php` ne garde plus les états des checkpoints (il les compte) : la partie seed 42 dure maintenant 30 tours (depuis Eldrazi Temple / Mimic).
 - [ ] Montées de version : PHPUnit 12, Symfony 8 quand Doctrine sera compatible (`var-exporter` 8), MySQL.
 - [ ] `composer audit` et dépendances à jour.

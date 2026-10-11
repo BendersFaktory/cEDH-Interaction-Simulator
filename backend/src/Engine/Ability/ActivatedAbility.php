@@ -30,6 +30,9 @@ use App\Engine\Mana\ManaRestriction;
  */
 final class ActivatedAbility
 {
+    /** @var array<string, self> mémo de `mana()` (poids mouche) */
+    private static array $manaMemo = [];
+
     /**
      * @param list<list<Color>>            $options      alternatives de mana produit (effet `mana`)
      * @param array<int, ManaRestriction>  $restrictions index d'option => restriction (options restreintes seulement)
@@ -62,9 +65,12 @@ final class ActivatedAbility
      */
     public static function mana(string $spec, ?string $cost = null): self
     {
-        [$options, $restrictions] = self::parseOptions(explode('|', $spec));
+        // Objet valeur immuable, fonction pure de ses arguments : instances partagées (poids mouche), aucun état de partie.
+        return self::$manaMemo[$spec . "\0" . $cost] ??= (function () use ($spec, $cost): self {
+            [$options, $restrictions] = self::parseOptions(explode('|', $spec));
 
-        return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, restrictions: $restrictions);
+            return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, restrictions: $restrictions);
+        })();
     }
 
     /** Treasure : `{T}, sacrifier : un mana de la couleur de son choix`. */
