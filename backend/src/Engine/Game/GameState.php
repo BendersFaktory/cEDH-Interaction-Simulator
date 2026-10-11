@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Game;
 
 use App\Engine\Ability\ActivatedAbility;
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Event\GameEvent;
 
 /**
@@ -27,6 +28,11 @@ final class GameState
     public bool $over = false;
     public ?int $winner = null;
     public CombatState $combat;
+    /** @var list<PendingTrigger> triggers en attente, dans l'ordre où ils surviennent (voir TriggerManager) */
+    public array $pendingTriggers = [];
+    public int $nextTriggerId = 1;
+    /** Détenteur de priorité à rétablir après un choix de triggers en cours ; null hors de ce choix. */
+    public ?int $triggerResumeHolder = null;
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -162,6 +168,9 @@ final class GameState
             $card->tapped = false;
             $destination = $this->sendToGraveyard($playerId, $card);
             $this->emit('PermanentSacrificed', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination]);
+            if ($card->isCreature()) {
+                $this->queueTriggers($playerId, $card, TriggeredAbility::DIES);
+            }
         }
     }
 
@@ -182,11 +191,34 @@ final class GameState
             sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $type,
             power: $power, toughness: $toughness, abilities: $abilities, token: true,
         );
-        $token->enteredTurn = $this->turn;
-        $this->player($playerId)->battlefield[] = $token;
+        $this->enterBattlefield($playerId, $token);
         $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()]);
 
         return $token;
+    }
+
+    /**
+     * Seul chemin d'entrée sur le champ de bataille (sort résolu, terrain joué, jeton créé) : note le tour d'arrivée (mal
+     * d'invocation) et met en file les triggers `etb` de la carte. L'appelant journalise.
+     */
+    public function enterBattlefield(int $playerId, CardInstance $card): void
+    {
+        $card->enteredTurn = $this->turn;
+        $this->player($playerId)->battlefield[] = $card;
+        $this->queueTriggers($playerId, $card, TriggeredAbility::ETB);
+    }
+
+    /**
+     * Met en file les triggers de `$card` pour l'événement `$event` (`TriggeredAbility::ETB|DIES|UPKEEP`). La source est
+     * copiée (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
+     */
+    public function queueTriggers(int $controller, CardInstance $card, string $event): void
+    {
+        foreach ($card->triggers as $index => $trigger) {
+            if ($trigger->event === $event) {
+                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index);
+            }
+        }
     }
 
     /** Défausse une carte de la main (cimetière via `sendToGraveyard()`) et journalise `CardDiscarded`. Seul chemin de la défausse. */
@@ -207,6 +239,9 @@ final class GameState
             'stepStarted' => $this->stepStarted,
             'priority' => $this->priority->toArray(),
             'combat' => $this->combat->toArray(),
+            'pendingTriggers' => array_map(static fn (PendingTrigger $t) => $t->toArray(), $this->pendingTriggers),
+            'nextTriggerId' => $this->nextTriggerId,
+            'triggerResumeHolder' => $this->triggerResumeHolder,
             'stack' => array_map(static fn (StackItem $i) => $i->toArray(), $this->stack),
             'landsPlayed' => $this->landsPlayed,
             'nextStackId' => $this->nextStackId,
@@ -239,6 +274,9 @@ final class GameState
         $s->stepStarted = (bool) $d['stepStarted'];
         $s->priority = PriorityState::fromArray($d['priority']);
         $s->combat = CombatState::fromArray($d['combat'] ?? []);
+        $s->pendingTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['pendingTriggers'] ?? []);
+        $s->nextTriggerId = (int) ($d['nextTriggerId'] ?? 1);
+        $s->triggerResumeHolder = isset($d['triggerResumeHolder']) ? (int) $d['triggerResumeHolder'] : null;
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];

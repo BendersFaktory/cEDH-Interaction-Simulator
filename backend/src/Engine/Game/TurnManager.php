@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Rules\CombatManager;
 use App\Engine\Rules\StateBasedActions;
 
@@ -25,6 +26,13 @@ final class TurnManager
             $untapped = $s->player($s->activePlayer)->untapAll();
             if ($untapped !== []) {
                 $s->emit('PermanentsUntapped', ['player' => $s->activePlayer, 'cards' => $untapped]);
+            }
+        }
+
+        // Triggers « au début de votre entretien » : mis sur la pile avant la première priorité de l'étape.
+        if ($s->phase === Phase::Upkeep) {
+            foreach ($s->player($s->activePlayer)->battlefield as $card) {
+                $s->queueTriggers($s->activePlayer, $card, TriggeredAbility::UPKEEP);
             }
         }
 

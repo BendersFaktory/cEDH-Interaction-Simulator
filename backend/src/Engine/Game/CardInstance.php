@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Game;
 
 use App\Engine\Ability\ActivatedAbility;
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
 
@@ -46,6 +47,8 @@ final class CardInstance
         public readonly array $abilities = [],
         public readonly ?string $adds = null, // mana ajouté à la résolution d'un sort `effect 'mana'` (rituel), ex. `{R}{R}`
         public readonly bool $token = false, // jeton : cesse d'exister en quittant le champ de bataille
+        /** @var list<TriggeredAbility> triggers (l'index fait partie de l'id d'action PutTrigger) */
+        public readonly array $triggers = [],
     ) {
     }
 
@@ -133,7 +136,8 @@ final class CardInstance
             'commander' => $this->commander,
             'power' => $this->power,
             'toughness' => $this->toughness,
-        ] + ($this->token ? ['token' => true] : []); // omis si faux : au-delà de 16 clés, PHP double la table (+75 % de mémoire par état)
+        ] + ($this->token ? ['token' => true] : []) // omis si faux : au-delà de 16 clés, PHP double la table (+75 % de mémoire par état)
+            + ($this->triggers === [] ? [] : ['triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers)]); // idem
     }
 
     public function toArray(): array
@@ -163,6 +167,7 @@ final class CardInstance
             array_map([ActivatedAbility::class, 'fromArray'], $d['abilities'] ?? []),
             $d['adds'] ?? null,
             (bool) ($d['token'] ?? false),
+            array_map([TriggeredAbility::class, 'fromArray'], $d['triggers'] ?? []),
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
 

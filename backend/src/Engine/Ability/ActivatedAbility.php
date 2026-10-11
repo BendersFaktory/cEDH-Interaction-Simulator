@@ -59,6 +59,15 @@ final class ActivatedAbility
         return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), array_map(self::parseOption(...), explode('|', $spec)));
     }
 
+    /**
+     * `{T}: ajoute …` ; `$spec` = alternatives séparées par `|`, ex. `{C}{C}` ou `{R}|{G}`. `$cost` = coût de mana en plus du
+     * `{T}` (Signet : `{1}`).
+     */
+    public static function mana(string $spec, ?string $cost = null): self
+    {
+        return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), array_map(self::parseOption(...), explode('|', $spec)));
+    }
+
     /** Treasure : `{T}, sacrifier : un mana de la couleur de son choix`. */
     public static function treasure(): self
     {
@@ -98,8 +107,14 @@ final class ActivatedAbility
     /** @return array{name: string, power: int, toughness: int} jeton décrit par `spec` (`Nom:F/E`) */
     public function tokenSpec(): array
     {
-        if (!preg_match('#^([^:]+):(\d+)/(\d+)$#', $this->spec, $m)) {
-            throw new \InvalidArgumentException("Jeton invalide : {$this->spec}");
+        return self::parseTokenSpec($this->spec);
+    }
+
+    /** @return array{name: string, power: int, toughness: int} jeton décrit par `Nom:F/E` (partagé avec `TriggeredAbility`) */
+    public static function parseTokenSpec(string $spec): array
+    {
+        if (!preg_match('#^([^:]+):(\d+)/(\d+)$#', $spec, $m)) {
+            throw new \InvalidArgumentException("Jeton invalide : $spec");
         }
 
         return ['name' => $m[1], 'power' => (int) $m[2], 'toughness' => (int) $m[3]];

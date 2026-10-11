@@ -23,6 +23,16 @@ export interface AbilityView {
   spec?: string
 }
 
+/** Trigger d'une carte (forme sérialisée par le moteur). */
+export interface TriggerView {
+  /** `etb` (entrée en jeu), `dies` (mort) ou `upkeep` (début de l'entretien de son contrôleur). */
+  event: 'etb' | 'dies' | 'upkeep'
+  effect: string
+  amount: number
+  /** Jeton créé (`Nom:F/E`). */
+  spec?: string
+}
+
 export interface PublicCard {
   id: string
   name: string
@@ -42,6 +52,8 @@ export interface PublicCard {
   adds?: string[] | string
   /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
   token?: boolean
+  /** Triggers (absent = aucun). */
+  triggers?: TriggerView[]
 }
 
 export interface BoardCard extends PublicCard {
@@ -63,7 +75,7 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger'
   player: number
   cardId?: string
   targets?: string[]
@@ -74,6 +86,8 @@ export interface ActionView {
   option?: number
   /** Action `ability` : vrai pour une capacité de mana. */
   mana?: boolean
+  /** Action `trigger` : trigger en attente à mettre sur la pile. */
+  pendingId?: string
 }
 
 export interface StackItemView {
@@ -84,6 +98,10 @@ export interface StackItemView {
   x?: number
   /** Présent pour une capacité activée (la carte est sa source). */
   ability?: AbilityView
+  /** Présent pour un trigger (la carte est sa source, telle qu'au moment du trigger). */
+  trigger?: TriggerView
+  /** Libellé du trigger, fourni par le moteur. */
+  label?: string
 }
 
 export interface DecisionRequest {

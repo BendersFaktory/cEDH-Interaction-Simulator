@@ -8,6 +8,7 @@ use App\Engine\Action\Action;
 use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PassPriority;
+use App\Engine\Action\PutTrigger;
 use App\Engine\Game\GameState;
 
 /** Passe toujours (ne déclare ni attaquant ni bloqueur). La décision est quand même prise et journalisée (PriorityPassed). */
@@ -34,9 +35,9 @@ final class AutoPassAgent implements PlayerAgent
             }
         }
 
-        // Défausse obligatoire : la première carte proposée (déterministe).
+        // Défausse obligatoire / trigger à poser : le premier choix proposé (déterministe).
         foreach ($legal as $action) {
-            if ($action instanceof Discard) {
+            if ($action instanceof Discard || $action instanceof PutTrigger) {
                 return $action;
             }
         }
