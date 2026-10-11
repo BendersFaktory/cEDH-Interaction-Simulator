@@ -136,6 +136,11 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'AbilityTriggered':
+      v.stack.push({ id: p.stackId, card: p.card, controller: p.player, targets: p.targets ?? [], trigger: p.trigger, label: p.label })
+      v.priority.passed = []
+      break
+
     case 'AbilityResolved':
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
       break

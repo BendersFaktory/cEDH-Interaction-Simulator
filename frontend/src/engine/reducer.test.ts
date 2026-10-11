@@ -129,6 +129,19 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1'])
   })
 
+  it('AbilityTriggered pose le déclencheur sur la pile (source hors du champ de bataille possible), AbilityResolved le retire', () => {
+    const v = start()
+    v.priority.passed = [1, 2]
+    const myr = { id: 'm1', name: 'Perilous Myr', type: 'creature' as const, cost: 2, effect: null, amount: 0 }
+    const trigger = { event: 'dies' as const, effect: 'damage', amount: 2 }
+    applyEvent(v, ev(4, 'AbilityTriggered', { player: 0, stackId: 's7', card: myr, triggerIndex: 0, trigger, label: 'Quand elle meurt : 2 dégâts', targets: ['player:3'] }))
+    expect(v.stack).toEqual([{ id: 's7', card: myr, controller: 0, targets: ['player:3'], trigger, label: 'Quand elle meurt : 2 dégâts' }])
+    expect(v.priority.passed).toEqual([])
+    applyEvent(v, ev(5, 'AbilityResolved', { stackId: 's7', controller: 0, card: myr, abilityIndex: 0, trigger: true }))
+    expect(v.stack).toEqual([])
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1'])
+  })
+
   it('ManaAdded, ManaPoolEmptied et SpellCast.pool', () => {
     const v = start()
     applyEvent(v, ev(4, 'ManaAdded', { player: 0, mana: { R: 2 }, pool: { R: 2 }, source: 's1' }))
