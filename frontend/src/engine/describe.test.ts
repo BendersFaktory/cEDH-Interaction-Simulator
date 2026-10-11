@@ -28,6 +28,8 @@ describe('describeEvent — capacités', () => {
     expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Mountain' }, tapped: ['x'], mana: { R: 1 } }))).toBe('J0 engage Mountain : {R}')
     expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Sol Ring' }, tapped: ['x'], mana: { C: 2 } }))).toBe('J0 engage Sol Ring : {C}{C}')
     expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Sol Ring' }, tapped: [], mana: { C: 2 } }))).toBe('J0 active Sol Ring : {C}{C}')
+    expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Eldrazi Temple' }, tapped: ['x'], mana: { C: 2 }, ability: { options: ['{C}{C}@eldrazi'] }, option: 0 })))
+      .toBe('J0 engage Eldrazi Temple : {C}{C} (mana restreint : seulement pour un sort ou une capacité d\'Eldrazi incolore)')
     expect(describeEvent(e('ManaAdded', { player: 0, mana: { R: 2 } }))).toBe('J0 gagne {R}{R}')
     expect(describeEvent(e('ManaPoolEmptied', { player: 0, lost: { R: 1 } }))).toBe('J0 perd son mana flottant {R}')
   })

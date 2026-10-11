@@ -20,6 +20,7 @@ use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
+use App\Engine\Mana\ManaContext;
 use App\Engine\Mana\ManaPayment;
 
 /**
@@ -67,16 +68,17 @@ final class LegalActionGenerator
         // Sorts (main + zone de commandement), dédoublonnés par (nom, cibles) pour ne pas lister 4 Bolt identiques.
         // Le coût d'un commandant inclut la taxe : +2 par lancement précédent.
         $seen = [];
+        $mana = ManaPayment::context($p, $s->turn); // champ de bataille scanné une seule fois pour tous les sorts et capacités
         foreach ([...$p->hand, ...$p->command] as $card) {
             if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed)) {
                 continue;
             }
             // Payable avec les terrains non engagés (couleurs, hybrides) ; un sort à {X} offre une action par X payable.
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($p, $cost, 0, $s->turn) === null) {
+            if (ManaPayment::plan($p, $cost, 0, $s->turn, null, $card, $mana) === null) {
                 continue;
             }
-            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost, $s->turn), self::MAX_X) : 0;
+            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost, $s->turn, $card, $mana), self::MAX_X) : 0;
             foreach ($this->targetSets($s, $card) as $targets) {
                 for ($x = 0; $x <= $maxX; $x++) {
                     $key = $card->name . '|' . implode(',', $targets) . '|' . $x;
@@ -89,7 +91,7 @@ final class LegalActionGenerator
             }
         }
 
-        return [...$actions, ...$this->abilityActions($s, $p)];
+        return [...$actions, ...$this->abilityActions($s, $p, $mana)];
     }
 
     /**
@@ -99,13 +101,13 @@ final class LegalActionGenerator
      *
      * @return list<ActivateAbility>
      */
-    private function abilityActions(GameState $s, PlayerState $p): array
+    private function abilityActions(GameState $s, PlayerState $p, ManaContext $mana): array
     {
         $actions = [];
         $seen = [];
         foreach ($p->battlefield as $card) {
             foreach ($card->abilities() as $index => $ability) {
-                if (!AbilityManager::canActivate($s, $p, $card, $ability)) {
+                if (!AbilityManager::canActivate($s, $p, $card, $ability, $mana)) {
                     continue;
                 }
                 $options = $ability->isManaAbility ? array_keys($ability->options) : [0];

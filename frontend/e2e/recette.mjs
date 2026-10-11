@@ -129,6 +129,9 @@ async function run() {
   let attacked = false, sawBlock = false
   for (let i = 0; i < 400 && !attacked; i++) {
     if (!(await page.locator('.actions').count())) break
+    // Les boutons sont désactivés pendant une décision en vol (store.loading) : on attend qu'ils soient réactivés
+    // avant de les chercher, sans avaler l'erreur si l'état reste bloqué.
+    await page.waitForFunction(() => !document.querySelector('.actions button:disabled'), null, { timeout: TIMEOUT })
     const order = ['Défausser', 'Attaquer', 'Bloquer', 'Terrains', 'Sorts', 'Terminer la déclaration', 'Priorité']
     for (const title of order) {
       // Sorts : on ne lance que des créatures (le Bolt/Contresort ne servent pas ce scénario).
@@ -173,10 +176,10 @@ async function run() {
   log('9 réserve visible après engagement manuel:', poolSeen); await shot('9-mana-manuel')
   if (!poolSeen) problems.push('recette mana : la réserve n\'apparaît pas après une capacité de mana')
 
-  // 10 : capacité à choix de coût (seed 7 : J0 a Goblin Bombardment, Llanowar Elves et Grizzly Bears en main de départ).
+  // 10 : capacité à choix de coût (seed 18 : J0 a Goblin Bombardment et Llanowar Elves en main de départ).
   // J0 joue ses terrains, lance Bombardment et des créatures, n'attaque pas, puis sacrifie une créature pour 1 dégât à J1.
   const prevGame10 = (await info()).match(/#(\d+)/)[1]
-  await page.fill('input[placeholder="aléatoire"]', '7')
+  await page.fill('input[placeholder="aléatoire"]', '18')
   await page.click('text=Nouvelle partie Commander')
   await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame10)
   await page.waitForSelector('.actions', { timeout: TIMEOUT })
@@ -202,10 +205,10 @@ async function run() {
   await page.locator('text=/J0 sacrifie/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('10-cout-sacrifice')
   if (!sacrificed) problems.push('recette coût : J0 n\'a pas pu sacrifier une créature au Goblin Bombardment')
 
-  // 11 : trigger à cible (seed 11 : J0 a Goblin Bombardment, Perilous Myr et Sol Ring en main de départ).
+  // 11 : trigger à cible (seed 161 : J0 a Goblin Bombardment et Perilous Myr en main de départ).
   // J0 lance Bombardment et le Myr, sacrifie le Myr (1 dégât à J1), puis choisit J2 comme cible du trigger « meurt ».
   const prevGame11 = (await info()).match(/#(\d+)/)[1]
-  await page.fill('input[placeholder="aléatoire"]', '11')
+  await page.fill('input[placeholder="aléatoire"]', '161')
   await page.click('text=Nouvelle partie Commander')
   await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame11)
   await page.waitForSelector('.actions', { timeout: TIMEOUT })
@@ -214,7 +217,7 @@ async function run() {
     if (!(await page.locator('.actions').count())) break
     const put = page.locator('.actions h4:has-text("Triggers à mettre sur la pile") ~ button:not([disabled]):has-text("Perilous Myr"):has-text("→ joueur 2")').first()
     const sac = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("en sacrifiant Perilous Myr"):has-text("→ joueur 1")').first()
-    const spell = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):is(:has-text("Sol Ring"), :has-text("Goblin Bombardment"), :has-text("Perilous Myr"))').first()
+    const spell = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):is(:has-text("Goblin Bombardment"), :has-text("Perilous Myr"))').first()
     if (await put.count()) {
       if (await tryClick(put)) {
         await page.waitForTimeout(400)
@@ -233,6 +236,45 @@ async function run() {
   log('11 cible du trigger choisie par J0 :', triggered, '| journal :', trigLine, '| pile :', stackShown, '|', await info())
   await shot('11-declencheur')
   if (!triggered) problems.push('recette trigger : J0 n\'a pas pu choisir la cible du trigger de Perilous Myr')
+
+  // 12 : mana conditionnel (seed 225 : J0 a Eldrazi Temple et Eldrazi Mimic en main de départ).
+  // J0 joue le Temple, l'engage à la main pour {C}{C} restreint (pastilles marquées dans la réserve), puis lance le Mimic avec.
+  const prevGame12 = (await info()).match(/#(\d+)/)[1]
+  await page.fill('input[placeholder="aléatoire"]', '225')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame12)
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  let restrictedSeen = false
+  let mimicCast = false
+  for (let i = 0; i < 120 && !mimicCast; i++) {
+    if (!(await page.locator('.actions').count())) break
+    const temple = page.locator('.actions h4:has-text("Terrains") ~ button:not([disabled]):has-text("Eldrazi Temple")').first()
+    const restricted = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("Eldrazi Temple"):has-text("seulement pour")').first()
+    const mimic = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):has-text("Eldrazi Mimic")').first()
+    if (restrictedSeen && (await mimic.count())) {
+      if (await tryClick(mimic)) {
+        await page.waitForTimeout(400)
+        mimicCast = (await page.locator('text=/J0 lance Eldrazi Mimic/').count()) > 0
+      }
+    } else if (await restricted.count()) {
+      if (await tryClick(restricted)) {
+        await page.waitForTimeout(300)
+        restrictedSeen = (await page.locator('.mana-pool .mana-sym.restricted').count()) === 2
+        if (restrictedSeen) await shot('12a-mana-restreint')
+      }
+    } else if (await temple.count()) await tryClick(temple)
+    else if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
+    else if (await enabled('Terminer la déclaration').count()) await tryClick(enabled('Terminer la déclaration'))
+    else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
+    await page.waitForTimeout(150)
+  }
+  const mimicLine = mimicCast ? (await page.locator('text=/J0 lance Eldrazi Mimic/').first().textContent())?.replace(/\s+/g, ' ').trim() : '(absent)'
+  const leftRestricted = await page.locator('.mana-pool .mana-sym.restricted').count()
+  log('12 mana restreint affiché:', restrictedSeen, '| Mimic lancé avec :', mimicCast, '| journal :', mimicLine, '| restreint restant :', leftRestricted, '|', await info())
+  await shot('12b-mimic')
+  if (!restrictedSeen) problems.push('recette mana conditionnel : le {C}{C} restreint d\'Eldrazi Temple n\'apparaît pas dans la réserve')
+  if (!mimicCast) problems.push('recette mana conditionnel : J0 n\'a pas pu lancer Eldrazi Mimic avec le mana du Temple')
+  else if (leftRestricted) problems.push('recette mana conditionnel : le mana restreint n\'a pas été dépensé pour Eldrazi Mimic')
 
   // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
   const unexpected = problems.filter((p) => !/404/.test(p))

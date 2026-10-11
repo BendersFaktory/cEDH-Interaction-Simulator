@@ -130,7 +130,8 @@ final class PlayerState
 
     /**
      * Active une capacité de mana d'un permanent : l'engage (si `{T}`) et ajoute le mana produit à la réserve.
-     * Pas de pile, pas d'événement (l'appelant journalise). Seul endroit qui crée du mana.
+     * Pas de pile, pas d'événement (l'appelant journalise). Seul endroit qui crée du mana. Le mana d'une option restreinte
+     * (Eldrazi Temple) va dans la partie restreinte de la réserve.
      *
      * @return array<string, int> mana produit, par symbole
      */
@@ -140,8 +141,9 @@ final class PlayerState
             $card->tapped = true;
         }
         $produced = $ability->produced($option);
+        $restriction = $ability->restriction($option);
         foreach ($produced as $symbol => $n) {
-            $this->pool->add(Color::fromSymbol($symbol), $n);
+            $this->pool->add(Color::fromSymbol($symbol), $n, $restriction);
         }
 
         return $produced;
@@ -149,7 +151,8 @@ final class PlayerState
 
     /**
      * Exécute un plan de ManaPayment : active les capacités de mana prévues, puis chaque convertisseur (son coût pris dans la
-     * réserve, puis sa production ajoutée), enfin dépense `spend` depuis la réserve.
+     * réserve, puis sa production ajoutée), enfin dépense `spend` depuis la réserve : d'abord la partie restreinte prévue
+     * (`spendRestricted`), le reste en mana libre.
      * Le surplus produit (Sol Ring pour un `{1}`) reste dans la réserve jusqu'à la fin de l'étape.
      * Les sources dont le coût inclut un sacrifice (Treasure) restent engagées sur le champ de bataille : l'appelant les
      * sacrifie aussitôt avec `GameState::sacrifice($joueur, $result['sacrifice'])`.
@@ -196,8 +199,19 @@ final class PlayerState
                 $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
             }
         }
+        $free = $plan->spend;
+        foreach ($plan->spendRestricted as $kind => $amounts) {
+            foreach ($amounts as $symbol => $n) {
+                $this->pool->spendRestricted($kind, Color::fromSymbol($symbol), $n);
+                $free[$symbol] -= $n;
+            }
+        }
+        foreach ($free as $symbol => $n) {
+            if ($n > 0) {
+                $this->pool->spend(Color::fromSymbol($symbol), $n);
+            }
+        }
         foreach ($plan->spend as $symbol => $n) {
-            $this->pool->spend(Color::fromSymbol($symbol), $n);
             $spent[$symbol] = ($spent[$symbol] ?? 0) + $n;
         }
         // Pris dans la réserve préexistante = dépensé au-delà de ce que les activations ont produit.
@@ -253,7 +267,7 @@ final class PlayerState
             'commanderCasts' => $this->commanderCasts,
             'commanderDamage' => $this->commanderDamage,
             'pool' => $this->pool->toArray(),
-        ];
+        ] + ($this->pool->restrictedToArray() === [] ? [] : ['poolRestricted' => $this->pool->restrictedToArray()]);
     }
 
     public static function fromArray(array $d): self
@@ -269,7 +283,7 @@ final class PlayerState
             $map($d['command']),
             array_map('intval', $d['commanderCasts']),
             array_map('intval', $d['commanderDamage']),
-            ManaPool::fromArray($d['pool'] ?? []),
+            ManaPool::fromArray($d['pool'] ?? [], $d['poolRestricted'] ?? []),
         );
         $p->lost = (bool) $d['lost'];
 

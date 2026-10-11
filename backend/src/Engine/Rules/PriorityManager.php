@@ -160,7 +160,7 @@ final class PriorityManager
         if ($a->x < 0 || ($a->x > 0 && !$cost->hasX())) {
             throw new IllegalActionException('X invalide pour ce sort');
         }
-        $plan = ManaPayment::plan($p, $cost, $a->x, $s->turn) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
+        $plan = ManaPayment::plan($p, $cost, $a->x, $s->turn, null, $card) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
 
         $card = $p->takeFromHand($a->cardId);
         $fromCommand = false;
@@ -188,6 +188,7 @@ final class PriorityManager
             'paid' => $paid,
             'fromPool' => $fromPool,
             'pool' => $p->pool->toArray(),
+        ] + $p->pool->restrictedField() + [
             'fromCommand' => $fromCommand,
         ]);
         $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût

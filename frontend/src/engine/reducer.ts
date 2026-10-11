@@ -41,6 +41,11 @@ function removeCard(cards: BoardCard[], id: string): void {
   if (i >= 0) cards.splice(i, 1)
 }
 
+/** Partie restreinte de la réserve (valeur absolue ; absente du payload = vide). */
+function restrictedOf(r: Record<string, Record<string, number>> | undefined): Record<string, Record<string, number>> {
+  return Object.fromEntries(Object.entries(r ?? {}).map(([k, m]) => [k, { ...m }]))
+}
+
 function tapAll(pl: PlayerView, ids: string[] | undefined): void {
   for (const id of ids ?? []) {
     const c = pl.battlefield.find((x) => x.id === id)
@@ -55,7 +60,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
   switch (e.type) {
     case 'GameStarted':
-      for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[]; pool?: Record<string, number> }>) {
+      for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[]; pool?: Record<string, number>; restricted?: Record<string, Record<string, number>> }>) {
         v.players[pl.id] = {
           id: pl.id,
           life: pl.life,
@@ -68,6 +73,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
           controller: pl.controller,
           commanderDamage: {},
           pool: { ...(pl.pool ?? {}) },
+          restricted: restrictedOf(pl.restricted),
         } satisfies PlayerView
       }
       break
@@ -117,7 +123,10 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
         if (land) land.tapped = true
       }
       v.stack.push({ id: p.stackId, card: p.card, controller: p.player, targets: p.targets })
-      if (p.pool) pl.pool = { ...p.pool }
+      if (p.pool) {
+        pl.pool = { ...p.pool }
+        pl.restricted = restrictedOf(p.restricted)
+      }
       v.priority.passed = []
       break
     }
@@ -126,6 +135,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       const pl = v.players[p.player]
       tapAll(pl, p.tapped)
       pl.pool = { ...p.pool }
+      pl.restricted = restrictedOf(p.restricted)
       break
     }
 
@@ -147,10 +157,12 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
     case 'ManaAdded':
       v.players[p.player].pool = { ...p.pool }
+      v.players[p.player].restricted = restrictedOf(p.restricted)
       break
 
     case 'ManaPoolEmptied':
       v.players[p.player].pool = {}
+      v.players[p.player].restricted = {}
       break
 
     case 'SpellResolved': {

@@ -73,7 +73,7 @@ final class StackResolver
         foreach ($cost->colored as $symbol => $n) {
             $p->pool->add(Color::fromSymbol($symbol), $n);
         }
-        $s->emit('ManaAdded', ['player' => $player, 'mana' => $cost->colored, 'pool' => $p->pool->toArray(), 'source' => $stackId]);
+        $s->emit('ManaAdded', ['player' => $player, 'mana' => $cost->colored, 'pool' => $p->pool->toArray()] + $p->pool->restrictedField() + ['source' => $stackId]);
     }
 
     /** Pioche : une bibliothèque vide élimine le joueur (comme à l'étape de pioche). */

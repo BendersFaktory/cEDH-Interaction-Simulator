@@ -8,7 +8,7 @@ export interface AbilityView {
   effect: string
   tap: boolean
   manaCost?: string | null
-  /** Pour un effet de mana : alternatives produites (ex. ['CC'] ou ['R', 'G']). */
+  /** Pour un effet de mana : alternatives produites (ex. ['{C}{C}'] ou ['{R}', '{G}']) ; suffixe `@kind` si restreinte (`{C}{C}@eldrazi`). */
   options?: string[]
   amount?: number
   /** Coût : sacrifier la source (Treasure, Mind Stone). */
@@ -54,6 +54,8 @@ export interface PublicCard {
   token?: boolean
   /** Triggers (absent = aucun). */
   triggers?: TriggerView[]
+  /** Sous-types rangés sous leur type, ex. { creature: ['Eldrazi'] } (absent = aucun). */
+  subtypes?: Record<string, string[]>
 }
 
 export interface BoardCard extends PublicCard {
@@ -144,8 +146,10 @@ export interface PlayerView {
   controller: string
   /** Dégâts de commandant subis : "propriétaire:idCommandant" => total. */
   commanderDamage: Record<string, number>
-  /** Réserve de mana (symbole => quantité). */
+  /** Réserve de mana libre (symbole => quantité). */
   pool: Record<string, number>
+  /** Mana restreint (restriction => symbole => quantité), ex. { eldrazi: { C: 2 } } ; vide/absent = aucun. */
+  restricted?: Record<string, Record<string, number>>
 }
 
 export interface GameView {
