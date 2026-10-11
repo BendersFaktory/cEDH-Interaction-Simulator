@@ -71,10 +71,10 @@ final class TurnManager
 
     public function endStep(GameState $s): void
     {
-        // Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape.
+        // Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape (mana restreint compris, compté dans `lost`).
         foreach ($s->players as $p) {
             if (!$p->pool->isEmpty()) {
-                $s->emit('ManaPoolEmptied', ['player' => $p->id, 'lost' => $p->pool->toArray(), 'pool' => []]);
+                $s->emit('ManaPoolEmptied', ['player' => $p->id, 'lost' => $p->pool->all(), 'pool' => []]);
                 $p->pool->clear();
             }
         }

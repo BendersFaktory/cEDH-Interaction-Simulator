@@ -151,6 +151,18 @@ Lecture : `create` double environ par rapport à la mesure précédente (seed 42
 
 Lecture : le coût par événement de `create` ne bouge pas (seed 42 : ~96 µs par événement en base, contre ~95 avant) ; les écarts entre graines viennent de la longueur des parties (seed 16 : 54 tours). La reconstruction au pire écart monte à 40-61 ms (≤ 27 ms avant) : les écarts entre ancres sont plus longs (jusqu'à 176 événements) et les tours plus chargés (triggers, pioches). Toujours sous 100 ms : **N = 1 est conservé**. La file de triggers ajoute 3 clés à l'état (vides hors trigger) et une clé `triggers` aux seules cartes qui en ont.
 
+#### Après le mana conditionnel (Eldrazi Temple, Eldrazi Mimic ; mesuré le 2026-10-12, graines 42 / 6 / 16)
+
+| | seed 42 | seed 6 | seed 16 |
+|---|---|---|---|
+| Événements (dont verbeux) / ancres | 2975 (2262) / 30 | 4138 (3157) / 43 | 6410 (4921) / 59 |
+| Taille : ancres / événements | 1,31 / 0,18 Mo | 1,88 / 0,24 Mo | 2,62 / 0,42 Mo |
+| `create()` (service, médiane) | ~0,30 s | ~0,32 s | **~1,45 s** |
+| `fork` au milieu | ~38 ms | ~14 ms | ~88 ms |
+| `state@` (pire écart entre ancres) | ~44 ms | ~22 ms | ~42 ms |
+
+Lecture : les decks ont changé (un terrain de base remplacé par Eldrazi Temple, un Hybrid Bear par Eldrazi Mimic), donc les parties ne sont pas comparables une à une avec le tableau précédent. Seeds 42 et 6 : ~77-100 µs par événement, comme avant. **Seed 16 : ~226 µs par événement** (partie de 59 tours, jusqu'à 24 permanents par joueur) : le solveur de paiement (`ManaPayment`, appelé à chaque priorité via `AbilityManager::canActivate` et le générateur d'actions) coûte plus cher sur un grand plateau. Sur des decks identiques, la restriction seule ajoute ~5 % (mesure de l'agent d'implémentation sur 7 parties). Voir l'item « Profiler le moteur » de la roadmap. N = 1 conservé (reconstruction ≤ 44 ms).
+
 ## Persistance : `json_text` et insertions par lots
 
 - Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.

@@ -8,6 +8,10 @@ const target = (t: string): string =>
 const manaStr = (m: Record<string, number> | undefined): string =>
   Object.entries(m ?? {}).map(([s, n]) => `{${s}}`.repeat(n)).join('')
 
+/** Libellé d'une restriction de mana (`kind` du moteur). */
+export const restrictionLabel = (kind: string): string =>
+  kind === 'eldrazi' ? 'seulement pour un sort ou une capacité d\'Eldrazi incolore' : kind
+
 /** Phrase lisible pour le journal. Les événements verbeux restent concis. */
 export function describeEvent(e: GameEvent): string {
   const p = e.payload
@@ -36,7 +40,8 @@ export function describeEvent(e: GameEvent): string {
     }
     case 'ManaAbilityActivated': {
       const tapped = (p.tapped as string[] | undefined)?.length ? 'engage' : 'active'
-      return `J${p.player} ${tapped} ${p.card.name} : ${manaStr(p.mana)}`
+      const restriction = ((p.ability?.options ?? []) as string[])[p.option ?? 0]?.split('@')[1]
+      return `J${p.player} ${tapped} ${p.card.name} : ${manaStr(p.mana)}${restriction ? ` (mana restreint : ${restrictionLabel(restriction)})` : ''}`
     }
     case 'AbilityActivated': {
       const t = ((p.targets ?? []) as string[]).map(target).join(', ')

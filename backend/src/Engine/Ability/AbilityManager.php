@@ -110,7 +110,7 @@ final class AbilityManager
     /** Plan de paiement du coût de mana d'une capacité ; la source ne paie jamais son propre coût. */
     private static function costPlan(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability): ?ManaPlan
     {
-        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id);
+        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id, $card);
     }
 
     public static function activate(GameState $s, ActivateAbility $a): void
@@ -159,7 +159,7 @@ final class AbilityManager
                 'mana' => $mana,
                 'tapped' => $tapped,
                 'pool' => $p->pool->toArray(),
-            ], verbose: true);
+            ] + $p->pool->restrictedField(), verbose: true);
             self::payCardCosts($s, $a->player(), $discard, $sacrifice);
 
             return; // résolue sur-le-champ : la pile et les passes ne sont pas touchées

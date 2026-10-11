@@ -6,6 +6,7 @@ namespace App\Engine\Game;
 
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
+use App\Engine\Card\Subtypes;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
 
@@ -49,7 +50,32 @@ final class CardInstance
         public readonly bool $token = false, // jeton : cesse d'exister en quittant le champ de bataille
         /** @var list<TriggeredAbility> triggers (l'index fait partie de l'id d'action PutTrigger) */
         public readonly array $triggers = [],
+        /** @var array<string, list<string>> sous-types rattachés à leur type (règle 205.3), ex. `['creature' => ['Eldrazi']]` */
+        public readonly array $subtypes = [],
     ) {
+        if ($subtypes !== []) {
+            Subtypes::assertValid($type, $subtypes, $name);
+        }
+    }
+
+    /** Sous-type porté par la carte, sous le type `$type` s'il est donné (sinon sous n'importe lequel de ses types). */
+    public function hasSubtype(string $subtype, ?string $type = null): bool
+    {
+        foreach ($this->subtypes as $t => $list) {
+            if (($type === null || $t === $type) && in_array($subtype, $list, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Incolore : aucun symbole coloré ni hybride dans le coût de mana (`{C}` est incolore). */
+    public function isColorless(): bool
+    {
+        $cost = $this->manaCost();
+
+        return $cost->hybrid === [] && array_diff(array_keys($cost->colored), ['C']) === [];
     }
 
     /** Coût de mana structuré (les terrains n'ont pas de coût). */
@@ -137,7 +163,8 @@ final class CardInstance
             'power' => $this->power,
             'toughness' => $this->toughness,
         ] + ($this->token ? ['token' => true] : []) // omis si faux : au-delà de 16 clés, PHP double la table (+75 % de mémoire par état)
-            + ($this->triggers === [] ? [] : ['triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers)]); // idem
+            + ($this->triggers === [] ? [] : ['triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers)]) // idem
+            + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]); // idem
     }
 
     public function toArray(): array
@@ -168,6 +195,7 @@ final class CardInstance
             $d['adds'] ?? null,
             (bool) ($d['token'] ?? false),
             array_map([TriggeredAbility::class, 'fromArray'], $d['triggers'] ?? []),
+            $d['subtypes'] ?? [],
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
 

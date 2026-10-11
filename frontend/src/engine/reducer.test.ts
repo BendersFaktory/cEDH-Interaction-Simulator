@@ -157,6 +157,26 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].pool).toEqual({ R: 1 })
   })
 
+  it('mana restreint : recopié depuis le snapshot et les payloads, vidé en fin d\'étape', () => {
+    const r = replay([ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h', restricted: { eldrazi: { C: 2 } } }] })])
+    expect(r.players[0].restricted).toEqual({ eldrazi: { C: 2 } })
+    expect(start().players[0].restricted).toEqual({})
+
+    const v = start()
+    applyEvent(v, ev(4, 'ManaAbilityActivated', { player: 0, card: land, tapped: ['l1'], mana: { C: 2 }, pool: {}, restricted: { eldrazi: { C: 2 } } }))
+    expect(v.players[0].pool).toEqual({})
+    expect(v.players[0].restricted).toEqual({ eldrazi: { C: 2 } })
+    v.players[0].hand.push({ ...pinger, id: 'h1', tapped: false })
+    applyEvent(v, ev(5, 'SpellCast', { player: 0, card: { ...pinger, id: 'h1' }, stackId: 's1', targets: [], tapped: [], fromCommand: false, pool: {} }))
+    expect(v.players[0].restricted).toEqual({})
+
+    applyEvent(v, ev(6, 'ManaAdded', { player: 0, mana: { R: 1 }, pool: { R: 1 }, restricted: { eldrazi: { C: 1 } }, source: 's2' }))
+    expect(v.players[0].restricted).toEqual({ eldrazi: { C: 1 } })
+    applyEvent(v, ev(7, 'ManaPoolEmptied', { player: 0, lost: { R: 1, C: 1 }, pool: {} }))
+    expect(v.players[0].pool).toEqual({})
+    expect(v.players[0].restricted).toEqual({})
+  })
+
   it('un artefact résolu arrive sur le champ de bataille', () => {
     const v = start()
     v.stack.push({ id: 's9', card: pinger, controller: 1, targets: [] })

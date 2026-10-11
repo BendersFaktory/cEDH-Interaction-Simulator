@@ -322,4 +322,66 @@ final class AbilityTest extends TestCase
         $this->assertSame(2, $copy->nextTokenId);
         $this->assertTrue($copy->player(0)->findOnBattlefield('p0_t1')?->token);
     }
+
+    private static function temple(string $id = 'et'): CardInstance
+    {
+        return new CardInstance($id, 'Eldrazi Temple', CardInstance::LAND, 0, null, 0, false, false, 0, 0, 0, 0, null, [], [ActivatedAbility::mana('{C}{C}@eldrazi')]);
+    }
+
+    private static function mimic(string $id = 'mim'): CardInstance
+    {
+        return new CardInstance($id, 'Eldrazi Mimic', CardInstance::CREATURE, 2, null, 0, false, false, 2, 1, 0, 0, '{2}', subtypes: [CardInstance::CREATURE => ['Eldrazi']]);
+    }
+
+    private function activateTempleRestricted(GameState $s): array
+    {
+        $actions = array_values(array_filter($this->abilities($s), static fn (ActivateAbility $a) => $a->cardId === 'et' && $a->abilityIndex === 1));
+        $this->assertCount(1, $actions, 'Option restreinte proposée à la main');
+        $result = (new GameEngine(new AgentRegistry()))->advance($s, $actions[0]);
+
+        return array_values(array_filter($result->events, static fn ($e) => $e->type === 'ManaAbilityActivated'))[0]->payload;
+    }
+
+    public function testManualRestrictedManaFromTempleCastsMimicButNotAColoredSpell(): void
+    {
+        $bears = new CardInstance('gb', 'Grizzly Bears', CardInstance::CREATURE, 2, null, 0, false, false, 2, 2, 0, 0, '{1}{G}');
+        $forest = new CardInstance('f1', 'Forest', CardInstance::LAND, 0, null, 0, false, false, 0, 0, 0, 0, null, ['G']);
+        $s = (new ScenarioBuilder())->hand(0, self::mimic(), $bears)->build([0 => 'human', 1 => 'ai:pass', 2 => 'ai:pass', 3 => 'ai:pass']);
+        $s->player(0)->battlefield = [self::temple(), $forest];
+
+        $payload = $this->activateTempleRestricted($s);
+        $this->assertSame(['C' => 2], $payload['mana']);
+        $this->assertSame([], $payload['pool']);
+        $this->assertSame(['eldrazi' => ['C' => 2]], $payload['restricted']);
+        $this->assertSame('{C}{C}@eldrazi', $payload['ability']['options'][0]);
+
+        $casts = array_values(array_filter((new LegalActionGenerator())->for($s, 0), static fn (Action $a) => $a instanceof CastSpell));
+        $this->assertSame(['mim'], array_map(static fn (CastSpell $a) => $a->cardId, $casts), 'Forêt + mana restreint ne paient pas Grizzly Bears');
+
+        $result = (new GameEngine(new AgentRegistry()))->advance($s, $casts[0]);
+        $spell = array_values(array_filter($result->events, static fn ($e) => $e->type === 'SpellCast'))[0]->payload;
+        $this->assertSame([], $spell['tapped']);
+        $this->assertSame(['C' => 2], $spell['fromPool']);
+        $this->assertArrayNotHasKey('restricted', $spell, 'Omis une fois la partie restreinte vide');
+        $this->assertTrue($s->player(0)->pool->isEmpty());
+        $this->assertFalse($s->player(0)->findOnBattlefield('f1')->tapped);
+    }
+
+    public function testRestrictedManaIsLostAtEndOfStep(): void
+    {
+        $s = (new ScenarioBuilder())->build([0 => 'human', 1 => 'ai:pass', 2 => 'ai:pass', 3 => 'ai:pass']);
+        $s->player(0)->battlefield = [self::temple()];
+        $this->activateTempleRestricted($s);
+        $copy = GameState::fromArray($s->toArray());
+        $this->assertSame(['eldrazi' => ['C' => 2]], $copy->player(0)->pool->restrictedToArray(), 'Survit à un snapshot');
+
+        $s->controllers[0] = 'ai:pass';
+        $result = (new GameEngine(new AgentRegistry()))->advance($s);
+        $emptied = array_values(array_filter($result->events, static fn ($e) => $e->type === 'ManaPoolEmptied' && $e->payload['player'] === 0));
+        $this->assertNotEmpty($emptied);
+        $this->assertSame(['C' => 2], $emptied[0]->payload['lost']);
+        $this->assertSame([], $emptied[0]->payload['pool']);
+        $this->assertArrayNotHasKey('restricted', $emptied[0]->payload);
+        $this->assertTrue($s->player(0)->pool->isEmpty());
+    }
 }

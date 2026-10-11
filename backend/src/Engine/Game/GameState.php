@@ -177,19 +177,20 @@ final class GameState
     /** Crée un jeton Treasure sur le champ de bataille du joueur (`TokenCreated`). */
     public function createTreasure(int $playerId): CardInstance
     {
-        return $this->createToken($playerId, 'Treasure', CardInstance::ARTIFACT, abilities: [ActivatedAbility::treasure()]);
+        return $this->createToken($playerId, 'Treasure', CardInstance::ARTIFACT, abilities: [ActivatedAbility::treasure()], subtypes: [CardInstance::ARTIFACT => ['Treasure']]);
     }
 
     /**
      * Crée un jeton sur le champ de bataille du joueur (id `p<joueur>_t<n>`, déterministe) et journalise `TokenCreated`.
      *
-     * @param list<ActivatedAbility> $abilities
+     * @param list<ActivatedAbility>      $abilities
+     * @param array<string, list<string>> $subtypes
      */
-    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = []): CardInstance
+    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = [], array $subtypes = []): CardInstance
     {
         $token = new CardInstance(
             sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $type,
-            power: $power, toughness: $toughness, abilities: $abilities, token: true,
+            power: $power, toughness: $toughness, abilities: $abilities, token: true, subtypes: $subtypes,
         );
         $this->enterBattlefield($playerId, $token);
         $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()]);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Mana;
 
 use App\Engine\Ability\AbilityManager;
+use App\Engine\Game\CardInstance;
 use App\Engine\Game\PlayerState;
 
 /**
@@ -25,6 +26,12 @@ use App\Engine\Game\PlayerState;
  *     convertisseurs forment le besoin. La réserve paie ensuite (colorés, puis générique : incolore d'abord, puis WUBRG).
  *  3. Backtracking sur les permanents simples (ordre du champ de bataille) pour couvrir le besoin résiduel.
  *
+ * Mana conditionnel : `$for` = la carte payée (sort lancé, ou source de la capacité). Le mana restreint de la réserve et les
+ * options restreintes des sources ne sont pris en compte que si leur restriction admet `$for`. Le mana restreint de la
+ * réserve paie le coût demandé (jamais celui d'un convertisseur) AVANT la réserve libre ; une option restreinte n'est
+ * candidate que sans convertisseur, et n'est choisie que si elle fait strictement mieux selon le critère (premier trouvé
+ * gagne, l'option libre d'une même source étant essayée d'abord).
+ *
  * Critère (lexicographique, plus petit = mieux) : plus de réserve dépensée, moins de mana gaspillé (produit non dépensé),
  * moins de sacrifices (un Treasure ne sert qu'en dernier recours), moins d'engagements (convertisseurs compris), moins de sources à plusieurs alternatives engagées, puis ordre du champ de
  * bataille / WUBRGC / masque d'hybrides (le premier trouvé gagne : un convertisseur n'est utilisé que s'il fait strictement
@@ -35,25 +42,26 @@ final class ManaPayment
     private const NODE_LIMIT = 50000;
     private const MAX_CONVERTERS = 3;
 
-    public static function plan(PlayerState $p, ManaCost $cost, int $x = 0, ?int $turn = null, ?string $exclude = null): ?ManaPlan
+    public static function plan(PlayerState $p, ManaCost $cost, int $x = 0, ?int $turn = null, ?string $exclude = null, ?CardInstance $for = null): ?ManaPlan
     {
         $state = ['nodes' => 0];
 
-        return self::solve(self::sources($p, $turn, $exclude), self::converters($p, $turn, $exclude), $p->pool->toArray(), $cost, $x, $state);
+        return self::solve(self::sources($p, $turn, $exclude, $for), self::converters($p, $turn, $exclude), $p->pool->toArray(), self::restrictedPool($p, $for), $cost, $x, $state);
     }
 
     /** Plus grand X payable avec la réserve et les sources non engagées (0 si le sort n'a pas de {X}). */
-    public static function maxX(PlayerState $p, ManaCost $cost, ?int $turn = null): int
+    public static function maxX(PlayerState $p, ManaCost $cost, ?int $turn = null, ?CardInstance $for = null): int
     {
         if (!$cost->hasX()) {
             return 0;
         }
-        $sources = self::sources($p, $turn, null);
+        $sources = self::sources($p, $turn, null, $for);
         $converters = self::converters($p, $turn, null);
         $pool = $p->pool->toArray();
+        $restricted = self::restrictedPool($p, $for);
 
         // Borne haute : tout le mana potentiel, divisé par le nombre de {X}. Le coût croît avec X, donc faisable est monotone.
-        $potential = array_sum($pool);
+        $potential = array_sum($pool) + array_sum(array_map('array_sum', $restricted));
         foreach ($sources as $s) {
             $potential += max(array_column($s['choices'], 'total'));
         }
@@ -66,7 +74,7 @@ final class ManaPayment
         $best = 0;
         for ($x = 1; $x <= $limit; $x++) {
             $state = ['nodes' => 0];
-            if (self::solve($sources, $converters, $pool, $cost, $x, $state) === null) {
+            if (self::solve($sources, $converters, $pool, $restricted, $cost, $x, $state) === null) {
                 break;
             }
             $best = $x;
@@ -76,13 +84,31 @@ final class ManaPayment
     }
 
     /**
-     * Permanents prêts (voir `AbilityManager::sourceReady`) avec au moins une capacité de mana `{T}` sans coût de mana.
+     * Mana restreint de la réserve dont la restriction admet `$for`, par restriction puis par symbole.
      *
-     * @return list<array{card: string, multi: bool, choices: list<array{ability: int, option: int, prod: array<string,int>, total: int}>}>
+     * @return array<string, array<string, int>>
      */
-    private static function sources(PlayerState $p, ?int $turn, ?string $exclude): array
+    private static function restrictedPool(PlayerState $p, ?CardInstance $for): array
     {
-        return self::collect($p, $turn, $exclude, false);
+        $out = [];
+        foreach ($p->pool->restrictedToArray() as $kind => $amounts) {
+            if ((new ManaRestriction($kind))->allows($for)) {
+                $out[$kind] = $amounts;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Permanents prêts (voir `AbilityManager::sourceReady`) avec au moins une capacité de mana `{T}` sans coût de mana.
+     * Une option restreinte n'est retenue que si sa restriction admet `$for` (`rk` = sa restriction, null sinon).
+     *
+     * @return list<array{card: string, multi: bool, choices: list<array{ability: int, option: int, prod: array<string,int>, total: int, rk: ?string}>}>
+     */
+    private static function sources(PlayerState $p, ?int $turn, ?string $exclude, ?CardInstance $for): array
+    {
+        return self::collect($p, $turn, $exclude, false, $for);
     }
 
     /**
@@ -95,7 +121,7 @@ final class ManaPayment
         return array_slice(self::collect($p, $turn, $exclude, true), 0, self::MAX_CONVERTERS);
     }
 
-    private static function collect(PlayerState $p, ?int $turn, ?string $exclude, bool $withCost): array
+    private static function collect(PlayerState $p, ?int $turn, ?string $exclude, bool $withCost, ?CardInstance $for = null): array
     {
         $order = [];
         foreach (Color::cases() as $i => $color) {
@@ -116,13 +142,17 @@ final class ManaPayment
                     continue;
                 }
                 foreach ($ability->options as $oi => $_) {
+                    $restriction = $ability->restriction($oi);
+                    if ($restriction !== null && ($withCost || !$restriction->allows($for))) {
+                        continue;
+                    }
                     $prod = $ability->produced($oi);
                     $total = array_sum($prod);
                     if ($total === 0) {
                         continue;
                     }
                     $first = $ability->options[$oi][0]->symbol();
-                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice ? 1 : 0];
+                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice ? 1 : 0, 'rk' => $restriction?->kind];
                     if ($withCost) {
                         $choice['cost'] = $ability->manaCost;
                         $choice['costTotal'] = $ability->manaCost->manaValue();
@@ -166,12 +196,14 @@ final class ManaPayment
 
     /**
      * @param array<string, int> $pool
+     * @param array<string, array<string, int>> $restricted mana restreint admis de la réserve
      * @param array{nodes: int} $state
      */
-    private static function solve(array $sources, array $converters, array $pool, ManaCost $cost, int $x, array &$state): ?ManaPlan
+    private static function solve(array $sources, array $converters, array $pool, array $restricted, ManaCost $cost, int $x, array &$state): ?ManaPlan
     {
         $h = count($cost->hybrid);
         $best = null; // ['key' => list<int>, 'plan' => ManaPlan]
+        $freeSources = $converters === [] ? $sources : self::withoutRestricted($sources);
 
         foreach (self::combinations($converters) as $combo) {
             // Production des convertisseurs (réservée au coût demandé) et coût cumulé des convertisseurs.
@@ -189,7 +221,7 @@ final class ManaPayment
                 }
                 $convGeneric += $conv['cost']->generic;
             }
-            $simple = $used === [] ? $sources : array_values(array_filter($sources, static fn (array $src) => !isset($used[$src['card']])));
+            $simple = $used === [] ? $sources : array_values(array_filter($freeSources, static fn (array $src) => !isset($used[$src['card']])));
 
             for ($mask = 0; $mask < (1 << $h); $mask++) {
                 $colored = $cost->colored;
@@ -222,7 +254,37 @@ final class ManaPayment
                     }
                 }
 
-                // 2b. Besoin restant (coût demandé + coûts des convertisseurs) : la réserve paie d'abord.
+                // 2b. Le mana restreint admis de la réserve paie le reste du coût demandé (colorés, puis générique).
+                $rSpend = [];
+                if ($restricted !== []) {
+                    $rLeft = $restricted;
+                    foreach ($restColored as $sym => $need) {
+                        foreach ($rLeft as $kind => $amounts) {
+                            $use = min($need, $amounts[$sym] ?? 0);
+                            if ($use > 0) {
+                                $rSpend[$kind][$sym] = $use;
+                                $rLeft[$kind][$sym] -= $use;
+                                $need -= $use;
+                            }
+                        }
+                        if ($need > 0) {
+                            $restColored[$sym] = $need;
+                        } else {
+                            unset($restColored[$sym]);
+                        }
+                    }
+                    foreach ($rLeft as $kind => $amounts) {
+                        foreach (self::genericOrder() as $sym) {
+                            $use = min($restGeneric, $amounts[$sym] ?? 0);
+                            if ($use > 0) {
+                                $rSpend[$kind][$sym] = ($rSpend[$kind][$sym] ?? 0) + $use;
+                                $restGeneric -= $use;
+                            }
+                        }
+                    }
+                }
+
+                // 2c. Besoin restant (coût demandé + coûts des convertisseurs) : la réserve libre paie d'abord.
                 $needColored = $restColored;
                 foreach ($convColored as $sym => $n) {
                     $needColored[$sym] = ($needColored[$sym] ?? 0) + $n;
@@ -251,7 +313,7 @@ final class ManaPayment
                         $g -= $use;
                     }
                 }
-                $poolUsed = array_sum($poolSpend);
+                $poolUsed = array_sum($poolSpend) + array_sum(array_map('array_sum', $rSpend));
 
                 // 3. Couverture du besoin résiduel par des engagements de sources simples.
                 $found = self::cover($simple, $residual, $g, $state);
@@ -265,7 +327,7 @@ final class ManaPayment
                 $waste = $found['waste'] + array_sum($outLeft);
                 $key = [-$poolUsed, $waste, $found['sac'], $found['taps'] + count($combo), $found['multi'], $mask];
                 if ($best === null || self::less($key, $best['key'])) {
-                    $best = ['key' => $key, 'plan' => self::build($found['picks'], $residual, $g, $poolSpend, $combo, $outSpend, $restColored)];
+                    $best = ['key' => $key, 'plan' => self::build($found['picks'], $residual, $g, $poolSpend, $combo, $outSpend, $restColored, $rSpend)];
                 }
                 if ($state['nodes'] >= self::NODE_LIMIT) {
                     break 2;
@@ -274,6 +336,32 @@ final class ManaPayment
         }
 
         return $best['plan'] ?? null;
+    }
+
+    /**
+     * Sources sans leurs options restreintes (avec un convertisseur, la production simple peut payer son coût : le mana
+     * restreint n'y a pas droit).
+     */
+    private static function withoutRestricted(array $sources): array
+    {
+        $any = false;
+        foreach ($sources as $src) {
+            foreach ($src['choices'] as $c) {
+                $any = $any || $c['rk'] !== null;
+            }
+        }
+        if (!$any) {
+            return $sources;
+        }
+        $out = [];
+        foreach ($sources as $src) {
+            $choices = array_values(array_filter($src['choices'], static fn (array $c) => $c['rk'] === null));
+            if ($choices !== []) {
+                $out[] = ['card' => $src['card'], 'multi' => count($choices) > 1, 'choices' => $choices];
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -349,7 +437,7 @@ final class ManaPayment
 
             $src = $sources[$i];
             foreach ($src['choices'] as $c) {
-                $picks[] = ['card' => $src['card'], 'ability' => $c['ability'], 'option' => $c['option'], 'prod' => $c['prod']];
+                $picks[] = ['card' => $src['card'], 'ability' => $c['ability'], 'option' => $c['option'], 'prod' => $c['prod'], 'rk' => $c['rk']];
                 foreach ($c['prod'] as $s => $v) {
                     $have[$s] = ($have[$s] ?? 0) + $v;
                 }
@@ -370,26 +458,53 @@ final class ManaPayment
      * Assemble le plan. `$residual` + `$generic` = ce que les sources simples paient (avec `$poolSpend` pour la réserve) pour
      * le reste du coût demandé ET les coûts des convertisseurs. On met d'abord de côté les colorés du coût demandé
      * (`$restColored`), puis chaque convertisseur prend son coût (colorés, puis générique : incolore d'abord) ; ce qui reste
-     * paie le générique du coût demandé, en plus de la production des convertisseurs (`$outSpend`).
+     * paie le générique du coût demandé, en plus de la production des convertisseurs (`$outSpend`). Le mana restreint
+     * (`$rSpend` pris dans la réserve, production des options restreintes, consommée avant la libre) ne paie que le coût
+     * demandé : `$rSpend` s'ajoute à `spend`, et une option restreinte n'est jamais choisie avec un convertisseur.
      *
      * @param list<array{card: string, ability: int, option: int, prod: array<string,int>}> $picks
      * @param list<array{card: string, ability: int, option: int, prod: array<string,int>, cost: ManaCost}> $combo
      */
-    private static function build(array $picks, array $residual, int $generic, array $poolSpend, array $combo = [], array $outSpend = [], array $restColored = []): ManaPlan
+    private static function build(array $picks, array $residual, int $generic, array $poolSpend, array $combo = [], array $outSpend = [], array $restColored = [], array $rSpend = []): ManaPlan
     {
         $taps = [];
         $produced = [];
+        $producedR = []; // production restreinte, par restriction puis par symbole
         foreach ($picks as $pick) {
             $taps[] = ['card' => $pick['card'], 'ability' => $pick['ability'], 'option' => $pick['option']];
             foreach ($pick['prod'] as $s => $v) {
                 $produced[$s] = ($produced[$s] ?? 0) + $v;
+                if ($pick['rk'] !== null) {
+                    $producedR[$pick['rk']][$s] = ($producedR[$pick['rk']][$s] ?? 0) + $v;
+                }
             }
         }
-        // Mana dépensé hors convertisseurs : réserve + colorés résiduels + générique pris sur la production simple.
+        $spendR = $rSpend;
+        // Mana dépensé hors convertisseurs : réserve + colorés résiduels + générique pris sur la production simple. La
+        // production restreinte est consommée d'abord.
         $real = $poolSpend;
         foreach ($residual as $s => $r) {
             $real[$s] = ($real[$s] ?? 0) + $r;
             $produced[$s] -= $r;
+            foreach ($producedR as $kind => $amounts) {
+                $use = min($r, $amounts[$s] ?? 0);
+                if ($use > 0) {
+                    $producedR[$kind][$s] -= $use;
+                    $spendR[$kind][$s] = ($spendR[$kind][$s] ?? 0) + $use;
+                    $r -= $use;
+                }
+            }
+        }
+        foreach ($producedR as $kind => $amounts) {
+            foreach (self::genericOrder() as $s) {
+                $use = min($generic, $amounts[$s] ?? 0);
+                if ($use > 0) {
+                    $real[$s] = ($real[$s] ?? 0) + $use;
+                    $produced[$s] -= $use;
+                    $spendR[$kind][$s] = ($spendR[$kind][$s] ?? 0) + $use;
+                    $generic -= $use;
+                }
+            }
         }
         foreach (self::genericOrder() as $s) {
             $use = min($generic, $produced[$s] ?? 0);
@@ -431,8 +546,13 @@ final class ManaPayment
                 $spend[$s] = ($spend[$s] ?? 0) + $n;
             }
         }
+        foreach ($rSpend as $amounts) {
+            foreach ($amounts as $s => $n) {
+                $spend[$s] = ($spend[$s] ?? 0) + $n;
+            }
+        }
 
-        return new ManaPlan($taps, self::ordered($spend), $converters);
+        return new ManaPlan($taps, self::ordered($spend), $converters, array_filter(array_map(self::ordered(...), $spendR)));
     }
 
     /**

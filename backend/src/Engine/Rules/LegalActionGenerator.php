@@ -73,10 +73,10 @@ final class LegalActionGenerator
             }
             // Payable avec les terrains non engagés (couleurs, hybrides) ; un sort à {X} offre une action par X payable.
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($p, $cost, 0, $s->turn) === null) {
+            if (ManaPayment::plan($p, $cost, 0, $s->turn, null, $card) === null) {
                 continue;
             }
-            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost, $s->turn), self::MAX_X) : 0;
+            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost, $s->turn, $card), self::MAX_X) : 0;
             foreach ($this->targetSets($s, $card) as $targets) {
                 for ($x = 0; $x <= $maxX; $x++) {
                     $key = $card->name . '|' . implode(',', $targets) . '|' . $x;

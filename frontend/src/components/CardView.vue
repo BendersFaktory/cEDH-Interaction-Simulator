@@ -16,14 +16,14 @@ const abilityText = (a: NonNullable<BoardCard['abilities']>[number]): string => 
     a.discard ? `défausser ${a.discard}` : '',
   ].filter(Boolean).join(', ')
   const what = a.isManaAbility
-    ? (a.options ?? []).join(' | ')
+    ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ')
     : a.effect === 'draw' ? `piocher ${a.amount}`
     : a.effect === 'token' ? `${a.amount} jeton ${(a.spec ?? '').replace(':', ' ')}`
     : a.effect === 'pump' ? (a.spec ?? '')
     : `${a.effect}${a.amount !== undefined ? ` ${a.amount}` : ''}`
   return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}`
 }
-const abilitiesTitle = computed(() => (props.card.type === 'land' ? [] : (props.card.abilities ?? [])).map(abilityText).join(' ; '))
+const abilitiesTitle = computed(() => (props.card.abilities ?? []).map(abilityText).join(' ; '))
 const landColor = computed(() => (props.card.type === 'land' && props.card.produces?.length === 1 ? props.card.produces[0] : null))
 </script>
 

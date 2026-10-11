@@ -159,7 +159,8 @@ final class HeuristicAgent implements PlayerAgent
             return true;
         }
         $copy = PlayerState::fromArray($p->toArray());
-        $plan = ManaPayment::plan($copy, $copy->castCost($copy->findCastable($cast->cardId)), 0, $state->turn);
+        $copyRitual = $copy->findCastable($cast->cardId);
+        $plan = ManaPayment::plan($copy, $copy->castCost($copyRitual), 0, $state->turn, null, $copyRitual);
         if ($plan === null) {
             return false;
         }
@@ -174,7 +175,7 @@ final class HeuristicAgent implements PlayerAgent
                 continue;
             }
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($before, $cost, 0, $state->turn) === null && ManaPayment::plan($copy, $cost, 0, $state->turn) !== null) {
+            if (ManaPayment::plan($before, $cost, 0, $state->turn, null, $card) === null && ManaPayment::plan($copy, $cost, 0, $state->turn, null, $card) !== null) {
                 return true;
             }
         }

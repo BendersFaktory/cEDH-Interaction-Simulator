@@ -6,6 +6,7 @@ namespace App\Engine\Ability;
 
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
+use App\Engine\Mana\ManaRestriction;
 
 /**
  * Capacité activée d'un permanent (objet valeur). Toutes les capacités activées partagent ce modèle ;
@@ -21,13 +22,17 @@ use App\Engine\Mana\ManaCost;
  * sources ; l'auto-paiement la traite en « convertisseur » (`ManaPayment`). `sorcerySpeed` : activable seulement quand on
  * pourrait lancer un rituel (son tour, phase principale, pile vide).
  *
- * Forme sérialisée (`toArray`) : les options sont des chaînes `{R}{R}` ; seules les lettres WUBRGC sont écrites ; les
+ * Mana conditionnel : une option peut porter une restriction d'usage (`restrictions[option]`, voir `ManaRestriction`),
+ * écrite en suffixe : `{C}{C}@eldrazi` (Eldrazi Temple). Ce mana va dans la partie restreinte de la réserve.
+ *
+ * Forme sérialisée (`toArray`) : les options sont des chaînes `{R}{R}` (suffixe `@kind` si restreintes) ; seules les lettres WUBRGC sont écrites ; les
  * champs `sacrificeCreature`, `discard`, `sorcerySpeed` et `spec` sont omis à leur valeur par défaut.
  */
 final class ActivatedAbility
 {
     /**
-     * @param list<list<Color>> $options alternatives de mana produit (effet `mana`)
+     * @param list<list<Color>>            $options      alternatives de mana produit (effet `mana`)
+     * @param array<int, ManaRestriction>  $restrictions index d'option => restriction (options restreintes seulement)
      */
     public function __construct(
         public readonly bool $isManaAbility,
@@ -41,6 +46,7 @@ final class ActivatedAbility
         public readonly int $discard = 0,
         public readonly bool $sorcerySpeed = false,
         public readonly string $spec = '',
+        public readonly array $restrictions = [],
     ) {
         if ($effect === 'token') {
             $this->tokenSpec();
@@ -51,12 +57,14 @@ final class ActivatedAbility
     }
 
     /**
-     * `{T}: ajoute …` ; `$spec` = alternatives séparées par `|`, ex. `{C}{C}` ou `{R}|{G}`. `$cost` = coût de mana en plus du
-     * `{T}` (Signet : `{1}`).
+     * `{T}: ajoute …` ; `$spec` = alternatives séparées par `|`, ex. `{C}{C}`, `{R}|{G}` ou `{C}{C}@eldrazi` (restreinte).
+     * `$cost` = coût de mana en plus du `{T}` (Signet : `{1}`).
      */
     public static function mana(string $spec, ?string $cost = null): self
     {
-        return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), array_map(self::parseOption(...), explode('|', $spec)));
+        [$options, $restrictions] = self::parseOptions(explode('|', $spec));
+
+        return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, restrictions: $restrictions);
     }
 
     /** Treasure : `{T}, sacrifier : un mana de la couleur de son choix`. */
@@ -121,6 +129,31 @@ final class ActivatedAbility
         return [(int) $m[1], (int) $m[2]];
     }
 
+    /**
+     * @param list<string> $texts
+     * @return array{0: list<list<Color>>, 1: array<int, ManaRestriction>}
+     */
+    private static function parseOptions(array $texts): array
+    {
+        $options = [];
+        $restrictions = [];
+        foreach ($texts as $i => $text) {
+            $parts = explode('@', $text, 2);
+            $options[] = self::parseOption($parts[0]);
+            if (isset($parts[1])) {
+                $restrictions[$i] = new ManaRestriction($parts[1]);
+            }
+        }
+
+        return [$options, $restrictions];
+    }
+
+    /** Restriction d'usage du mana produit par l'alternative `$option` (null = mana libre). */
+    public function restriction(int $option): ?ManaRestriction
+    {
+        return $this->restrictions[$option] ?? null;
+    }
+
     /** @return list<Color> */
     private static function parseOption(string $text): array
     {
@@ -157,7 +190,8 @@ final class ActivatedAbility
             $this->discard > 0 ? "défausser {$this->discard}" : '',
         ], static fn (string $p) => $p !== ''));
         $what = match ($this->effect) {
-            'mana' => implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? [])),
+            'mana' => implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? []))
+                . ($this->restriction($option) === null ? '' : ' (' . $this->restriction($option)->label() . ')'),
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
@@ -175,10 +209,7 @@ final class ActivatedAbility
             'effect' => $this->effect,
             'tap' => $this->tap,
             'manaCost' => $this->manaCost === null ? null : (string) $this->manaCost,
-            'options' => array_map(
-                static fn (array $o) => implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $o)),
-                $this->options,
-            ),
+            'options' => array_map($this->optionText(...), array_keys($this->options)),
             'amount' => $this->amount,
             'sacrifice' => $this->sacrifice,
         ] + array_filter([
@@ -191,18 +222,30 @@ final class ActivatedAbility
 
     public static function fromArray(array $d): self
     {
+        [$options, $restrictions] = self::parseOptions($d['options'] ?? []);
+
         return new self(
             (bool) $d['isManaAbility'],
             $d['effect'] ?? 'mana',
             (bool) ($d['tap'] ?? true),
             isset($d['manaCost']) ? ManaCost::parse($d['manaCost']) : null,
-            array_map(self::parseOption(...), $d['options'] ?? []),
+            $options,
             (int) ($d['amount'] ?? 0),
             (bool) ($d['sacrifice'] ?? false),
             (bool) ($d['sacrificeCreature'] ?? false),
             (int) ($d['discard'] ?? 0),
             (bool) ($d['sorcerySpeed'] ?? false),
             (string) ($d['spec'] ?? ''),
+            $restrictions,
         );
+    }
+
+    /** Alternative `$option` sous forme texte : `{C}{C}`, suffixée `@kind` si restreinte. */
+    private function optionText(int $option): string
+    {
+        $text = implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? []));
+        $restriction = $this->restriction($option);
+
+        return $restriction === null ? $text : $text . '@' . $restriction->kind;
     }
 }
