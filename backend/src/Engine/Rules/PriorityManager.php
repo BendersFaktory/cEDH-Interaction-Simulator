@@ -47,15 +47,19 @@ final class PriorityManager
         for ($i = 0; $i < self::MAX_ITERATIONS; $i++) {
             $p = $s->priority;
 
-            if (!$p->announced) {
+            // Déclencheurs en attente (y compris après une action spéciale comme jouer un terrain, ou à la reprise d'un choix
+            // d'ordre/cible) : posés avant que quiconque reçoive la priorité.
+            if (!$p->announced || $s->pendingTriggers !== []) {
                 $this->sba->check($s);
                 if ($s->over) {
                     return;
                 }
+                $this->triggers->putPendingOnStack($s, $injected);
                 $this->repairPriorityHolder($s);
-                $this->triggers->putPendingOnStack($s);
+            }
 
-                $p = $s->priority;
+            $p = $s->priority;
+            if (!$p->announced) {
                 // Point de bifurcation : début de ronde (personne n'a encore passé) OU pile non vide
                 // (c'est là qu'on veut pouvoir « juste avant ta réponse »). Les octrois intermédiaires
                 // sur pile vide ne sont pas des checkpoints : ça divise le volume de snapshots par ~4.

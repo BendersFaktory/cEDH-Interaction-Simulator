@@ -46,7 +46,7 @@ final class GameEngine
             $legal,
             $sba,
             new StackResolver(),
-            new TriggerManager(),
+            new TriggerManager($agents, $legal),
             $listener,
         );
     }

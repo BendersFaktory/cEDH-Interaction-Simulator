@@ -10,7 +10,7 @@ use App\Engine\Game\GameState;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
 
-/** Résout le sommet de la pile. TODO: dispatch par carte (handlers) au lieu de flags 'damage'/'counter'. */
+/** Résout le sommet de la pile (sort, capacité activée ou déclenchée). TODO: dispatch par carte (handlers) au lieu de flags 'damage'/'counter'. */
 final class StackResolver
 {
     public function resolveTop(GameState $s): void
@@ -21,20 +21,20 @@ final class StackResolver
         }
         $card = $item->card;
 
-        if ($item->ability !== null) {
-            // Capacité activée : la source reste où elle est, seuls les effets s'appliquent.
+        if ($item->isAbility()) {
+            // Capacité activée ou déclenchée : la source reste où elle est (ou l'a déjà quitté), seuls les effets s'appliquent.
             $s->emit('AbilityResolved', [
                 'stackId' => $item->id,
                 'controller' => $item->controller,
                 'card' => $card->toPublic(),
                 'abilityIndex' => $item->abilityIndex,
-            ]);
-            $ability = $item->ability;
+            ] + ($item->isTrigger() ? ['trigger' => true] : []));
+            $ability = $item->ability ?? $item->trigger;
             match ($ability->effect) {
                 'damage' => $this->damage($s, $item->targets[0] ?? '', $ability->amount, $card->name),
                 'draw' => $this->draw($s, $item->controller, $ability->amount),
-                'token' => $this->tokens($s, $item->controller, $ability),
-                'pump' => $this->pump($s, $item->controller, $card->id, $ability),
+                'token' => $this->tokens($s, $item->controller, $ability->spec, $ability->amount),
+                'pump' => $this->pump($s, $item->controller, $card->id, $item->ability),
                 default => null,
             };
 
@@ -88,10 +88,10 @@ final class StackResolver
         }
     }
 
-    private function tokens(GameState $s, int $player, ActivatedAbility $ability): void
+    private function tokens(GameState $s, int $player, string $spec, int $amount): void
     {
-        ['name' => $name, 'power' => $power, 'toughness' => $toughness] = $ability->tokenSpec();
-        for ($i = 0; $i < $ability->amount; $i++) {
+        ['name' => $name, 'power' => $power, 'toughness' => $toughness] = ActivatedAbility::parseTokenSpec($spec);
+        for ($i = 0; $i < $amount; $i++) {
             $s->createToken($player, $name, CardInstance::CREATURE, $power, $toughness);
         }
     }

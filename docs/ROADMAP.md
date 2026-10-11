@@ -1,6 +1,6 @@
 # Roadmap
 
-> Dernière mise à jour : 2026-10-11 (déclencheurs, étape 1/5 : modèle et file d'attente). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
+> Dernière mise à jour : 2026-10-11 (déclencheurs, étape 2/5 : mise sur la pile et résolution). Ne cocher `[x]` qu'une fois la vérification réellement passée (voir « Roadmap (à tenir à jour) » dans `CLAUDE.md`).
 
 ## 0. Valider le squelette (premier jour)
 
@@ -27,7 +27,8 @@
   - [x] Choix de paiement par l'humain (quels terrains engager) : activer ses sources à la main, la réserve est dépensée avant tout nouvel engagement. *(Vérifié : `AbilityTest::testManualManaIsSpentBeforeUntappedLands`, recette scénario 9.)*
 - [ ] **Déclencheurs** : file d'attente dans `GameState`, ordre APNAP, ciblage, `TriggerManager`.
   - [x] Modèle et file d'attente : `TriggeredAbility` (`etb` / `dies` / `upkeep`, effets `damage` / `draw` / `token`), `CardInstance::triggers` (omis s'il est vide), `GameState::$pendingTriggers` sérialisée (`PendingTrigger` : source en information de dernière connaissance), `GameState::enterBattlefield()` seul chemin d'entrée en jeu (sort, terrain, jeton), mort par SBA et par sacrifice (jeton compris), entretien du joueur actif. *(Vérifié le 2026-10-11 : PHPUnit 124 tests dont `TriggerQueueTest` (8) ; `smoke.php 42` identique avant/après.)*
-  - [ ] Mise sur la pile et résolution : `TriggerManager` (APNAP, boucle SBA ↔ déclencheurs), action `PutTrigger` (ordre et cible, décision hors priorité), passes remises à zéro, effets partagés avec les capacités activées, agents.
+  - [x] Mise sur la pile et résolution : `TriggerManager` (APNAP, déclencheurs d'un joueur éliminé retirés), action `PutTrigger` (ordre et cible ; décision hors priorité, détenteur gardé dans `triggerResumeHolder` ; aucune décision s'il n'y a qu'un choix, deux déclencheurs identiques n'en font qu'un), passes remises à zéro, `AbilityTriggered` / `AbilityResolved` (`trigger: true`), effets partagés avec les capacités activées, agents (IA : adversaire le plus faible ; `ai:pass` : premier choix ; `human` : s'arrête). *(Vérifié le 2026-10-11 : PHPUnit 131 tests dont `TriggerTest` (7 : entrée en jeu, cible choisie par l'humain avec reprise depuis un état sérialisé, APNAP, ordre choisi, sacrifice comme coût, Counterspell, joueur éliminé) et `StateReconstructorTest` vert ; `smoke.php 42` identique.)*
+  - [ ] Déclencheurs pendant le cleanup (règle 514.3a : une ronde de priorité s'ouvre) et autres événements (attaque, fin de tour, sorts lancés).
   - [ ] Cartes de démo : Elvish Visionary, Perilous Myr, Idole de l'Érudit.
   - [ ] Front et docs : `AbilityTriggered` (reducer, journal, `EVENTS.md`), fixture régénérée, `ARCHITECTURE.md`.
   - [ ] Recette (J0 choisit la cible d'un déclencheur) et mesures.

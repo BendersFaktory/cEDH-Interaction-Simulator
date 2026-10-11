@@ -14,6 +14,7 @@ use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PutTrigger;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
@@ -34,6 +35,10 @@ final class LegalActionGenerator
     /** @return list<Action> */
     public function for(GameState $s, int $playerId): array
     {
+        if ($s->triggerResumeHolder !== null) {
+            return $this->triggerActions($s, $playerId);
+        }
+
         if ($s->combat->declaring !== null) {
             return $this->declarationActions($s, $playerId);
         }
@@ -139,6 +144,35 @@ final class LegalActionGenerator
             if (!isset($seen[$card->name])) {
                 $seen[$card->name] = true;
                 $actions[] = new Discard($playerId, $card->id);
+            }
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Déclencheurs en attente du joueur : un choix par déclencheur et par cible, pas de « passer ». Deux déclencheurs
+     * identiques (même source par le nom, même capacité) ne donnent qu'un seul choix : leur ordre relatif est indifférent.
+     *
+     * @return list<PutTrigger>
+     */
+    public function triggerActions(GameState $s, int $playerId): array
+    {
+        $actions = [];
+        $seen = [];
+        foreach ($s->pendingTriggers as $pending) {
+            if ($pending->controller !== $playerId) {
+                continue;
+            }
+            $targetSets = $pending->ability()->targetsPlayer()
+                ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
+                : [[]];
+            foreach ($targetSets as $targets) {
+                $key = $pending->source->name . '|' . $pending->index . '|' . implode(',', $targets);
+                if (!isset($seen[$key])) {
+                    $seen[$key] = true;
+                    $actions[] = new PutTrigger($playerId, $pending->id, $targets);
+                }
             }
         }
 

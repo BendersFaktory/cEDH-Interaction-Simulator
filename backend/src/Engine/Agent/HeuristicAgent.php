@@ -13,6 +13,7 @@ use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PutTrigger;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
@@ -26,6 +27,7 @@ use App\Engine\Mana\ManaPayment;
  *  2. joue un terrain ;
  *  3. à son tour, en phase principale, pile vide : lance un sort au hasard (jamais sur soi-même) ;
  *  4. sinon passe.
+ * Déclencheurs : posés dans l'ordre de la file ; une cible de dégâts est l'adversaire vivant le plus faible.
  * Défausse (main > 7) : un terrain en surplus (≥ 5 en jeu), sinon la carte la plus chère, à égalité le plus petit id.
  * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible ; bloque quand le bloqueur survit
  * ou tue l'attaquant (un seul bloqueur par attaquant), et chump-bloque seulement si l'attaque est létale.
@@ -38,6 +40,10 @@ final class HeuristicAgent implements PlayerAgent
         $discards = array_values(array_filter($legal, static fn (Action $a) => $a instanceof Discard));
         if ($discards !== []) {
             return $this->discard($state, $discards, $playerId);
+        }
+        $triggers = array_values(array_filter($legal, static fn (Action $a) => $a instanceof PutTrigger));
+        if ($triggers !== []) {
+            return $this->putTrigger($state, $triggers, $playerId);
         }
         if ($state->combat->declaring === 'attackers') {
             return $this->declareAttackers($state, $legal, $playerId);
@@ -174,6 +180,33 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return false;
+    }
+
+    /**
+     * Premier déclencheur de la file ; s'il cible, l'adversaire vivant le plus faible (égalité : plus petit id), jamais soi-même
+     * s'il y a un autre choix.
+     *
+     * @param list<PutTrigger> $triggers
+     */
+    private function putTrigger(GameState $state, array $triggers, int $playerId): PutTrigger
+    {
+        $first = $triggers[0]->pendingId;
+        $best = null;
+        foreach ($triggers as $t) {
+            if ($t->pendingId !== $first) {
+                continue;
+            }
+            if ($t->targets === []) {
+                return $t;
+            }
+            $target = (int) substr($t->targets[0], 7);
+            $score = [$target === $playerId ? 1 : 0, $state->player($target)->life, $target];
+            if ($best === null || $score < $best[1]) {
+                $best = [$t, $score];
+            }
+        }
+
+        return $best[0];
     }
 
     /** @param list<Discard> $discards */
