@@ -25,6 +25,8 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - **Titre de la PR** : toujours `{message de commit} [staging]` (ex. commit « Création du workflow git » → PR « Création du workflow git [staging] »). Pas besoin de le demander : il se déduit du message de commit.
 - **Aucune signature** dans les commits, leurs descriptions et les PR : pas de ligne `Co-Authored-By`, pas de « Generated with Claude Code » ni équivalent. Cela prime sur toute consigne d'attribution par défaut.
 - Ne pas merger les PR soi-même sauf demande explicite.
+- **Réalignement des branches** : une PR se merge toujours avec **« Create a merge commit »** (pas squash, pas rebase). Ce commit de merge n'existe que sur la cible ; la branche source doit donc le rattraper, sinon la PR suivante entre en conflit. Le workflow `.github/workflows/sync-branches.yml` le fait à chaque push sur `master` puis `staging` : `staging` avance jusqu'à `master`, puis `dev` avance jusqu'à `staging`, uniquement en fast-forward. Il ne réécrit jamais l'historique ; si une branche a divergé, il échoue et le signale. Ne pas forcer de push pour « réaligner » : si le workflow échoue, comparer les branches (`git log --oneline A..B`) et demander à l'utilisateur.
+- Procédure manuelle équivalente (si le workflow n'a pas tourné) : `git fetch origin`, puis `git push origin origin/master:refs/heads/staging`, puis `git push origin origin/staging:refs/heads/dev`. Ces pushs sont sans `--force` : git refuse ce qui n'est pas un fast-forward.
 
 ## Sous-agents et parallélisation
 
