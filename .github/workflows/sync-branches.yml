@@ -1,0 +1,51 @@
+name: Synchroniser les branches
+
+# Après un merge dans master (ou staging), fait avancer les branches en aval
+# en fast-forward uniquement : master -> staging -> dev. Ne réécrit jamais l'historique.
+
+on:
+  push:
+    branches: [master, staging]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-branches
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Faire avancer les branches en aval (fast-forward seulement)
+        run: |
+          set -euo pipefail
+
+          # sync <source> <cible> : avance la cible jusqu'à la source si c'est un fast-forward
+          sync() {
+            local src="$1" dst="$2"
+            git fetch --quiet origin "$src" "$dst"
+            if git merge-base --is-ancestor "origin/$dst" "origin/$src"; then
+              if [ "$(git rev-parse "origin/$dst")" = "$(git rev-parse "origin/$src")" ]; then
+                echo "$dst est déjà à jour avec $src"
+              else
+                git push origin "origin/$src:refs/heads/$dst"
+                echo "$dst avancé jusqu'à $src"
+              fi
+            elif git merge-base --is-ancestor "origin/$src" "origin/$dst"; then
+              echo "$dst est devant $src : rien à faire"
+            else
+              echo "::error::$dst a divergé de $src : fast-forward impossible, réalignement à faire à la main"
+              exit 1
+            fi
+          }
+
+          if [ "$GITHUB_REF_NAME" = "master" ]; then
+            sync master staging
+          fi
+          sync staging dev

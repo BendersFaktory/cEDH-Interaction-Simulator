@@ -57,3 +57,6 @@ backend/var/
 backend/.env.local
 backend/.env.*.local
 .phpunit.result.cache
+
+# Worktrees des sous-agents (locaux)
+.claude/
