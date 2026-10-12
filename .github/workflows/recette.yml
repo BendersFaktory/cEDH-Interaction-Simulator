@@ -28,14 +28,14 @@ jobs:
       # Les variables d'environnement priment sur .env : pas de mot de passe versionné.
       DATABASE_URL: mysql://root:root@127.0.0.1:3306/mtg_sim?serverVersion=9.3.0&charset=utf8mb4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
           tools: composer
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -60,7 +60,7 @@ jobs:
 
       - name: Captures
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: recette-captures
           path: frontend/recette/
