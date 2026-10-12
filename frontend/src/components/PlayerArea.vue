@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PlayerView } from '../types/engine'
+import { restrictionLabel } from '../engine/describe'
 import CardView from './CardView.vue'
 
 defineProps<{ player: PlayerView; isActive: boolean; hasPriority: boolean; hasPassed: boolean }>()
@@ -7,6 +8,10 @@ defineProps<{ player: PlayerView; isActive: boolean; hasPriority: boolean; hasPa
 /** Réserve => liste de pastilles (une par unité), couleurs d'abord. */
 const poolSymbols = (pool: Record<string, number> | undefined): string[] =>
   Object.entries(pool ?? {}).flatMap(([s, n]) => Array<string>(Math.max(0, n)).fill(s))
+
+/** Mana restreint => pastilles avec leur restriction. */
+const restrictedSymbols = (r: PlayerView['restricted']): Array<{ s: string; kind: string }> =>
+  Object.entries(r ?? {}).flatMap(([kind, m]) => poolSymbols(m).map((s) => ({ s, kind })))
 </script>
 
 <template>
@@ -20,9 +25,16 @@ const poolSymbols = (pool: Record<string, number> | undefined): string[] =>
       <span v-if="player.lost" class="badge lost">éliminé</span>
     </header>
 
-    <div v-if="poolSymbols(player.pool).length" class="zone mana-pool">
+    <div v-if="poolSymbols(player.pool).length || restrictedSymbols(player.restricted).length" class="zone mana-pool">
       <h4>Réserve de mana</h4>
       <span v-for="(s, i) in poolSymbols(player.pool)" :key="i" class="mana-sym" :class="/^[WUBRGC]$/.test(s) ? `m-${s}` : 'm-n'">{{ s }}</span>
+      <span
+        v-for="(r, i) in restrictedSymbols(player.restricted)"
+        :key="`r${i}`"
+        class="mana-sym restricted"
+        :class="/^[WUBRGC]$/.test(r.s) ? `m-${r.s}` : 'm-n'"
+        :title="`Mana restreint : ${restrictionLabel(r.kind)}`"
+      >{{ r.s }}<sup>*</sup></span>
     </div>
 
     <div v-if="Object.keys(player.commanderDamage).length" class="zone">
@@ -59,3 +71,8 @@ const poolSymbols = (pool: Record<string, number> | undefined): string[] =>
     </footer>
   </section>
 </template>
+
+<style scoped>
+.mana-sym.restricted { outline: 1px dashed currentColor; outline-offset: 1px; cursor: help; }
+.mana-sym.restricted sup { font-size: 8px; margin-left: 1px; }
+</style>

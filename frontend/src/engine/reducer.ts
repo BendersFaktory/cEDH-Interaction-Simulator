@@ -22,12 +22,15 @@ export function initialView(): GameView {
 
 const board = (card: PublicCard): BoardCard => ({ ...card, tapped: false })
 
-function zoneOf(pl: PlayerView, destination: string): BoardCard[] {
+/** Zone d'arrivée ; `null` pour 'none' (un jeton qui quitte le champ de bataille cesse d'exister). */
+function zoneOf(pl: PlayerView, destination: string): BoardCard[] | null {
   switch (destination) {
     case 'battlefield':
       return pl.battlefield
     case 'command':
       return pl.command
+    case 'none':
+      return null
     default:
       return pl.graveyard
   }
@@ -36,6 +39,11 @@ function zoneOf(pl: PlayerView, destination: string): BoardCard[] {
 function removeCard(cards: BoardCard[], id: string): void {
   const i = cards.findIndex((c) => c.id === id)
   if (i >= 0) cards.splice(i, 1)
+}
+
+/** Partie restreinte de la réserve (valeur absolue ; absente du payload = vide). */
+function restrictedOf(r: Record<string, Record<string, number>> | undefined): Record<string, Record<string, number>> {
+  return Object.fromEntries(Object.entries(r ?? {}).map(([k, m]) => [k, { ...m }]))
 }
 
 function tapAll(pl: PlayerView, ids: string[] | undefined): void {
@@ -52,7 +60,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
   switch (e.type) {
     case 'GameStarted':
-      for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[]; pool?: Record<string, number> }>) {
+      for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[]; pool?: Record<string, number>; restricted?: Record<string, Record<string, number>> }>) {
         v.players[pl.id] = {
           id: pl.id,
           life: pl.life,
@@ -65,6 +73,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
           controller: pl.controller,
           commanderDamage: {},
           pool: { ...(pl.pool ?? {}) },
+          restricted: restrictedOf(pl.restricted),
         } satisfies PlayerView
       }
       break
@@ -114,7 +123,10 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
         if (land) land.tapped = true
       }
       v.stack.push({ id: p.stackId, card: p.card, controller: p.player, targets: p.targets })
-      if (p.pool) pl.pool = { ...p.pool }
+      if (p.pool) {
+        pl.pool = { ...p.pool }
+        pl.restricted = restrictedOf(p.restricted)
+      }
       v.priority.passed = []
       break
     }
@@ -123,6 +135,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       const pl = v.players[p.player]
       tapAll(pl, p.tapped)
       pl.pool = { ...p.pool }
+      pl.restricted = restrictedOf(p.restricted)
       break
     }
 
@@ -133,28 +146,35 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'AbilityTriggered':
+      v.stack.push({ id: p.stackId, card: p.card, controller: p.player, targets: p.targets ?? [], trigger: p.trigger, label: p.label })
+      v.priority.passed = []
+      break
+
     case 'AbilityResolved':
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
       break
 
     case 'ManaAdded':
       v.players[p.player].pool = { ...p.pool }
+      v.players[p.player].restricted = restrictedOf(p.restricted)
       break
 
     case 'ManaPoolEmptied':
       v.players[p.player].pool = {}
+      v.players[p.player].restricted = {}
       break
 
     case 'SpellResolved': {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
-      zoneOf(v.players[p.controller], p.destination).push(board(p.card))
+      zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
       break
     }
 
     case 'SpellCountered': {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
       // Un commandant contré retourne en zone de commandement (règle de remplacement).
-      zoneOf(v.players[p.controller], p.destination).push(board(p.card))
+      zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
       break
     }
 
@@ -168,7 +188,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'CardDiscarded': {
       const pl = v.players[p.player]
       removeCard(pl.hand, p.card.id)
-      zoneOf(pl, p.destination).push(board(p.card))
+      zoneOf(pl, p.destination)?.push(board(p.card))
       break
     }
 
@@ -190,7 +210,28 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'CreatureDied': {
       const pl = v.players[p.player]
       removeCard(pl.battlefield, p.card.id)
-      zoneOf(pl, p.destination).push(board(p.card))
+      zoneOf(pl, p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'CreatureBoosted': {
+      // Valeurs absolues : force/endurance actuelles (bonus du tour compris, ou remises à la base au cleanup).
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) {
+        c.power = p.power
+        c.toughness = p.toughness
+      }
+      break
+    }
+
+    case 'TokenCreated':
+      v.players[p.player].battlefield.push(board(p.card))
+      break
+
+    case 'PermanentSacrificed': {
+      const pl = v.players[p.player]
+      removeCard(pl.battlefield, p.card.id)
+      zoneOf(pl, p.destination)?.push(board(p.card))
       break
     }
 

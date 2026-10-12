@@ -71,6 +71,37 @@ curl localhost:8000/api/simulations/2/pending
 curl -X POST localhost:8000/api/simulations/2/decisions -H 'Content-Type: application/json' -d '{"actionId":"pass:1"}'
 ```
 
+## Profiler le moteur (SPX)
+
+Outil : [php-spx](https://github.com/NoiseByNorthwest/php-spx). Il n'est pas disponible via PECL sur macOS (Homebrew, PHP 8.4) : compilation depuis les sources.
+
+```bash
+git clone https://github.com/NoiseByNorthwest/php-spx && cd php-spx
+phpize
+./configure --with-zlib-dir=$(xcrun --show-sdk-path)/usr
+make
+mkdir -p /opt/homebrew/lib/php/pecl/20240924   # le dossier n'existe pas : make install échoue sur le lien pecl
+cp modules/spx.so /opt/homebrew/lib/php/pecl/20240924/
+echo 'extension=spx.so' > /opt/homebrew/etc/php/8.4/conf.d/ext-spx.ini
+```
+
+Piège : les scripts autoconf de Homebrew ont un shebang cassé (`/usr/bin/perl5.30`) ; les lancer avec `/usr/bin/perl <script>`.
+
+Usage (inactif sans `SPX_ENABLED`, le rapport plat part sur stderr) :
+
+```bash
+SPX_ENABLED=1 SPX_FP_LIMIT=30 php backend/bin/smoke.php 16 > /dev/null
+SPX_ENABLED=1 SPX_FP_INC=1 SPX_FP_LIMIT=30 php backend/bin/smoke.php 16 > /dev/null   # trié par temps inclusif
+```
+
+Les gains se mesurent **sans** SPX (le profileur ralentit l'exécution). Pour vérifier qu'une optimisation ne change aucun événement, `bin/bench.php` donne durée, nombre d'événements, µs par événement et sha1 du flux d'événements par graine (défaut : 42 6 16) :
+
+```bash
+php backend/bin/bench.php 1..20 42
+```
+
+Les empreintes doivent rester identiques avant et après l'optimisation ; sinon le jeu a changé.
+
 ## Mesures (seed 42, 4 IA)
 
 | | SQLite (au départ) | MySQL, colonnes `JSON` natives | **MySQL, `json_text` + insertions par lots** (actuel) |
@@ -115,7 +146,7 @@ Commande : `APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php [seed..
 | Plus grand écart entre ancres | n.m. | **128 événements** | 127 | 138 |
 | Pic mémoire PHP (`APP_DEBUG=0`) | ~100 Mo | **~38 Mo** | 38 Mo | 42 Mo |
 
-Lecture : l'hypothèse « ~2× plus d'événements » ne tient plus. Le combat termine les parties au tour ~33-48 au lieu de ~100+, ce qui compense les 9 étapes par tour : une partie a **moins** d'événements qu'avant les phases complètes (les ~2/3 sont des événements verbeux, 1 ancre par tour). Un tour fait au plus ~140 événements, la reconstruction reste à quelques ms : **N = 1 est conservé**. Limite : seules des parties « 4 IA » ont été mesurées ; la taille des ancres croîtra avec les vraies decks (100 cartes) et le mana/les déclencheurs, à remesurer à ce moment-là.
+Lecture : l'hypothèse « ~2× plus d'événements » ne tient plus. Le combat termine les parties au tour ~33-48 au lieu de ~100+, ce qui compense les 9 étapes par tour : une partie a **moins** d'événements qu'avant les phases complètes (les ~2/3 sont des événements verbeux, 1 ancre par tour). Un tour fait au plus ~140 événements, la reconstruction reste à quelques ms : **N = 1 est conservé**. Limite : seules des parties « 4 IA » ont été mesurées ; la taille des ancres croîtra avec les vraies decks (100 cartes) et le mana/les triggers, à remesurer à ce moment-là.
 
 #### Après le mana (couleurs, auto-paiement ; mesuré le 2026-10-10, seed 42)
 
@@ -124,6 +155,53 @@ Lecture : l'hypothèse « ~2× plus d'événements » ne tient plus. Le combat t
 #### Après les capacités activées et le mana avancé (solveur exact, réserve persistante, duals, Sol Ring, rituels ; mesuré le 2026-10-10, graines 42 / 6 / 16)
 
 Seed 42 : 3805 événements (dont 2945 verbeux), 40 ancres, 1,56 Mo d'ancres + 0,20 Mo d'événements ; `create` ~0,21 s (graines 6 et 16 : ~0,25 et ~0,30 s pour 4048 et 4740 événements ; +40 % vs le mana de base : le solveur est maintenant une recherche exacte, appelée pour chaque sort envisagé) ; `fork` 8-22 ms ; reconstruction 1-17 ms (pire écart : 125-139 événements) ; pic mémoire 29-36 Mo. N = 1 reste adapté. Les activations de mana manuelles d'un humain ajoutent une ancre par pause (~35 Ko chacune).
+
+#### Après la fin des capacités activées (créatures à mana, Signets, Treasure, coûts riches ; mesuré le 2026-10-10, graines 42 / 6 / 16)
+
+| | seed 42 | seed 6 | seed 16 |
+|---|---|---|---|
+| Événements (dont verbeux) / ancres | 4751 (3585) / 49 | 4087 (3121) / 43 | 4204 (3232) / 47 |
+| Taille : ancres / événements | 2,08 / 0,28 Mo | 1,83 / 0,23 Mo | 2,00 / 0,23 Mo |
+| `create()` (service, médiane) | ~0,45 s | ~0,37 s | ~0,36 s |
+| `fork` au milieu | ~34 ms | ~50 ms | ~41 ms |
+| `state@` (pire écart entre ancres, 137-148 événements) | ~27 ms | ~25 ms | ~22 ms |
+| Pic mémoire PHP (`APP_DEBUG=0`) | 34 Mo | 36 Mo | 36 Mo |
+
+Lecture : `create` double environ par rapport à la mesure précédente (seed 42 : 0,21 → 0,45 s). Deux causes, mesurées séparément : les parties sont plus longues (jetons bloqueurs : 49 tours au lieu de 40 pour la seed 42, +25 % d'événements, ancres de 1,56 à 2,08 Mo), et le moteur seul coûte 30 à 45 % de plus par événement (seed 42, sans base : 36 → 53 µs par événement ; 133 → 252 ms pour la partie). Chaque priorité évalue maintenant plus de capacités (choix de coût, plans de paiement avec convertisseurs). Reconstruction et fork restent sous 50 ms : **N = 1 est conservé**. Piste si `create` devient gênant : profiler `LegalActionGenerator` / `AbilityManager::canActivate` (un plan de paiement par capacité à coût de mana à chaque priorité).
+
+#### Après les triggers (Elvish Visionary, Perilous Myr, Idole de l'Érudit ; mesuré le 2026-10-11, graines 42 / 6 / 16)
+
+| | seed 42 | seed 6 | seed 16 |
+|---|---|---|---|
+| Événements (dont verbeux) / ancres | 4429 (3385) / 41 | 4234 (3199) / 41 | 5410 (4220) / 54 |
+| Taille : ancres / événements | 1,77 / 0,28 Mo | 1,78 / 0,26 Mo | 2,34 / 0,31 Mo |
+| `create()` (service, médiane) | ~0,42 s | ~0,47 s | ~0,59 s |
+| `fork` au milieu | ~51 ms | ~25 ms | ~36 ms |
+| `state@` (pire écart entre ancres, 147-176 événements) | ~40 ms | ~51 ms | ~61 ms |
+| Pic mémoire PHP (`APP_DEBUG=0`) | 31 Mo | 34 Mo | 41 Mo |
+
+Lecture : le coût par événement de `create` ne bouge pas (seed 42 : ~96 µs par événement en base, contre ~95 avant) ; les écarts entre graines viennent de la longueur des parties (seed 16 : 54 tours). La reconstruction au pire écart monte à 40-61 ms (≤ 27 ms avant) : les écarts entre ancres sont plus longs (jusqu'à 176 événements) et les tours plus chargés (triggers, pioches). Toujours sous 100 ms : **N = 1 est conservé**. La file de triggers ajoute 3 clés à l'état (vides hors trigger) et une clé `triggers` aux seules cartes qui en ont.
+
+#### Après le mana conditionnel (Eldrazi Temple, Eldrazi Mimic ; mesuré le 2026-10-12, graines 42 / 6 / 16)
+
+| | seed 42 | seed 6 | seed 16 |
+|---|---|---|---|
+| Événements (dont verbeux) / ancres | 2975 (2262) / 30 | 4138 (3157) / 43 | 6410 (4921) / 59 |
+| Taille : ancres / événements | 1,31 / 0,18 Mo | 1,88 / 0,24 Mo | 2,62 / 0,42 Mo |
+| `create()` (service, médiane) | ~0,30 s | ~0,32 s | **~1,45 s** |
+| `fork` au milieu | ~38 ms | ~14 ms | ~88 ms |
+| `state@` (pire écart entre ancres) | ~44 ms | ~22 ms | ~42 ms |
+
+Lecture : les decks ont changé (un terrain de base remplacé par Eldrazi Temple, un Hybrid Bear par Eldrazi Mimic), donc les parties ne sont pas comparables une à une avec le tableau précédent. Seeds 42 et 6 : ~77-100 µs par événement, comme avant. **Seed 16 : ~226 µs par événement** (partie de 59 tours, jusqu'à 24 permanents par joueur) : le solveur de paiement (`ManaPayment`, appelé à chaque priorité via `AbilityManager::canActivate` et le générateur d'actions) coûte plus cher sur un grand plateau. Sur des decks identiques, la restriction seule ajoute ~5 % (mesure de l'agent d'implémentation sur 7 parties). Voir l'item « Profiler le moteur » de la roadmap. N = 1 conservé (reconstruction ≤ 44 ms).
+
+#### Après le profilage et l'optimisation du solveur (mesuré le 2026-10-12, graines 42 / 6 / 16, MySQL 9.3)
+
+Decks inchangés depuis la mesure précédente, donc comparables. Médianes de `bin/measure.php` :
+
+- `create()` : seed 42 ~0,22 s, seed 6 ~0,25 s, **seed 16 ~0,70 s** (était ~1,45 s).
+- `fork` au milieu : ~11 à 66 ms ; reconstruction (`state@`, pire écart entre ancres) : ≤ 32 ms ; taille en base : ~1,5 à 3,0 Mo (inchangée).
+
+Lecture : seul le moteur a changé. Les événements sont identiques (empreintes sha1 de `bin/bench.php`, 21 graines). N = 1 conservé.
 
 ## Persistance : `json_text` et insertions par lots
 

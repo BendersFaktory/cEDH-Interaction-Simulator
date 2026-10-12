@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Agent;
 
+use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
@@ -12,8 +13,10 @@ use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PutTrigger;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
+use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
 use App\Engine\Mana\ManaCost;
 use App\Engine\Mana\ManaPayment;
@@ -24,6 +27,7 @@ use App\Engine\Mana\ManaPayment;
  *  2. joue un terrain ;
  *  3. à son tour, en phase principale, pile vide : lance un sort au hasard (jamais sur soi-même) ;
  *  4. sinon passe.
+ * Triggers : posés dans l'ordre de la file ; une cible de dégâts est l'adversaire vivant le plus faible.
  * Défausse (main > 7) : un terrain en surplus (≥ 5 en jeu), sinon la carte la plus chère, à égalité le plus petit id.
  * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible ; bloque quand le bloqueur survit
  * ou tue l'attaquant (un seul bloqueur par attaquant), et chump-bloque seulement si l'attaque est létale.
@@ -36,6 +40,10 @@ final class HeuristicAgent implements PlayerAgent
         $discards = array_values(array_filter($legal, static fn (Action $a) => $a instanceof Discard));
         if ($discards !== []) {
             return $this->discard($state, $discards, $playerId);
+        }
+        $triggers = array_values(array_filter($legal, static fn (Action $a) => $a instanceof PutTrigger));
+        if ($triggers !== []) {
+            return $this->putTrigger($state, $triggers, $playerId);
         }
         if ($state->combat->declaring === 'attackers') {
             return $this->declareAttackers($state, $legal, $playerId);
@@ -61,11 +69,25 @@ final class HeuristicAgent implements PlayerAgent
             }
         }
 
-        // Capacité non-mana (Prodigal Pinger) : sur l'adversaire vivant le plus faible (égalité : plus petit id).
-        // Les capacités de mana ne sont jamais choisies : l'auto-paiement s'en charge.
+        // Wild Mongrel : en combat (étape des bloqueurs), défausser un terrain pour +1/+1 si la créature attaque ou bloque.
+        if ($state->phase === Phase::DeclareBlockers && $state->combat->declaring === null) {
+            foreach ($legal as $action) {
+                if ($action instanceof ActivateAbility && $this->ability($state, $action)?->effect === 'pump'
+                    && (isset($state->combat->attackers[$action->cardId]) || $state->combat->isBlocking($action->cardId))
+                    && $state->player($playerId)->findInHand($action->costChoices[0] ?? '')?->isLand()) {
+                    return $action;
+                }
+            }
+        }
+
+        // Capacité de dégâts (Prodigal Pinger, Goblin Bombardment) : sur l'adversaire vivant le plus faible (égalité : plus
+        // petit id). Bombardment ne sacrifie que des jetons. Les capacités de mana ne sont jamais choisies : l'auto-paiement
+        // s'en charge.
         $ping = null;
         foreach ($legal as $action) {
-            if ($action instanceof ActivateAbility && !$action->mana && ($target = $this->playerTarget($action)) !== null && $target !== $playerId) {
+            if ($action instanceof ActivateAbility && !$action->mana
+                && ($action->costChoices === [] || $this->battlefieldCard($state, $playerId, $action->costChoices[0])?->token)
+                && ($target = $this->playerTarget($action)) !== null && $target !== $playerId) {
                 $life = $state->player($target)->life;
                 if ($ping === null || $life < $ping[1] || ($life === $ping[1] && $target < $ping[2])) {
                     $ping = [$action, $life, $target];
@@ -96,9 +118,26 @@ final class HeuristicAgent implements PlayerAgent
 
                 return $this->withBestX($state, $pick, $casts);
             }
+
+            // Plus rien à lancer, en phase principale 2 : jetons (Kher Keep), puis pioche (Tome ; Mind Stone seulement main vide).
+            if ($state->phase === Phase::Main2) {
+                foreach (['token', 'draw'] as $effect) {
+                    foreach ($legal as $action) {
+                        $ability = $action instanceof ActivateAbility ? $this->ability($state, $action) : null;
+                        if ($ability?->effect === $effect && (!$ability->sacrifice || $state->player($playerId)->hand === [])) {
+                            return $action;
+                        }
+                    }
+                }
+            }
         }
 
         return AutoPassAgent::pass($legal, $playerId);
+    }
+
+    private function ability(GameState $state, ActivateAbility $a): ?ActivatedAbility
+    {
+        return $this->battlefieldCard($state, $a->player(), $a->cardId)?->abilities()[$a->abilityIndex] ?? null;
     }
 
     private function playerTarget(ActivateAbility $a): ?int
@@ -120,7 +159,8 @@ final class HeuristicAgent implements PlayerAgent
             return true;
         }
         $copy = PlayerState::fromArray($p->toArray());
-        $plan = ManaPayment::plan($copy, $copy->castCost($copy->findCastable($cast->cardId)));
+        $copyRitual = $copy->findCastable($cast->cardId);
+        $plan = ManaPayment::plan($copy, $copy->castCost($copyRitual), 0, $state->turn, null, $copyRitual);
         if ($plan === null) {
             return false;
         }
@@ -135,12 +175,39 @@ final class HeuristicAgent implements PlayerAgent
                 continue;
             }
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($before, $cost) === null && ManaPayment::plan($copy, $cost) !== null) {
+            if (ManaPayment::plan($before, $cost, 0, $state->turn, null, $card) === null && ManaPayment::plan($copy, $cost, 0, $state->turn, null, $card) !== null) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Premier trigger de la file ; s'il cible, l'adversaire vivant le plus faible (égalité : plus petit id), jamais soi-même
+     * s'il y a un autre choix.
+     *
+     * @param list<PutTrigger> $triggers
+     */
+    private function putTrigger(GameState $state, array $triggers, int $playerId): PutTrigger
+    {
+        $first = $triggers[0]->pendingId;
+        $best = null;
+        foreach ($triggers as $t) {
+            if ($t->pendingId !== $first) {
+                continue;
+            }
+            if ($t->targets === []) {
+                return $t;
+            }
+            $target = (int) substr($t->targets[0], 7);
+            $score = [$target === $playerId ? 1 : 0, $state->player($target)->life, $target];
+            if ($best === null || $score < $best[1]) {
+                $best = [$t, $score];
+            }
+        }
+
+        return $best[0];
     }
 
     /** @param list<Discard> $discards */
@@ -163,7 +230,11 @@ final class HeuristicAgent implements PlayerAgent
     /** @param list<Action> $legal */
     private function declareAttackers(GameState $state, array $legal, int $playerId): Action
     {
-        $attacks = array_values(array_filter($legal, static fn (Action $a) => $a instanceof DeclareAttacker));
+        // Les créatures à mana (Llanowar Elves) restent à la maison : leur mana vaut plus que leur attaque. Une créature
+        // sans force (jeton Kobold 0/1) aussi.
+        $attacks = array_values(array_filter($legal, fn (Action $a) => $a instanceof DeclareAttacker
+            && !$this->hasManaAbility($card = $this->battlefieldCard($state, $playerId, $a->cardId))
+            && ($card?->currentPower() ?? 0) > 0));
         if ($attacks === []) {
             return $this->finish($legal, $playerId);
         }
@@ -190,7 +261,7 @@ final class HeuristicAgent implements PlayerAgent
         $incoming = 0;
         foreach ($state->combat->attackers as $attackerId => $defender) {
             if ($defender === $playerId && ($attacker = $this->battlefieldCard($state, $state->activePlayer, $attackerId)) !== null) {
-                $incoming += $attacker->power;
+                $incoming += $attacker->currentPower();
             }
         }
         $lethal = $incoming >= $state->player($playerId)->life;
@@ -205,11 +276,11 @@ final class HeuristicAgent implements PlayerAgent
             if ($attacker === null || $blocker === null) {
                 continue;
             }
-            if ($blocker->toughness - $blocker->damage > $attacker->power || $blocker->power >= $attacker->toughness - $attacker->damage) {
+            if ($blocker->currentToughness() - $blocker->damage > $attacker->currentPower() || $blocker->currentPower() >= $attacker->currentToughness() - $attacker->damage) {
                 return $a;
             }
-            if ($lethal && !$blocker->commander && ($chump === null || $attacker->power > $chump[1])) {
-                $chump = [$a, $attacker->power];
+            if ($lethal && !$blocker->commander && ($chump === null || $attacker->currentPower() > $chump[1])) {
+                $chump = [$a, $attacker->currentPower()];
             }
         }
         if ($chump !== null) {
@@ -268,6 +339,17 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return null;
+    }
+
+    private function hasManaAbility(?CardInstance $card): bool
+    {
+        foreach ($card?->abilities() ?? [] as $ability) {
+            if ($ability->isManaAbility) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isCounter(GameState $state, CastSpell $action): bool

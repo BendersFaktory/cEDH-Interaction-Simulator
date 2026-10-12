@@ -1,6 +1,6 @@
 // Miroir TypeScript des structures produites par le moteur PHP (voir docs/EVENTS.md).
 
-export type CardKind = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact'
+export type CardType = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact' | 'enchantment'
 
 /** Capacité activée d'une carte (forme sérialisée par le moteur). */
 export interface AbilityView {
@@ -8,15 +8,35 @@ export interface AbilityView {
   effect: string
   tap: boolean
   manaCost?: string | null
-  /** Pour un effet de mana : alternatives produites (ex. ['CC'] ou ['R', 'G']). */
+  /** Pour un effet de mana : alternatives produites (ex. ['{C}{C}'] ou ['{R}', '{G}']) ; suffixe `@kind` si restreinte (`{C}{C}@eldrazi`). */
   options?: string[]
   amount?: number
+  /** Coût : sacrifier la source (Treasure, Mind Stone). */
+  sacrifice?: boolean
+  /** Coût : sacrifier une créature (Goblin Bombardment). */
+  sacrificeCreature?: boolean
+  /** Coût : défausser N cartes (Wild Mongrel). */
+  discard?: number
+  /** Activable seulement en rituel. */
+  sorcerySpeed?: boolean
+  /** Jeton créé (`Nom:F/E`) ou bonus (`+F/+E`). */
+  spec?: string
+}
+
+/** Trigger d'une carte (forme sérialisée par le moteur). */
+export interface TriggerView {
+  /** `etb` (entrée en jeu), `dies` (mort) ou `upkeep` (début de l'entretien de son contrôleur). */
+  event: 'etb' | 'dies' | 'upkeep'
+  effect: string
+  amount: number
+  /** Jeton créé (`Nom:F/E`). */
+  spec?: string
 }
 
 export interface PublicCard {
   id: string
   name: string
-  kind: CardKind
+  type: CardType
   cost: number
   effect: string | null
   /** Coût de mana canonique ('{X}{2}{R/G}{U}{U}'), null pour un terrain. */
@@ -30,6 +50,12 @@ export interface PublicCard {
   abilities?: AbilityView[]
   /** Mana ajouté par un rituel (effet 'mana'). */
   adds?: string[] | string
+  /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
+  token?: boolean
+  /** Triggers (absent = aucun). */
+  triggers?: TriggerView[]
+  /** Sous-types rangés sous leur type, ex. { creature: ['Eldrazi'] } (absent = aucun). */
+  subtypes?: Record<string, string[]>
 }
 
 export interface BoardCard extends PublicCard {
@@ -51,7 +77,7 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger'
   player: number
   cardId?: string
   targets?: string[]
@@ -62,6 +88,8 @@ export interface ActionView {
   option?: number
   /** Action `ability` : vrai pour une capacité de mana. */
   mana?: boolean
+  /** Action `trigger` : trigger en attente à mettre sur la pile. */
+  pendingId?: string
 }
 
 export interface StackItemView {
@@ -72,6 +100,10 @@ export interface StackItemView {
   x?: number
   /** Présent pour une capacité activée (la carte est sa source). */
   ability?: AbilityView
+  /** Présent pour un trigger (la carte est sa source, telle qu'au moment du trigger). */
+  trigger?: TriggerView
+  /** Libellé du trigger, fourni par le moteur. */
+  label?: string
 }
 
 export interface DecisionRequest {
@@ -114,8 +146,10 @@ export interface PlayerView {
   controller: string
   /** Dégâts de commandant subis : "propriétaire:idCommandant" => total. */
   commanderDamage: Record<string, number>
-  /** Réserve de mana (symbole => quantité). */
+  /** Réserve de mana libre (symbole => quantité). */
   pool: Record<string, number>
+  /** Mana restreint (restriction => symbole => quantité), ex. { eldrazi: { C: 2 } } ; vide/absent = aucun. */
+  restricted?: Record<string, Record<string, number>>
 }
 
 export interface GameView {

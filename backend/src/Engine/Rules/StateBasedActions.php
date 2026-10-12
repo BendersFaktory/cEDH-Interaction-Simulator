@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PlayerState;
 
@@ -38,12 +39,13 @@ final class StateBasedActions
     {
         foreach ($s->players as $p) {
             foreach ($p->battlefield as $card) {
-                if ($card->isCreature() && $card->damage >= $card->toughness && $card->damage > 0) {
+                if ($card->isCreature() && $card->damage >= $card->currentToughness() && $card->damage > 0) {
                     $p->takeFromBattlefield($card->id);
                     $card->damage = 0;
                     $card->tapped = false;
                     $destination = $s->sendToGraveyard($p->id, $card);
                     $s->emit('CreatureDied', ['player' => $p->id, 'card' => $card->toPublic(), 'destination' => $destination]);
+                    $s->queueTriggers($p->id, $card, TriggeredAbility::DIES);
                 }
             }
         }

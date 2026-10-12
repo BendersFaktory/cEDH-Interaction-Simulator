@@ -11,7 +11,7 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 5. **Un sort lancé remet `priority->passed` à zéro** et rend la priorité au lanceur ; la pile ne se résout que quand tous les joueurs en vie ont passé consécutivement. Les terrains ne déclenchent pas de ronde.
 6. **On ne forke que sur un checkpoint** = un `PriorityGranted` dont le payload porte `checkpoint: true` (début de ronde, ou pile non vide). Jamais au milieu d'une résolution de pile. Les autres octrois n'ont pas de point de bifurcation ; le serveur recolle au checkpoint précédent. Seules des **ancres** sont stockées (1 par tour, + pause humaine, + fork) : les checkpoints intermédiaires se reconstruisent par rejeu (`StateReconstructor`).
 10. **Capacités activées** : toute activation passe par `AbilityManager::activate()`. Une capacité de mana (`isManaAbility`) est résolue immédiatement, sans pile ni nouvelle ronde (comme `PlayLand`) ; les autres vont sur la pile. Ne jamais créer de mana ailleurs que par `PlayerState::activateManaSource`. Le pool persiste jusqu'à la fin de l'étape.
-9. **Commander** : un commandant qui irait au cimetière (contré, détruit...) retourne en zone de commandement (`GameState::sendToGraveyard()` — toujours l'utiliser, jamais `->graveyard[] =` directement). La taxe est dans `PlayerState::castCost()` : toujours passer par elle pour un coût.
+9. **Commander** : un commandant qui irait au cimetière (contré, détruit...) retourne en zone de commandement (`GameState::sendToGraveyard()` — toujours l'utiliser, jamais `->graveyard[] =` directement ; un jeton y cesse d'exister, destination `none`). Un sacrifice passe toujours par `GameState::sacrifice()`. La taxe est dans `PlayerState::castCost()` : toujours passer par elle pour un coût.
 7. **Le front est « bête »** : il applique les événements (`src/engine/reducer.ts`), aucune règle de jeu. Les payloads d'événements portent des **valeurs absolues** (ex. PV résultants) pour que le reducer reste trivial.
 8. **Ne jamais faire confiance au client** : `POST /decisions` envoie un `actionId`, le serveur recalcule les actions légales et retrouve l'action.
 
@@ -25,6 +25,17 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 - **Titre de la PR** : toujours `{message de commit} [staging]` (ex. commit « Création du workflow git » → PR « Création du workflow git [staging] »). Pas besoin de le demander : il se déduit du message de commit.
 - **Aucune signature** dans les commits, leurs descriptions et les PR : pas de ligne `Co-Authored-By`, pas de « Generated with Claude Code » ni équivalent. Cela prime sur toute consigne d'attribution par défaut.
 - Ne pas merger les PR soi-même sauf demande explicite.
+
+## Sous-agents et parallélisation
+
+- **Paralléliser au maximum** : dès qu'une étape se découpe en tâches indépendantes (fichiers ou fonctions distincts, pas de dépendance de résultat), les lancer dans le même tour, en arrière-plan. Ne pas paralléliser ce qui se touche (même fichier, même fonction) : le conflit coûte plus cher que le gain.
+- **Modèle le moins cher qui reste fiable pour la tâche**, choisi à chaque plan : `haiku` pour le mécanique (commandes, installation, rédaction de scripts simples, relecture de sorties, mise à jour de documentation) ; `sonnet` pour un refactor ciblé dont le comportement est vérifiable par des tests ; `opus` pour un raisonnement délicat (algorithmes avec contrainte d'optimalité, règles de jeu, revue de sécurité). Ne jamais descendre sous le modèle qui a fait échouer une tâche précédente de même nature.
+- **Branche par sous-agent** (`isolation: "worktree"`) : chaque sous-agent travaille sur sa propre branche et son propre worktree, jamais sur `dev` directement.
+  - **Partir de `dev`, pas de `master`** : le worktree est créé depuis la branche par défaut du dépôt (`master`). Le sous-agent doit donc, avant tout travail, exécuter `git switch -c <nom-de-branche> dev` (ou `git reset --hard dev` sur une branche créée automatiquement) et vérifier que `git rev-parse --short HEAD` vaut le hash de `dev`. Sinon, il s'arrête et le signale.
+  - Le sous-agent ne committe pas, ne pousse pas et n'ouvre pas de PR.
+- **Intégration** (faite par la session principale, pas par le sous-agent) : une fois le travail vérifié (tests, empreintes, build), la session fusionne la branche du sous-agent dans `dev`. Un conflit se traite comme un conflit de fusion ordinaire, sans message ni commit de résolution inventé. Le commit final suit les règles de la section « Workflow Git » : message fourni par l'utilisateur, push de `dev`, PR `dev` → `staging`.
+- Après intégration, supprimer le worktree et la branche du sous-agent une fois leur contenu repris dans `dev` (`git worktree remove`, `git branch -d`).
+- **Compacter le contexte à chaque fermeture de sous-agent** : une fois le rapport d'un sous-agent reçu et intégré, la session principale compacte son contexte (`/compact`), pour que les journaux et sorties des sous-agents ne s'accumulent pas. Le compactage est déclenché par la session (commande `/compact`), pas par le sous-agent.
 
 ## Roadmap (à tenir à jour)
 
@@ -48,9 +59,11 @@ Simulateur Magic: The Gathering **Commander à 4 joueurs : l'utilisateur occupe 
 # Moteur (sans composer)
 APP_DEBUG=0 php -d memory_limit=512M backend/bin/measure.php   # taille en base + latences (create, fork, state) ; MySQL requis
 php backend/bin/smoke.php 42                  # joue une partie Commander complète à 4 IA
+php backend/bin/bench.php 1..20 42            # vitesse + empreinte sha1 des événements (à comparer avant/après une optimisation)
+SPX_ENABLED=1 SPX_FP_LIMIT=30 php backend/bin/smoke.php 16 > /dev/null   # profil SPX (rapport sur stderr ; installation dans docs/SYMFONY_SETUP.md)
 php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json   # à relancer si le format d'événements change
 
-# Backend (99 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
+# Backend (150 tests : moteur, API, type Doctrine, reconstruction des checkpoints ; MySQL doit tourner, cf. docs/SYMFONY_SETUP.md)
 cd backend && composer install && vendor/bin/phpunit
 php backend/bin/console doctrine:migrations:migrate --no-interaction   # crée les tables MySQL (base mtg_sim)
 cd backend && php -S 127.0.0.1:8000 -t public                           # API pour le front (npm run dev)
@@ -67,24 +80,25 @@ cd frontend && npm run recette    # parcours Chrome (Playwright) contre l'API r�
 3. `frontend/src/engine/reducer.ts` (+ `describe.ts` pour le journal).
 4. Régénérer la fixture et relancer `npm test` (test de contrat PHP ↔ reducer).
 
-## État de vérification (dernière vérification : 2026-10-10)
+## État de vérification (dernière vérification : 2026-10-12)
 
 | Partie | Vérifié ? |
 |---|---|
 | Moteur PHP : partie complète via `bin/smoke.php` | Oui |
-| Tests PHP : 99 tests (moteur dont `PhasesTest`, `CombatTest`, `DiscardTest`, `ManaPaymentTest`, `ManaCastTest` et `AbilityTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
-| Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, 348 sorts payés avec les bonnes couleurs, capacités activées toutes résolues, PV cohérents, ordre des tours correct, aucun auto-Éclair |
-| Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout (recette : `npm run recette`) |
-| Reducer front vs état final PHP (fixture) | Oui : `vitest` (17 tests) passe |
+| Tests PHP : 150 tests (moteur dont `PhasesTest`, `CombatTest`, `DiscardTest`, `ManaPaymentTest`, `ManaCastTest`, `AbilityTest`, `ActivatedCostsTest`, `TriggerQueueTest`, `TriggerTest` et `SubtypesTest`, API, type Doctrine, reconstruction des checkpoints) | **Passent avec le vrai PHPUnit 11.5** (PHP 8.4) |
+| Audit de simulation (7 graines, 4 IA) | Oui : déterministe, 1 terrain/tour, 383 sorts payés avec les bonnes couleurs (Signets, Treasures, Mind Stone compris), capacités à coûts riches exercées (Bombardment ne sacrifie que des jetons, Mongrel ne défausse que des terrains, timing de rituel respecté, bonus remis à zéro au cleanup), capacités activées toutes résolues, créatures à mana jamais engagées pendant le mal d'invocation, PV cohérents, ordre des tours correct, aucun auto-Éclair. Triggers (2026-10-11, 7 graines) : 65 posés, tous résolus sauf 1 resté sur la pile en fin de partie, aucun en attente à un checkpoint, APNAP respecté, Myr jamais sur soi |
+| Siège humain `human:auto` | Oui : s'arrête sur décision, reprend, partie menée au bout, capacité à choix de coût activée (recette : `npm run recette`, scénario 10), cible d'un trigger choisie (scénario 11), mana restreint d'Eldrazi Temple engagé à la main puis dépensé pour Eldrazi Mimic (scénario 12) |
+| Reducer front vs état final PHP (fixture) | Oui : `vitest` (25 tests) passe (la fixture seed 42 contient jetons, sacrifices, bonus, triggers et du mana restreint) |
 | Front Vue : `vue-tsc --noEmit` et `vite build` | **Oui, passent** (composants compilés ; affichés dans Chrome, voir ligne suivante) |
-| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (99 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (phases complètes + combat, mesuré le 2026-10-10, seed 42) : `create` ~0,21 s, ~1,8 Mo en base (40 ancres, MySQL 9.3), `fork` ~8-22 ms, reconstruction ~1-17 ms après les capacités activées (`bin/measure.php`) |
+| Couche Symfony (`Controller/`, `Entity/`, `Service/`) | **Oui** : app Symfony 7.4 réelle (kernel, config, migration MySQL). `lint:container` et `doctrine:schema:validate` OK, 7 routes, 11 tests d'API (`tests/Api/`), 6 tests du type `json_text` et 4 tests d'acceptation des checkpoints épars passent (150 tests au total), scénario `curl` complet (création, décision, fork) vérifié. Partie 4 IA (mesuré le 2026-10-12 après le profilage, graines 42 / 6 / 16) : `create` ~0,22-0,25 s, **~0,70 s sur la seed 16** (59 tours), fork ~11-66 ms, reconstruction ≤ 32 ms, ~1,5-3,0 Mo en base (30-59 ancres, MySQL 9.3) (`bin/measure.php`) |
 | Front branché sur l'API réelle dans un navigateur | **Oui (2026-10-09)** : Chrome via Playwright, partie J0, partie 4 IA complète, fork + décision, chargement, erreur 404 ; aucune erreur console inattendue. Rejouable : `npm run recette` (captures dans `frontend/recette/`) |
+| Performance moteur (`bin/bench.php`) | **Oui (2026-10-12)** : seed 16 1144 → 437 ms (178 → 68 µs par événement), seed 42 150 → 89 ms, seed 6 134 → 88 ms, 21 graines 7,15 → 3,69 s ; **21 empreintes sha1 identiques** avant/après (seeds 1..20 + 42) ; profil SPX avant optimisation : `ManaPayment::plan` ≈ 75 % du temps |
 
-Limites de comportement connues : l'IA attaque avec tout sur l'adversaire le plus faible et la partie se termine vers le tour 35-40 (seed 42 : J2 gagne). Taxe de commandant et retour en zone de commandement sont maintenant exercés en partie (vérifié sur 12 graines). Combat minimal : pas de mots-clés, un seul bloqueur côté IA, ordre d'assignation des dégâts = ordre de déclaration ; défausse à 7 : choix simple côté IA.
+Limites de comportement connues : l'IA attaque avec tout (sauf créatures à mana et créatures sans force) sur l'adversaire le plus faible et la partie se termine vers le tour 45 (seed 42 : 30 tours, J2 gagne). Taxe de commandant et retour en zone de commandement sont maintenant exercés en partie (vérifié sur 12 graines). Combat minimal : pas de mots-clés, un seul bloqueur côté IA, ordre d'assignation des dégâts = ordre de déclaration ; défausse à 7 : choix simple côté IA.
 
 ## Prochaines étapes
 
-Voir `docs/ROADMAP.md` (section 1). Phases complètes, combat à 4 joueurs, défausse à 7, mana (couleurs, hybrides, X, auto-paiement, sources non-terrain, duals, mana manuel) et socle des capacités activées sont faits. **Priorité immédiate : les déclencheurs** (file d'attente, ordre APNAP, ciblage), puis les restes des capacités activées (coûts d'activation riches, Signets, mana conditionnel). En parallèle, restes du combat : IA d'attaque/blocage fine (§3), stops configurables pour `human:auto` (§4), mots-clés ; restes des phases : choix de défausse de l'IA plus fin (§3) ; IA : gestion du surplus de mana (§3).
+Voir `docs/ROADMAP.md`. Phases complètes, combat à 4 joueurs, défausse à 7, **mana (couleurs, hybrides, X, auto-paiement, sources non-terrain, duals, mana manuel, mana conditionnel)**, **capacités activées** et **triggers (§1 : entrée en jeu, mort, entretien ; APNAP, choix d'ordre et de cible)** sont faits. **Mana conditionnel terminé (2026-10-12)** : Eldrazi Temple / Eldrazi Mimic, sous-types rattachés à leur type, recette scénario 12. La pile est au-dessus des joueurs (§6). **Moteur profilé et optimisé (2026-10-12)** : seed 16 1,14 → 0,44 s dans `bin/bench.php`, empreintes d'événements identiques (§5). **Priorité immédiate : compléter les triggers (cleanup, attaque, fin de tour) au fil des cartes**, puis cartes multi-types (§2). En parallèle : IA (§3 : surplus de mana, garder de quoi contrer, attaque/blocage fins, défausse), stops configurables (§4), mots-clés du combat (§1) ; front : refonte du plateau (§6) ; technique : CI, couverture (§5) ; connecteur Scryfall (§2).
 
 ## Questions ouvertes (à trancher avec l'utilisateur)
 

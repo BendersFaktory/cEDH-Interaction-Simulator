@@ -19,12 +19,21 @@ spl_autoload_register(static function (string $class): void {
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
-use App\Engine\Snapshot\InMemoryCheckpoints;
+use App\Engine\Game\GameState;
+use App\Engine\Snapshot\CheckpointListener;
 
 $seed = (int) ($argv[1] ?? 42);
 
 $state = GameFactory::create($seed, [0 => 'ai:heuristic', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic']);
-$checkpoints = new InMemoryCheckpoints();
+// Compte les checkpoints sans garder les états (InMemoryCheckpoints dépasse 128 Mo sur une longue partie).
+$checkpoints = new class () implements CheckpointListener {
+    public int $count = 0;
+
+    public function onCheckpoint(GameState $state): void
+    {
+        $this->count++;
+    }
+};
 $engine = new GameEngine(new AgentRegistry(), $checkpoints);
 
 $result = $engine->advance($state);
@@ -48,7 +57,7 @@ printf(
     $state->turn,
     $state->eventSeq,
     $verbose,
-    count($checkpoints->states),
+    $checkpoints->count,
 );
 foreach ($state->players as $p) {
     printf("  joueur %d : %d PV%s\n", $p->id, $p->life, $p->lost ? ' (éliminé)' : '');

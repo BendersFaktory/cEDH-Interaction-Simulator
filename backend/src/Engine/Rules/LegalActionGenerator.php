@@ -14,11 +14,13 @@ use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PutTrigger;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
+use App\Engine\Mana\ManaContext;
 use App\Engine\Mana\ManaPayment;
 
 /**
@@ -34,6 +36,10 @@ final class LegalActionGenerator
     /** @return list<Action> */
     public function for(GameState $s, int $playerId): array
     {
+        if ($s->triggerResumeHolder !== null) {
+            return $this->triggerActions($s, $playerId);
+        }
+
         if ($s->combat->declaring !== null) {
             return $this->declarationActions($s, $playerId);
         }
@@ -62,16 +68,17 @@ final class LegalActionGenerator
         // Sorts (main + zone de commandement), dédoublonnés par (nom, cibles) pour ne pas lister 4 Bolt identiques.
         // Le coût d'un commandant inclut la taxe : +2 par lancement précédent.
         $seen = [];
+        $mana = ManaPayment::context($p, $s->turn); // champ de bataille scanné une seule fois pour tous les sorts et capacités
         foreach ([...$p->hand, ...$p->command] as $card) {
             if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed)) {
                 continue;
             }
             // Payable avec les terrains non engagés (couleurs, hybrides) ; un sort à {X} offre une action par X payable.
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($p, $cost) === null) {
+            if (ManaPayment::plan($p, $cost, 0, $s->turn, null, $card, $mana) === null) {
                 continue;
             }
-            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost), self::MAX_X) : 0;
+            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost, $s->turn, $card, $mana), self::MAX_X) : 0;
             foreach ($this->targetSets($s, $card) as $targets) {
                 for ($x = 0; $x <= $maxX; $x++) {
                     $key = $card->name . '|' . implode(',', $targets) . '|' . $x;
@@ -84,34 +91,39 @@ final class LegalActionGenerator
             }
         }
 
-        return [...$actions, ...$this->abilityActions($s, $p)];
+        return [...$actions, ...$this->abilityActions($s, $p, $mana)];
     }
 
     /**
-     * Capacités activées des permanents du joueur, à tout moment où il a la priorité. Dédoublonnées par
-     * (nom, capacité, alternative, cibles) : quatre Montagnes non engagées = une seule action.
+     * Capacités activées des permanents du joueur, à tout moment où il a la priorité (ou seulement en rituel si
+     * `sorcerySpeed`, voir AbilityManager::canActivate). Une action par (alternative, cibles, choix de coût), dédoublonnée
+     * par noms : quatre Montagnes non engagées = une seule action ; sacrifier l'un ou l'autre de deux jetons Kobold aussi.
      *
      * @return list<ActivateAbility>
      */
-    private function abilityActions(GameState $s, PlayerState $p): array
+    private function abilityActions(GameState $s, PlayerState $p, ManaContext $mana): array
     {
         $actions = [];
         $seen = [];
         foreach ($p->battlefield as $card) {
             foreach ($card->abilities() as $index => $ability) {
-                if (!AbilityManager::canActivate($s, $p, $card, $ability)) {
+                if (!AbilityManager::canActivate($s, $p, $card, $ability, $mana)) {
                     continue;
                 }
                 $options = $ability->isManaAbility ? array_keys($ability->options) : [0];
                 $targetSets = $ability->effect === 'damage'
                     ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
                     : [[]];
-                foreach ($options as $option) {
-                    foreach ($targetSets as $targets) {
-                        $key = $card->name . '|' . $index . '|' . $option . '|' . implode(',', $targets);
-                        if (!isset($seen[$key])) {
-                            $seen[$key] = true;
-                            $actions[] = new ActivateAbility($p->id, $card->id, $index, $option, $targets, $ability->isManaAbility);
+                foreach (AbilityManager::costChoices($p, $card, $ability) as $choices) {
+                    $names = implode(',', array_map(static fn (CardInstance $c) => $c->name, $choices));
+                    $ids = array_map(static fn (CardInstance $c) => $c->id, $choices);
+                    foreach ($options as $option) {
+                        foreach ($targetSets as $targets) {
+                            $key = $card->name . '|' . $index . '|' . $option . '|' . implode(',', $targets) . '|' . $names;
+                            if (!isset($seen[$key])) {
+                                $seen[$key] = true;
+                                $actions[] = new ActivateAbility($p->id, $card->id, $index, $option, $targets, $ability->isManaAbility, $ids);
+                            }
                         }
                     }
                 }
@@ -134,6 +146,35 @@ final class LegalActionGenerator
             if (!isset($seen[$card->name])) {
                 $seen[$card->name] = true;
                 $actions[] = new Discard($playerId, $card->id);
+            }
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Triggers en attente du joueur : un choix par trigger et par cible, pas de « passer ». Deux triggers
+     * identiques (même source par le nom, même capacité) ne donnent qu'un seul choix : leur ordre relatif est indifférent.
+     *
+     * @return list<PutTrigger>
+     */
+    public function triggerActions(GameState $s, int $playerId): array
+    {
+        $actions = [];
+        $seen = [];
+        foreach ($s->pendingTriggers as $pending) {
+            if ($pending->controller !== $playerId) {
+                continue;
+            }
+            $targetSets = $pending->ability()->targetsPlayer()
+                ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
+                : [[]];
+            foreach ($targetSets as $targets) {
+                $key = $pending->source->name . '|' . $pending->index . '|' . implode(',', $targets);
+                if (!isset($seen[$key])) {
+                    $seen[$key] = true;
+                    $actions[] = new PutTrigger($playerId, $pending->id, $targets);
+                }
             }
         }
 

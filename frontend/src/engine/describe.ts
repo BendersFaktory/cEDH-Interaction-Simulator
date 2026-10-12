@@ -8,6 +8,10 @@ const target = (t: string): string =>
 const manaStr = (m: Record<string, number> | undefined): string =>
   Object.entries(m ?? {}).map(([s, n]) => `{${s}}`.repeat(n)).join('')
 
+/** Libellé d'une restriction de mana (`kind` du moteur). */
+export const restrictionLabel = (kind: string): string =>
+  kind === 'eldrazi' ? 'seulement pour un sort ou une capacité d\'Eldrazi incolore' : kind
+
 /** Phrase lisible pour le journal. Les événements verbeux restent concis. */
 export function describeEvent(e: GameEvent): string {
   const p = e.payload
@@ -36,7 +40,8 @@ export function describeEvent(e: GameEvent): string {
     }
     case 'ManaAbilityActivated': {
       const tapped = (p.tapped as string[] | undefined)?.length ? 'engage' : 'active'
-      return `J${p.player} ${tapped} ${p.card.name} : ${manaStr(p.mana)}`
+      const restriction = ((p.ability?.options ?? []) as string[])[p.option ?? 0]?.split('@')[1]
+      return `J${p.player} ${tapped} ${p.card.name} : ${manaStr(p.mana)}${restriction ? ` (mana restreint : ${restrictionLabel(restriction)})` : ''}`
     }
     case 'AbilityActivated': {
       const t = ((p.targets ?? []) as string[]).map(target).join(', ')
@@ -44,8 +49,12 @@ export function describeEvent(e: GameEvent): string {
       const detail = a.effect === 'damage' && a.amount !== undefined ? ` (${a.amount} dégât${a.amount > 1 ? 's' : ''})` : ''
       return `J${p.player} active ${p.card.name}${detail}${t ? ` → ${t}` : ''}`
     }
+    case 'AbilityTriggered': {
+      const t = ((p.targets ?? []) as string[]).map(target).join(', ')
+      return `Trigger de ${p.card.name} (J${p.player}) : ${p.label}${t ? ` → ${t}` : ''}`
+    }
     case 'AbilityResolved':
-      return `Capacité de ${p.card.name} résolue`
+      return p.trigger ? `Trigger de ${p.card.name} résolu` : `Capacité de ${p.card.name} résolue`
     case 'ManaAdded':
       return `J${p.player} gagne ${manaStr(p.mana)}`
     case 'ManaPoolEmptied':
@@ -68,6 +77,12 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
     case 'CreatureDied':
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'CreatureBoosted':
+      return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
+    case 'TokenCreated':
+      return `J${p.player} crée un jeton ${p.card.name}`
+    case 'PermanentSacrificed':
+      return `J${p.player} sacrifie ${p.card.name}${p.destination === 'command' ? ' (retour en zone de commandement)' : ''}`
     case 'CombatEnded':
       return 'Fin du combat'
     case 'PlayerLost':

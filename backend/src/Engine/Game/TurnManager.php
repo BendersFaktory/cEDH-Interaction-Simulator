@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Rules\CombatManager;
 use App\Engine\Rules\StateBasedActions;
 
@@ -28,12 +29,25 @@ final class TurnManager
             }
         }
 
+        // Triggers « au début de votre entretien » : mis sur la pile avant la première priorité de l'étape.
+        if ($s->phase === Phase::Upkeep) {
+            foreach ($s->player($s->activePlayer)->battlefield as $card) {
+                $s->queueTriggers($s->activePlayer, $card, TriggeredAbility::UPKEEP);
+            }
+        }
+
         $this->combat->beginStep($s);
 
         if ($s->phase === Phase::Cleanup) {
             foreach ($s->players as $p) {
                 foreach ($p->battlefield as $card) {
                     $card->damage = 0;
+                    // Fin des effets « jusqu'à la fin du tour » (règle 514.2).
+                    if ($card->powerBonus !== 0 || $card->toughnessBonus !== 0) {
+                        $card->powerBonus = 0;
+                        $card->toughnessBonus = 0;
+                        $s->emit('CreatureBoosted', ['player' => $p->id, 'card' => $card->id, 'power' => $card->currentPower(), 'toughness' => $card->currentToughness()]);
+                    }
                 }
             }
         }
@@ -57,10 +71,10 @@ final class TurnManager
 
     public function endStep(GameState $s): void
     {
-        // Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape.
+        // Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape (mana restreint compris, compté dans `lost`).
         foreach ($s->players as $p) {
             if (!$p->pool->isEmpty()) {
-                $s->emit('ManaPoolEmptied', ['player' => $p->id, 'lost' => $p->pool->toArray(), 'pool' => []]);
+                $s->emit('ManaPoolEmptied', ['player' => $p->id, 'lost' => $p->pool->all(), 'pool' => []]);
                 $p->pool->clear();
             }
         }

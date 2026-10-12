@@ -47,15 +47,19 @@ final class PriorityManager
         for ($i = 0; $i < self::MAX_ITERATIONS; $i++) {
             $p = $s->priority;
 
-            if (!$p->announced) {
+            // Triggers en attente (y compris après une action spéciale comme jouer un terrain, ou à la reprise d'un choix
+            // d'ordre/cible) : posés avant que quiconque reçoive la priorité.
+            if (!$p->announced || $s->pendingTriggers !== []) {
                 $this->sba->check($s);
                 if ($s->over) {
                     return;
                 }
+                $this->triggers->putPendingOnStack($s, $injected);
                 $this->repairPriorityHolder($s);
-                $this->triggers->putPendingOnStack($s);
+            }
 
-                $p = $s->priority;
+            $p = $s->priority;
+            if (!$p->announced) {
                 // Point de bifurcation : début de ronde (personne n'a encore passé) OU pile non vide
                 // (c'est là qu'on veut pouvoir « juste avant ta réponse »). Les octrois intermédiaires
                 // sur pile vide ne sont pas des checkpoints : ça divise le volume de snapshots par ~4.
@@ -141,7 +145,7 @@ final class PriorityManager
     {
         $p = $s->player($a->player());
         $card = $p->takeFromHand($a->cardId) ?? throw new IllegalActionException('Terrain absent de la main');
-        $p->battlefield[] = $card;
+        $s->enterBattlefield($a->player(), $card);
         $s->landsPlayed++;
         $s->emit('LandPlayed', ['player' => $a->player(), 'card' => $card->toPublic()]);
     }
@@ -156,7 +160,7 @@ final class PriorityManager
         if ($a->x < 0 || ($a->x > 0 && !$cost->hasX())) {
             throw new IllegalActionException('X invalide pour ce sort');
         }
-        $plan = ManaPayment::plan($p, $cost, $a->x) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
+        $plan = ManaPayment::plan($p, $cost, $a->x, $s->turn, null, $card) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
 
         $card = $p->takeFromHand($a->cardId);
         $fromCommand = false;
@@ -164,7 +168,7 @@ final class PriorityManager
             $card = $p->takeFromCommand($a->cardId);
             $fromCommand = true;
         }
-        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool] = $p->payWithPlan($plan);
+        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice] = $p->payWithPlan($plan);
         if ($fromCommand) {
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
@@ -184,8 +188,10 @@ final class PriorityManager
             'paid' => $paid,
             'fromPool' => $fromPool,
             'pool' => $p->pool->toArray(),
+        ] + $p->pool->restrictedField() + [
             'fromCommand' => $fromCommand,
         ]);
+        $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût
 
         // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
         $s->priority->passed = [];

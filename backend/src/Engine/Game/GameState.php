@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Engine\Game;
 
+use App\Engine\Ability\ActivatedAbility;
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Event\GameEvent;
 
 /**
@@ -21,10 +23,16 @@ final class GameState
     public array $stack = [];
     public int $landsPlayed = 0;
     public int $nextStackId = 1;
+    public int $nextTokenId = 1;
     public int $eventSeq = 0;
     public bool $over = false;
     public ?int $winner = null;
     public CombatState $combat;
+    /** @var list<PendingTrigger> triggers en attente, dans l'ordre où ils surviennent (voir TriggerManager) */
+    public array $pendingTriggers = [];
+    public int $nextTriggerId = 1;
+    /** Détenteur de priorité à rétablir après un choix de triggers en cours ; null hors de ce choix. */
+    public ?int $triggerResumeHolder = null;
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -128,10 +136,14 @@ final class GameState
 
     /**
      * Envoie une carte au cimetière de son propriétaire, SAUF un commandant qui retourne en zone de commandement
-     * (règle de remplacement de Commander). Retourne la destination réelle : 'graveyard' | 'command'.
+     * (règle de remplacement de Commander) et un jeton qui cesse d'exister (règle 111.7).
+     * Retourne la destination réelle : 'graveyard' | 'command' | 'none'.
      */
     public function sendToGraveyard(int $ownerId, CardInstance $card): string
     {
+        if ($card->token) {
+            return 'none';
+        }
         if ($card->commander) {
             $this->player($ownerId)->command[] = $card;
 
@@ -140,6 +152,83 @@ final class GameState
         $this->player($ownerId)->graveyard[] = $card;
 
         return 'graveyard';
+    }
+
+    /**
+     * Sacrifie des permanents du joueur (coût déjà payé : ex. Treasure engagé par `payWithPlan`) : champ de bataille ->
+     * cimetière via `sendToGraveyard()`, un événement `PermanentSacrificed` par permanent. Seul chemin du sacrifice.
+     *
+     * @param list<string> $cardIds
+     */
+    public function sacrifice(int $playerId, array $cardIds): void
+    {
+        $p = $this->player($playerId);
+        foreach ($cardIds as $id) {
+            $card = $p->takeFromBattlefield($id) ?? throw new \DomainException("Permanent à sacrifier introuvable : $id");
+            $card->tapped = false;
+            $destination = $this->sendToGraveyard($playerId, $card);
+            $this->emit('PermanentSacrificed', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination]);
+            if ($card->isCreature()) {
+                $this->queueTriggers($playerId, $card, TriggeredAbility::DIES);
+            }
+        }
+    }
+
+    /** Crée un jeton Treasure sur le champ de bataille du joueur (`TokenCreated`). */
+    public function createTreasure(int $playerId): CardInstance
+    {
+        return $this->createToken($playerId, 'Treasure', CardInstance::ARTIFACT, abilities: [ActivatedAbility::treasure()], subtypes: [CardInstance::ARTIFACT => ['Treasure']]);
+    }
+
+    /**
+     * Crée un jeton sur le champ de bataille du joueur (id `p<joueur>_t<n>`, déterministe) et journalise `TokenCreated`.
+     *
+     * @param list<ActivatedAbility>      $abilities
+     * @param array<string, list<string>> $subtypes
+     */
+    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = [], array $subtypes = []): CardInstance
+    {
+        $token = new CardInstance(
+            sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $type,
+            power: $power, toughness: $toughness, abilities: $abilities, token: true, subtypes: $subtypes,
+        );
+        $this->enterBattlefield($playerId, $token);
+        $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()]);
+
+        return $token;
+    }
+
+    /**
+     * Seul chemin d'entrée sur le champ de bataille (sort résolu, terrain joué, jeton créé) : note le tour d'arrivée (mal
+     * d'invocation) et met en file les triggers `etb` de la carte. L'appelant journalise.
+     */
+    public function enterBattlefield(int $playerId, CardInstance $card): void
+    {
+        $card->enteredTurn = $this->turn;
+        $this->player($playerId)->battlefield[] = $card;
+        $this->queueTriggers($playerId, $card, TriggeredAbility::ETB);
+    }
+
+    /**
+     * Met en file les triggers de `$card` pour l'événement `$event` (`TriggeredAbility::ETB|DIES|UPKEEP`). La source est
+     * copiée (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
+     */
+    public function queueTriggers(int $controller, CardInstance $card, string $event): void
+    {
+        foreach ($card->triggers as $index => $trigger) {
+            if ($trigger->event === $event) {
+                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index);
+            }
+        }
+    }
+
+    /** Défausse une carte de la main (cimetière via `sendToGraveyard()`) et journalise `CardDiscarded`. Seul chemin de la défausse. */
+    public function discard(int $playerId, string $cardId): void
+    {
+        $p = $this->player($playerId);
+        $card = $p->takeFromHand($cardId) ?? throw new \DomainException("Carte à défausser absente de la main : $cardId");
+        $destination = $this->sendToGraveyard($playerId, $card);
+        $this->emit('CardDiscarded', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'hand' => count($p->hand)]);
     }
 
     public function toArray(): array
@@ -151,9 +240,13 @@ final class GameState
             'stepStarted' => $this->stepStarted,
             'priority' => $this->priority->toArray(),
             'combat' => $this->combat->toArray(),
+            'pendingTriggers' => array_map(static fn (PendingTrigger $t) => $t->toArray(), $this->pendingTriggers),
+            'nextTriggerId' => $this->nextTriggerId,
+            'triggerResumeHolder' => $this->triggerResumeHolder,
             'stack' => array_map(static fn (StackItem $i) => $i->toArray(), $this->stack),
             'landsPlayed' => $this->landsPlayed,
             'nextStackId' => $this->nextStackId,
+            'nextTokenId' => $this->nextTokenId,
             'eventSeq' => $this->eventSeq,
             'over' => $this->over,
             'winner' => $this->winner,
@@ -182,9 +275,13 @@ final class GameState
         $s->stepStarted = (bool) $d['stepStarted'];
         $s->priority = PriorityState::fromArray($d['priority']);
         $s->combat = CombatState::fromArray($d['combat'] ?? []);
+        $s->pendingTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['pendingTriggers'] ?? []);
+        $s->nextTriggerId = (int) ($d['nextTriggerId'] ?? 1);
+        $s->triggerResumeHolder = isset($d['triggerResumeHolder']) ? (int) $d['triggerResumeHolder'] : null;
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];
+        $s->nextTokenId = (int) ($d['nextTokenId'] ?? 1);
         $s->eventSeq = (int) $d['eventSeq'];
         $s->over = (bool) $d['over'];
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];

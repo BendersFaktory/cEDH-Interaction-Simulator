@@ -17,15 +17,26 @@ final class ManaPaymentTest extends TestCase
 {
     /**
      * @param list<string|null> $specs 'R' = terrain produisant R ; 'RG' = terrain double ; '!R' = engagé ; null = terrain sans
-     *                                 `produces` ; 'SOL' = Sol Ring ({T} : {C}{C})
+     *                                 `produces` ; 'SOL' = Sol Ring ({T} : {C}{C}) ;
+     *                                 'SIG' = Izzet Signet ({1}, {T} : {U}{R}) ;
+     *                                 'TEMPLE' = Eldrazi Temple ({T} : {C} ; {T} : {C}{C} restreint Eldrazi)
      * @param array<string, int> $pool
+     * @param array<string, array<string, int>> $restricted
      */
-    private function player(array $specs, array $pool = []): PlayerState
+    private function player(array $specs, array $pool = [], array $restricted = []): PlayerState
     {
         $cards = [];
         foreach ($specs as $i => $spec) {
             $tapped = is_string($spec) && str_starts_with($spec, '!');
             $symbols = is_string($spec) ? ltrim($spec, '!') : null;
+            if ($symbols === 'SIG') {
+                $cards[] = new CardInstance('a' . $i, 'Izzet Signet', CardInstance::ARTIFACT, 2, null, 0, $tapped, false, 0, 0, 0, 0, null, [], [ActivatedAbility::mana('{U}{R}', '{1}')]);
+                continue;
+            }
+            if ($symbols === 'TEMPLE') {
+                $cards[] = new CardInstance('l' . $i, 'Eldrazi Temple', CardInstance::LAND, 0, null, 0, $tapped, false, 0, 0, 0, 0, null, [], [ActivatedAbility::mana('{C}{C}@eldrazi')]);
+                continue;
+            }
             if ($symbols === 'SOL') {
                 $cards[] = new CardInstance('a' . $i, 'Sol Ring', CardInstance::ARTIFACT, 1, null, 0, $tapped, false, 0, 0, 0, 0, null, [], [ActivatedAbility::mana('{C}{C}')]);
                 continue;
@@ -33,7 +44,23 @@ final class ManaPaymentTest extends TestCase
             $cards[] = new CardInstance('l' . $i, 'Land', CardInstance::LAND, 0, null, 0, $tapped, false, 0, 0, 0, 0, null, $symbols === null ? [] : str_split($symbols));
         }
 
-        return new PlayerState(0, 40, [], [], $cards, [], [], [], [], new ManaPool($pool));
+        return new PlayerState(0, 40, [], [], $cards, [], [], [], [], new ManaPool($pool, $restricted));
+    }
+
+    private static function mimic(): CardInstance
+    {
+        return new CardInstance('mimic', 'Eldrazi Mimic', CardInstance::CREATURE, 2, null, 0, false, false, 2, 1, 0, 0, '{2}', subtypes: [CardInstance::CREATURE => ['Eldrazi']]);
+    }
+
+    private static function bear(): CardInstance
+    {
+        return new CardInstance('bear', 'Grizzly Bears', CardInstance::CREATURE, 2, null, 0, false, false, 2, 2, 0, 0, '{1}{G}');
+    }
+
+    /** Créature incolore sans sous-type Eldrazi (n'a pas droit au mana du Temple). */
+    private static function golem(): CardInstance
+    {
+        return new CardInstance('golem', 'Golem', CardInstance::CREATURE, 2, null, 0, false, false, 2, 2, 0, 0, '{2}');
     }
 
     /** @return list<string>|null */
@@ -152,6 +179,29 @@ final class ManaPaymentTest extends TestCase
         $this->assertSame(['l1'], $this->cards(ManaPayment::plan($this->player(['RG', 'U']), ManaCost::parse('{1}'))));
     }
 
+    public function testColorFoundLateIsTappedWithoutWaste(): void
+    {
+        // Les bornes du solveur élaguent les engagements inutiles (G) : seule la source R est engagée, et le terrain simple
+        // passe avant le dual.
+        $this->assertSame(['l4'], $this->cards(ManaPayment::plan($this->player(['G', 'G', 'G', 'RG', 'R']), ManaCost::parse('{R}'))));
+        // À égalité, le premier permanent du champ de bataille paie le générique.
+        $this->assertSame(['l0', 'l4'], $this->cards(ManaPayment::plan($this->player(['G', 'G', 'G', 'RG', 'R']), ManaCost::parse('{1}{R}'))));
+    }
+
+    public function testForcedDualKeepsMinimalTaps(): void
+    {
+        // Le dual est indispensable (seule source R) : il est engagé, avec les premiers terrains pour le générique.
+        $plan = ManaPayment::plan($this->player(['G', 'G', 'G', 'G', 'RG']), ManaCost::parse('{2}{R}'));
+        $this->assertSame(['l0', 'l1', 'l4'], $this->cards($plan));
+        $this->assertSame(['R' => 1, 'G' => 2], $plan->spend);
+    }
+
+    public function testLateSolRingMinimisesTaps(): void
+    {
+        // {3} : Sol Ring (en dernier) + le premier terrain, plutôt que trois terrains.
+        $this->assertSame(['l0', 'a4'], $this->cards(ManaPayment::plan($this->player(['R', 'G', 'G', 'G', 'SOL']), ManaCost::parse('{3}'))));
+    }
+
     public function testSolRingPaysTwoWithoutWaste(): void
     {
         $plan = ManaPayment::plan($this->player(['SOL', 'R']), ManaCost::parse('{2}'));
@@ -234,5 +284,144 @@ final class ManaPaymentTest extends TestCase
         $this->assertNull(ManaPayment::plan($p, ManaCost::parse('{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}')));
         $this->assertNull(ManaPayment::plan($this->player(array_merge(array_fill(0, 12, 'RG'), array_fill(0, 12, 'WU'))), ManaCost::parse('{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{R}{W}{U}')));
         $this->assertLessThan(5.0, microtime(true) - $start);
+    }
+
+    public function testSignetNeverPaysItsOwnCost(): void
+    {
+        $this->assertNull(ManaPayment::plan($this->player(['SIG']), ManaCost::parse('{U}')));
+        $this->assertNull(ManaPayment::plan($this->player(['SIG']), ManaCost::parse('{1}')));
+        $this->assertSame(0, ManaPayment::maxX($this->player(['SIG']), ManaCost::parse('{X}')));
+    }
+
+    public function testSignetConvertsALandIntoTwoColors(): void
+    {
+        $plan = ManaPayment::plan($this->player(['G', 'SIG']), ManaCost::parse('{U}{R}'));
+        $this->assertSame(['l0'], $this->cards($plan));
+        $this->assertSame([['card' => 'a1', 'ability' => 0, 'option' => 0, 'spend' => ['G' => 1]]], $plan->converters);
+        $this->assertSame(['U' => 1, 'R' => 1], $plan->spend);
+        $this->assertSame(2, ManaPayment::maxX($this->player(['G', 'SIG']), ManaCost::parse('{X}')));
+    }
+
+    public function testSignetIsOnlyUsedWhenItDoesStrictlyBetter(): void
+    {
+        $plan = ManaPayment::plan($this->player(['R', 'U', 'SIG']), ManaCost::parse('{U}'));
+        $this->assertSame(['l1'], $this->cards($plan));
+        $this->assertSame([], $plan->converters);
+        // {2} : deux terrains ou terrain + Signet, à égalité (2 engagements, rien de perdu) : pas de Signet.
+        $this->assertSame([], ManaPayment::plan($this->player(['G', 'G', 'SIG']), ManaCost::parse('{2}'))->converters);
+        // {2}{U}{R} avec trois terrains : impossible sans le Signet.
+        $plan = ManaPayment::plan($this->player(['G', 'G', 'U', 'SIG']), ManaCost::parse('{1}{U}{R}{G}'));
+        $this->assertNotNull($plan);
+        $this->assertCount(1, $plan->converters);
+    }
+
+    public function testSignetCostIsPaidFromThePoolFirst(): void
+    {
+        $plan = ManaPayment::plan($this->player(['SIG'], ['C' => 1]), ManaCost::parse('{U}{R}'));
+        $this->assertSame([], $this->cards($plan));
+        $this->assertSame(['C' => 1], $plan->converters[0]['spend']);
+    }
+
+    public function testPayWithPlanActivatesConvertersAfterSimpleSources(): void
+    {
+        $p = $this->player(['G', 'SIG']);
+        $result = $p->payWithPlan(ManaPayment::plan($p, ManaCost::parse('{U}{R}')));
+        $this->assertSame(['l0', 'a1'], $result['tapped']);
+        $this->assertSame([], $result['fromPool']);
+        $this->assertTrue($p->pool->isEmpty());
+        $this->assertTrue($p->findOnBattlefield('a1')->tapped);
+    }
+
+    public function testRestrictedPoolManaIsRefusedForAColoredOrNonEldraziSpell(): void
+    {
+        $restricted = ['eldrazi' => ['C' => 2]];
+        $this->assertNull(ManaPayment::plan($this->player(['G'], [], $restricted), ManaCost::parse('{1}{G}'), 0, null, null, self::bear()));
+        $this->assertNull(ManaPayment::plan($this->player([], [], $restricted), ManaCost::parse('{2}'), 0, null, null, self::golem()));
+        $this->assertNull(ManaPayment::plan($this->player([], [], $restricted), ManaCost::parse('{2}')), 'Sans carte payée, rien n\'est admis');
+        $this->assertSame(0, ManaPayment::maxX($this->player([], [], $restricted), ManaCost::parse('{X}'), null, self::golem()));
+    }
+
+    public function testRestrictedPoolManaPaysAnEldraziAndIsSpentBeforeFreeMana(): void
+    {
+        $p = $this->player(['R'], ['C' => 1], ['eldrazi' => ['C' => 2]]);
+        $plan = ManaPayment::plan($p, ManaCost::parse('{2}'), 0, null, null, self::mimic());
+        $this->assertSame([], $plan->taps);
+        $this->assertSame(['C' => 2], $plan->spend);
+        $this->assertSame(['eldrazi' => ['C' => 2]], $plan->spendRestricted);
+
+        $result = $p->payWithPlan($plan);
+        $this->assertSame(['C' => 2], $result['fromPool']);
+        $this->assertSame(['C' => 1], $p->pool->toArray(), 'Le mana libre reste disponible');
+        $this->assertSame([], $p->pool->restrictedToArray());
+
+        // Mana restreint et mana libre ensemble : le restreint d'abord, le libre complète.
+        $p = $this->player([], ['G' => 1], ['eldrazi' => ['C' => 2]]);
+        $plan = ManaPayment::plan($p, ManaCost::parse('{3}'), 0, null, null, self::mimic());
+        $this->assertSame(['G' => 1, 'C' => 2], $plan->spend);
+        $this->assertSame(['eldrazi' => ['C' => 2]], $plan->spendRestricted);
+        $p->payWithPlan($plan);
+        $this->assertTrue($p->pool->isEmpty());
+    }
+
+    public function testTempleRestrictedOptionIsChosenOnlyWhenAdmissibleAndStrictlyBetter(): void
+    {
+        $p = $this->player(['TEMPLE', 'R']);
+
+        // Mimic {2} : le Temple seul ({C}{C} restreint, 1 engagement) plutôt que Temple {C} + Montagne.
+        $plan = ManaPayment::plan($p, ManaCost::parse('{2}'), 0, null, null, self::mimic());
+        $this->assertSame([['card' => 'l0', 'ability' => 1, 'option' => 0]], $plan->taps);
+        $this->assertSame(['eldrazi' => ['C' => 2]], $plan->spendRestricted);
+
+        // Sort non admissible : l'option restreinte n'existe pas pour lui.
+        $plan = ManaPayment::plan($p, ManaCost::parse('{2}'), 0, null, null, self::golem());
+        $this->assertSame(['l0', 'l1'], $this->cards($plan));
+        $this->assertSame(0, $plan->taps[0]['ability']);
+        $this->assertSame([], $plan->spendRestricted);
+
+        // Mimic à {1} : l'option restreinte gaspillerait un mana ; la Montagne est préférée au Temple (source à
+        // plusieurs alternatives, gardée pour plus tard).
+        $plan = ManaPayment::plan($p, ManaCost::parse('{1}'), 0, null, null, self::mimic());
+        $this->assertSame([['card' => 'l1', 'ability' => 0, 'option' => 0]], $plan->taps);
+        $this->assertSame([], $plan->spendRestricted);
+        $plan = ManaPayment::plan($this->player(['TEMPLE']), ManaCost::parse('{1}'), 0, null, null, self::mimic());
+        $this->assertSame([['card' => 'l0', 'ability' => 0, 'option' => 0]], $plan->taps);
+
+        // Le mana restreint produit en surplus reste restreint dans la réserve.
+        $p = $this->player(['TEMPLE']);
+        $plan = ManaPayment::plan($p, ManaCost::parse('{3}'), 0, null, null, self::mimic());
+        $this->assertNull($plan);
+        $this->assertSame(2, ManaPayment::maxX($p, ManaCost::parse('{X}'), null, self::mimic()));
+        $this->assertSame(1, ManaPayment::maxX($p, ManaCost::parse('{X}'), null, self::golem()));
+    }
+
+    public function testTempleRestrictedOptionNeverPaysAConverterCost(): void
+    {
+        // Mimic {U}{R} fictif : le Signet ne peut pas être payé par le mana restreint du Temple, mais par son {C}.
+        $plan = ManaPayment::plan($this->player(['TEMPLE', 'SIG']), ManaCost::parse('{U}{R}'), 0, null, null, self::mimic());
+        $this->assertSame([['card' => 'l0', 'ability' => 0, 'option' => 0]], $plan->taps);
+        $this->assertCount(1, $plan->converters);
+        $this->assertSame([], $plan->spendRestricted);
+        $this->assertNull(ManaPayment::plan($this->player(['SIG'], [], ['eldrazi' => ['C' => 1]]), ManaCost::parse('{U}{R}'), 0, null, null, self::mimic()));
+    }
+
+    public function testPoolSerializationKeepsTheRestrictedPartApart(): void
+    {
+        $p = $this->player(['R'], ['R' => 1]);
+        $this->assertArrayNotHasKey('poolRestricted', $p->toArray(), 'Omis si rien n\'est restreint');
+        $this->assertSame([], $p->pool->restrictedField());
+
+        $p->pool->add(\App\Engine\Mana\Color::Colorless, 2, new \App\Engine\Mana\ManaRestriction('eldrazi'));
+        $this->assertSame(['R' => 1], $p->pool->toArray(), 'La table libre ne change pas');
+        $this->assertSame(['eldrazi' => ['C' => 2]], $p->toArray()['poolRestricted']);
+        $this->assertSame(['restricted' => ['eldrazi' => ['C' => 2]]], $p->pool->restrictedField());
+        $this->assertSame(['R' => 1, 'C' => 2], $p->pool->all());
+        $this->assertSame(3, $p->pool->total());
+
+        $copy = PlayerState::fromArray($p->toArray());
+        $this->assertSame($p->toArray(), $copy->toArray());
+
+        $copy->pool->clear();
+        $this->assertTrue($copy->pool->isEmpty());
+        $this->assertSame([], $copy->pool->restrictedToArray());
     }
 }

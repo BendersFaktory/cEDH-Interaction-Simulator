@@ -18,6 +18,8 @@ const players = computed(() => Object.values(view.value.players))
       <span v-if="view.over" class="badge">{{ view.winner === null ? 'Fin de partie' : `Victoire de J${view.winner}` }}</span>
     </div>
 
+    <StackPanel :stack="view.stack" />
+
     <div class="players">
       <PlayerArea
         v-for="p in players"
@@ -28,7 +30,5 @@ const players = computed(() => Object.values(view.value.players))
         :has-passed="view.priority.passed.includes(p.id)"
       />
     </div>
-
-    <StackPanel :stack="view.stack" />
   </div>
 </template>

@@ -31,12 +31,14 @@ enum Color
 
     public static function fromSymbol(string $symbol): self
     {
-        foreach (self::cases() as $color) {
-            if ($color->symbol() === $symbol) {
-                return $color;
-            }
-        }
-
-        throw new \InvalidArgumentException("Symbole de mana inconnu : $symbol");
+        return match ($symbol) {
+            'W' => self::White,
+            'U' => self::Blue,
+            'B' => self::Black,
+            'R' => self::Red,
+            'G' => self::Green,
+            'C' => self::Colorless,
+            default => throw new \InvalidArgumentException("Symbole de mana inconnu : $symbol"),
+        };
     }
 }
