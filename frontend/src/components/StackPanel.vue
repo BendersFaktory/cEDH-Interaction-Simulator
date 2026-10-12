@@ -13,6 +13,12 @@ const abilityLabel = (item: StackItemView): string => {
   return a.effect === 'damage' && a.amount !== undefined ? `Capacité : ${a.amount} dégât${a.amount > 1 ? 's' : ''}` : `Capacité (${a.effect})`
 }
 
+const abilityLabel = (item: StackItemView): string => {
+  const a = item.ability
+  if (!a) return ''
+  return a.effect === 'damage' && a.amount !== undefined ? `Capacité : ${a.amount} dégât${a.amount > 1 ? 's' : ''}` : `Capacité (${a.effect})`
+}
+
 const target = (t: string): string => (t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`)
 </script>
 
