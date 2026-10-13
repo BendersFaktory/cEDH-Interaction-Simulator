@@ -25,13 +25,22 @@ export interface AbilityView {
 
 /** Trigger d'une carte (forme sérialisée par le moteur). */
 export interface TriggerView {
-  /** `etb` (entrée en jeu), `dies` (mort) ou `upkeep` (début de l'entretien de son contrôleur). */
-  event: 'etb' | 'dies' | 'upkeep'
+  /**
+   * Événement déclencheur : `etb` (entrée en jeu), `dies` (mort), `upkeep` (entretien de son contrôleur),
+   * `attacks` (déclarée attaquante), `end_step` (fin de tour de son contrôleur), `cast` (son contrôleur lance un sort),
+   * `discard` (son contrôleur défausse une carte).
+   */
+  event: TriggerEvent
   effect: string
   amount: number
   /** Jeton créé (`Nom:F/E`). */
   spec?: string
+  /** Seulement pour `cast` : `instant_sorcery` = le sort lancé doit être un éphémère ou un rituel (absent = tout sort). */
+  filter?: TriggerFilter
 }
+
+export type TriggerEvent = 'etb' | 'dies' | 'upkeep' | 'attacks' | 'end_step' | 'cast' | 'discard'
+export type TriggerFilter = 'instant_sorcery'
 
 export interface PublicCard {
   id: string

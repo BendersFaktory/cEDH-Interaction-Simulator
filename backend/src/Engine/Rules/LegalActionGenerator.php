@@ -44,7 +44,8 @@ final class LegalActionGenerator
             return $this->declarationActions($s, $playerId);
         }
 
-        if ($s->phase === Phase::Cleanup && $playerId === $s->activePlayer
+        // Défausse du cleanup ; pendant une ronde de priorité du cleanup (règle 514.3a), priorité ordinaire.
+        if ($s->phase === Phase::Cleanup && !$s->cleanupRound && $playerId === $s->activePlayer
             && count($s->player($playerId)->hand) > PlayerState::MAX_HAND_SIZE) {
             return $this->discardActions($s, $playerId);
         }

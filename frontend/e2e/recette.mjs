@@ -205,10 +205,10 @@ async function run() {
   await page.locator('text=/J0 sacrifie/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('10-cout-sacrifice')
   if (!sacrificed) problems.push('recette coût : J0 n\'a pas pu sacrifier une créature au Goblin Bombardment')
 
-  // 11 : trigger à cible (seed 161 : J0 a Goblin Bombardment et Perilous Myr en main de départ).
+  // 11 : trigger à cible (seed 80 : J0 a Goblin Bombardment et Perilous Myr en main de départ).
   // J0 lance Bombardment et le Myr, sacrifie le Myr (1 dégât à J1), puis choisit J2 comme cible du trigger « meurt ».
   const prevGame11 = (await info()).match(/#(\d+)/)[1]
-  await page.fill('input[placeholder="aléatoire"]', '161')
+  await page.fill('input[placeholder="aléatoire"]', '80')
   await page.click('text=Nouvelle partie Commander')
   await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame11)
   await page.waitForSelector('.actions', { timeout: TIMEOUT })
@@ -237,10 +237,10 @@ async function run() {
   await shot('11-declencheur')
   if (!triggered) problems.push('recette trigger : J0 n\'a pas pu choisir la cible du trigger de Perilous Myr')
 
-  // 12 : mana conditionnel (seed 225 : J0 a Eldrazi Temple et Eldrazi Mimic en main de départ).
+  // 12 : mana conditionnel (seed 170 : J0 a Eldrazi Temple et Eldrazi Mimic en main de départ).
   // J0 joue le Temple, l'engage à la main pour {C}{C} restreint (pastilles marquées dans la réserve), puis lance le Mimic avec.
   const prevGame12 = (await info()).match(/#(\d+)/)[1]
-  await page.fill('input[placeholder="aléatoire"]', '225')
+  await page.fill('input[placeholder="aléatoire"]', '170')
   await page.click('text=Nouvelle partie Commander')
   await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame12)
   await page.waitForSelector('.actions', { timeout: TIMEOUT })

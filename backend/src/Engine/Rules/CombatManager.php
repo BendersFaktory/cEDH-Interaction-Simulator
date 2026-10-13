@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Action\Action;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
@@ -147,6 +148,8 @@ final class CombatManager
         $card->tapped = true;
         $s->combat->attackers[$a->cardId] = $a->defender;
         $s->emit('AttackerDeclared', ['player' => $a->player(), 'card' => $a->cardId, 'defender' => $a->defender, 'tapped' => true]);
+        // « Quand elle attaque » : posé sur la pile à la première priorité de l'étape, donc avant les bloqueurs.
+        $s->queueTriggers($a->player(), $card, TriggeredAbility::ATTACKS);
     }
 
     private function declareBlocker(GameState $s, DeclareBlocker $a): void
