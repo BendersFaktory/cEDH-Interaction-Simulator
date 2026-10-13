@@ -2,6 +2,10 @@
 
 export type CardType = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact' | 'enchantment'
 
+/** Le moteur sérialise `type` en chaîne, ou en liste pour une carte à plusieurs types (artefact-créature). */
+export const typesOf = (card: { type: CardType | CardType[] }): CardType[] => (Array.isArray(card.type) ? card.type : [card.type])
+export const hasType = (card: { type: CardType | CardType[] }, t: CardType): boolean => typesOf(card).includes(t)
+
 /** Capacité activée d'une carte (forme sérialisée par le moteur). */
 export interface AbilityView {
   isManaAbility: boolean
@@ -45,7 +49,7 @@ export type TriggerFilter = 'instant_sorcery'
 export interface PublicCard {
   id: string
   name: string
-  type: CardType
+  type: CardType | CardType[]
   cost: number
   effect: string | null
   /** Coût de mana canonique ('{X}{2}{R/G}{U}{U}'), null pour un terrain. */

@@ -14,6 +14,9 @@ use App\Engine\Event\GameEvent;
  */
 final class GameState
 {
+    /** Version du format de `toArray()` ; à incrémenter quand la sérialisation change de façon incompatible. */
+    public const FORMAT_VERSION = 1;
+
     public int $turn = 1;
     public int $activePlayer;
     public Phase $phase = Phase::Untap;
@@ -257,6 +260,7 @@ final class GameState
     public function toArray(): array
     {
         return [
+            'version' => self::FORMAT_VERSION,
             'turn' => $this->turn,
             'activePlayer' => $this->activePlayer,
             'phase' => $this->phase->value,
@@ -283,6 +287,11 @@ final class GameState
 
     public static function fromArray(array $d): self
     {
+        // Une ancre écrite sans version est un état d'avant le versionnage (format 1).
+        $version = (int) ($d['version'] ?? 1);
+        if ($version > self::FORMAT_VERSION) {
+            throw new \DomainException("Format d'état $version plus récent que le moteur (" . self::FORMAT_VERSION . ')');
+        }
         $players = [];
         foreach ($d['players'] as $id => $p) {
             $players[(int) $id] = PlayerState::fromArray($p);

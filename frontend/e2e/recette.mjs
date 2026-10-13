@@ -52,7 +52,7 @@ async function run() {
   // Crée une partie par graine candidate jusqu'à ce que la main de J0 contienne toutes les cartes demandées.
   // Les graines « connues » passent en premier (cas courant : une seule partie créée) ; sinon on balaie 1..400.
   // Lève une erreur si aucune ne convient : le scénario ne peut alors pas s'exécuter.
-  const newGameWithHand = async (cards, known) => {
+  const newGameWithHand = async (cards, known, minLands = 0) => {
     const seeds = [...known, ...Array.from({ length: 400 }, (_, i) => i + 1)]
     for (const seed of seeds) {
       const prev = (await info())?.match(/#(\d+)/)?.[1] ?? null
@@ -61,7 +61,8 @@ async function run() {
       await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prev)
       await page.waitForSelector('.actions', { timeout: TIMEOUT })
       const hand = (await page.locator('h4:has-text("Main (")').first().locator('xpath=..').textContent()) ?? ''
-      if (cards.every((c) => hand.includes(c))) return seed
+      const lands = (hand.match(/Mountain|Forest|Island|Plains|Swamp/g) ?? []).length
+      if (cards.every((c) => hand.includes(c)) && lands >= minLands) return seed
     }
     throw new Error(`aucune graine ne donne ${cards.join(' + ')} en main de J0`)
   }
@@ -223,7 +224,7 @@ async function run() {
 
   // 11 : trigger à cible. J0 doit avoir Goblin Bombardment et Perilous Myr en main de départ : newGameWithHand cherche la graine.
   // J0 lance Bombardment et le Myr, sacrifie le Myr (1 dégât à J1), puis choisit J2 comme cible du trigger « meurt ».
-  const seed11 = await newGameWithHand(['Goblin Bombardment', 'Perilous Myr'], [80, 197, 38, 239, 273, 303, 327, 349])
+  const seed11 = await newGameWithHand(['Goblin Bombardment', 'Perilous Myr'], [222, 80, 197, 239, 273, 303, 327, 349], 3)
   log('11 graine retenue :', seed11)
   let triggered = false
   for (let i = 0; i < 300 && !triggered; i++) {

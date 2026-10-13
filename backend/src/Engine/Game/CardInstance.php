@@ -24,6 +24,9 @@ final class CardInstance
     public const ARTIFACT = 'artifact';
     public const ENCHANTMENT = 'enchantment';
 
+    /** @var list<string> types (artefact-créature : deux) ; sérialisé sous `type`, en chaîne s'il n'y en a qu'un */
+    public readonly array $types;
+
     /** Bonus de force/endurance jusqu'à la fin du tour (`pump`), remis à zéro au cleanup. Voir power()/toughness(). */
     public int $powerBonus = 0;
     public int $toughnessBonus = 0;
@@ -31,7 +34,7 @@ final class CardInstance
     public function __construct(
         public readonly string $id,
         public readonly string $name,
-        public readonly string $type,
+        string|array $type,
         public readonly int $cost = 0,
         public readonly ?string $effect = null, // 'damage' | 'counter' | 'mana' | 'treasure' | null
         public readonly int $amount = 0,
@@ -53,9 +56,18 @@ final class CardInstance
         /** @var array<string, list<string>> sous-types rattachés à leur type (règle 205.3), ex. `['creature' => ['Eldrazi']]` */
         public readonly array $subtypes = [],
     ) {
-        if ($subtypes !== []) {
-            Subtypes::assertValid($type, $subtypes, $name);
+        $this->types = is_array($type) ? array_values($type) : [$type];
+        if ($this->types === []) {
+            throw new \InvalidArgumentException("$name : une carte a au moins un type");
         }
+        if ($subtypes !== []) {
+            Subtypes::assertValid($this->types, $subtypes, $name);
+        }
+    }
+
+    public function hasType(string $type): bool
+    {
+        return in_array($type, $this->types, true);
     }
 
     /** Sous-type porté par la carte, sous le type `$type` s'il est donné (sinon sous n'importe lequel de ses types). */
@@ -127,22 +139,22 @@ final class CardInstance
     /** Permanent : va sur le champ de bataille en se résolvant (créature, artefact) ou en étant joué (terrain). */
     public function isPermanent(): bool
     {
-        return $this->type !== self::INSTANT && $this->type !== self::SORCERY;
+        return !$this->hasType(self::INSTANT) && !$this->hasType(self::SORCERY);
     }
 
     public function isLand(): bool
     {
-        return $this->type === self::LAND;
+        return $this->hasType(self::LAND);
     }
 
     public function isCreature(): bool
     {
-        return $this->type === self::CREATURE;
+        return $this->hasType(self::CREATURE);
     }
 
     public function isInstantSpeed(): bool
     {
-        return $this->type === self::INSTANT;
+        return $this->hasType(self::INSTANT);
     }
 
     /** Représentation exposée dans les événements (tout est public dans ce simulateur). */
@@ -151,7 +163,7 @@ final class CardInstance
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'type' => $this->type,
+            'type' => count($this->types) === 1 ? $this->types[0] : $this->types,
             'cost' => $this->cost,
             'manaCost' => $this->isLand() ? null : (string) $this->manaCost(),
             'produces' => $this->produces,

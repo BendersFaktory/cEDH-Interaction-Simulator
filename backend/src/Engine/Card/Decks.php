@@ -35,7 +35,7 @@ final class Decks
         $basics = ['W' => 'Plains', 'U' => 'Island', 'B' => 'Swamp', 'R' => 'Mountain', 'G' => 'Forest'];
 
         $n = 0;
-        $make = static function (string $name, string $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = [], array $subtypes = []) use ($playerId, &$n): CardInstance {
+        $make = static function (string $name, string|array $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = [], array $subtypes = []) use ($playerId, &$n): CardInstance {
             return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds, false, $triggers, $subtypes);
         };
 
@@ -103,6 +103,8 @@ final class Decks
             $library[] = $make('Elvish Visionary', CardInstance::CREATURE, 2, null, 0, false, 1, 1, '{1}{G}', triggers: [new TriggeredAbility(TriggeredAbility::ETB, 'draw', 1)]);
         }
         // Perilous Myr : quand il meurt, 2 dégâts (à un joueur ciblé ici).
+        // Artefact-créature (cartes multi-types) : prend la place d'un ours.
+        $library[] = $make('Golem de Fer', [CardInstance::ARTIFACT, CardInstance::CREATURE], 3, null, 0, false, 2, 2, '{3}', subtypes: [CardInstance::CREATURE => ['Golem']]);
         $library[] = $make('Perilous Myr', CardInstance::CREATURE, 2, null, 0, false, 1, 1, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DIES, 'damage', 2)]);
         // Carte factice de démonstration : au début de votre entretien, piocher une carte.
         $library[] = $make("Idole de l'Érudit", CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::UPKEEP, 'draw', 1)]);
