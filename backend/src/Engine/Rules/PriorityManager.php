@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Rules;
 
 use App\Engine\Ability\AbilityManager;
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
@@ -192,6 +193,8 @@ final class PriorityManager
             'fromCommand' => $fromCommand,
         ]);
         $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût
+        // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
+        $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);
 
         // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
         $s->priority->passed = [];

@@ -67,10 +67,13 @@ final class Decks
             $library[] = $make('Kher Keep', CardInstance::LAND, 0, null, 0, false, 0, 0, null, [], [ActivatedAbility::token('Kobold:0/1', 1, '{1}{R}')]);
             // Goblin Bombardment : sacrifier une créature : 1 dégât (à un joueur ici).
             $library[] = $make('Goblin Bombardment', CardInstance::ENCHANTMENT, 2, null, 0, false, 0, 0, '{1}{R}', [], [ActivatedAbility::bombardment(1)]);
-            for ($i = 0; $i < 5; $i++) {
+            // Young Pyromancer : quand vous lancez un éphémère ou un rituel, créer un jeton Elemental 1/1.
+            $library[] = $make('Young Pyromancer', CardInstance::CREATURE, 2, null, 0, false, 2, 1, '{1}{R}', triggers: [new TriggeredAbility(TriggeredAbility::CAST, 'token', 1, 'Elemental:1/1', TriggeredAbility::INSTANT_SORCERY)]);
+            // 4 Bolt et 1 Rite of Flame (au lieu de 5 et 2) : place pour Young Pyromancer et les cartes de triggers ci-dessous.
+            for ($i = 0; $i < 4; $i++) {
                 $library[] = $make('Lightning Bolt', CardInstance::INSTANT, 1, 'damage', 3, false, 0, 0, '{R}');
             }
-            for ($i = 0; $i < 2; $i++) {
+            for ($i = 0; $i < 1; $i++) {
                 $library[] = $make('Rite of Flame', CardInstance::INSTANT, 1, 'mana', 0, false, 0, 0, '{R}', [], [], '{R}{R}');
             }
             // Strike It Rich : rituel qui crée un jeton Treasure ({T}, sacrifier : un mana de la couleur de son choix).
@@ -103,7 +106,14 @@ final class Decks
         $library[] = $make('Perilous Myr', CardInstance::CREATURE, 2, null, 0, false, 1, 1, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DIES, 'damage', 2)]);
         // Carte factice de démonstration : au début de votre entretien, piocher une carte.
         $library[] = $make("Idole de l'Érudit", CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::UPKEEP, 'draw', 1)]);
-        $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');
+        // Cartes factices de démonstration des triggers d'attaque, de fin de tour et de défausse.
+        $library[] = $make('Pillard des Cendres', CardInstance::CREATURE, 3, null, 0, false, 2, 2, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::ATTACKS, 'damage', 1)]);
+        $library[] = $make('Lanterne du Crépuscule', CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::END_STEP, 'token', 1, 'Spirit:1/1')]);
+        $library[] = $make('Cendrier des Regrets', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DISCARD, 'damage', 1)]);
+        // Hybrid Bear : seulement s'il reste de la place (les decks rouges en sont pleins).
+        if (count($library) < $librarySize) {
+            $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');
+        }
         $bearName = $profile['bear'] === 'G' ? 'Grizzly Bears' : 'Mist Bears';
         while (count($library) < $librarySize) {
             $library[] = $make($bearName, CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{1}{' . $profile['bear'] . '}');

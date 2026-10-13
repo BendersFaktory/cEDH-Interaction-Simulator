@@ -8,7 +8,7 @@ Vue (reducer, store)  ──HTTP──►  SimulationController
                                 SimulationService  ──►  Doctrine (Simulation, GameEventRecord, Checkpoint)
                                        │
                                   GameEngine  (PHP pur, src/Engine)
-                                  ├── TurnManager        étapes et tours (untap/cleanup sans priorité)
+                                  ├── TurnManager        étapes et tours (untap sans priorité ; cleanup : voir « Triggers »)
                                   ├── PriorityManager    boucle de priorité
                                   ├── CombatManager      déclarations d'attaquants/bloqueurs (+ CombatResolver : dégâts)
                                   ├── HandSizeManager    défausse à 7 au cleanup (décision hors priorité)
@@ -46,7 +46,8 @@ Fait avancer la partie jusqu'à sa fin **ou** jusqu'à ce qu'un `HumanAgent` doi
 - **File sérialisée** `GameState::$pendingTriggers` (`PendingTrigger` : contrôleur, copie de la source, rang du trigger). La source est une copie : information de dernière connaissance pour une créature morte, et aucun état partagé avec le champ de bataille (sinon un état reconstruit depuis une ancre divergerait). Même règle pour la source d'une capacité activée sur la pile.
 - **Mise sur la pile** (`TriggerManager`, avant chaque `PriorityGranted`) : APNAP — le joueur actif pose tous les siens, puis chaque joueur dans le sens du tour. Choix d'ordre ou de cible = décision hors priorité, comme la défausse : le contrôleur occupe `priority->holder`, l'ancien détenteur est gardé dans `triggerResumeHolder` et retrouve la priorité ensuite, passes remises à zéro. Un seul choix possible : posé sans décision. Les triggers d'un joueur éliminé disparaissent.
 - **Résolution** : `StackResolver` traite un trigger comme une capacité activée (mêmes effets : `damage`, `draw`, `token`). Un contresort ne le cible pas.
-- Pas encore : triggers pendant le cleanup (règle 514.3a), autres événements (attaque, fin de tour, sort lancé).
+- Événements : `etb`, `dies`, `upkeep`, `attacks` (déclaration d'attaquant), `end_step` (fin de tour de son contrôleur), `cast` (sort lancé par son contrôleur, `filter` = `instant_sorcery` possible), `discard` (défausse de son contrôleur). Catalogue dans `docs/EVENTS.md`.
+- **Cleanup (règle 514.3a)** : `GameEngine::cleanup()` fait la défausse à 7, puis, si des SBA ont agi ou si des triggers attendent, ouvre une ronde de priorité complète et recommence une étape de cleanup. `GameState::$cleanupRound` marque cette ronde (sauvegardée dans le snapshot) : une reprise après une décision ne rejoue pas la défausse. Pas de ronde sinon.
 
 ## Suspension et reprise (le joueur humain)
 

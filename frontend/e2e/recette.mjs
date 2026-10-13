@@ -49,6 +49,22 @@ async function run() {
   const log = (...a) => console.log(...a)
   const info = async () => (await page.locator('.topbar .muted').textContent().catch(()=>null))?.replace(/\s+/g,' ')
   const prog = async () => (await page.locator('.playback small').textContent()).trim()
+  // Crée une partie par graine candidate jusqu'à ce que la main de J0 contienne toutes les cartes demandées.
+  // Les graines « connues » passent en premier (cas courant : une seule partie créée) ; sinon on balaie 1..400.
+  // Lève une erreur si aucune ne convient : le scénario ne peut alors pas s'exécuter.
+  const newGameWithHand = async (cards, known) => {
+    const seeds = [...known, ...Array.from({ length: 400 }, (_, i) => i + 1)]
+    for (const seed of seeds) {
+      const prev = (await info())?.match(/#(\d+)/)?.[1] ?? null
+      await page.fill('input[placeholder="aléatoire"]', String(seed))
+      await page.click('text=Nouvelle partie Commander')
+      await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prev)
+      await page.waitForSelector('.actions', { timeout: TIMEOUT })
+      const hand = (await page.locator('h4:has-text("Main (")').first().locator('xpath=..').textContent()) ?? ''
+      if (cards.every((c) => hand.includes(c))) return seed
+    }
+    throw new Error(`aucune graine ne donne ${cards.join(' + ')} en main de J0`)
+  }
 
   await page.goto('http://localhost:5173/')
   log('1 vide:', (await page.locator('.empty').textContent()).trim()); await shot('1-vide')
@@ -205,13 +221,10 @@ async function run() {
   await page.locator('text=/J0 sacrifie/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('10-cout-sacrifice')
   if (!sacrificed) problems.push('recette coût : J0 n\'a pas pu sacrifier une créature au Goblin Bombardment')
 
-  // 11 : trigger à cible (seed 161 : J0 a Goblin Bombardment et Perilous Myr en main de départ).
+  // 11 : trigger à cible. J0 doit avoir Goblin Bombardment et Perilous Myr en main de départ : newGameWithHand cherche la graine.
   // J0 lance Bombardment et le Myr, sacrifie le Myr (1 dégât à J1), puis choisit J2 comme cible du trigger « meurt ».
-  const prevGame11 = (await info()).match(/#(\d+)/)[1]
-  await page.fill('input[placeholder="aléatoire"]', '161')
-  await page.click('text=Nouvelle partie Commander')
-  await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame11)
-  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  const seed11 = await newGameWithHand(['Goblin Bombardment', 'Perilous Myr'], [80, 197, 38, 239, 273, 303, 327, 349])
+  log('11 graine retenue :', seed11)
   let triggered = false
   for (let i = 0; i < 300 && !triggered; i++) {
     if (!(await page.locator('.actions').count())) break
@@ -237,13 +250,10 @@ async function run() {
   await shot('11-declencheur')
   if (!triggered) problems.push('recette trigger : J0 n\'a pas pu choisir la cible du trigger de Perilous Myr')
 
-  // 12 : mana conditionnel (seed 225 : J0 a Eldrazi Temple et Eldrazi Mimic en main de départ).
+  // 12 : mana conditionnel. J0 doit avoir Eldrazi Temple et Eldrazi Mimic en main de départ : newGameWithHand cherche la graine.
   // J0 joue le Temple, l'engage à la main pour {C}{C} restreint (pastilles marquées dans la réserve), puis lance le Mimic avec.
-  const prevGame12 = (await info()).match(/#(\d+)/)[1]
-  await page.fill('input[placeholder="aléatoire"]', '225')
-  await page.click('text=Nouvelle partie Commander')
-  await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prevGame12)
-  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  const seed12 = await newGameWithHand(['Eldrazi Temple', 'Eldrazi Mimic'], [170, 129, 154, 225, 238, 249, 258, 263])
+  log('12 graine retenue :', seed12)
   let restrictedSeen = false
   let mimicCast = false
   for (let i = 0; i < 120 && !mimicCast; i++) {

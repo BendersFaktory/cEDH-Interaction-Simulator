@@ -30,13 +30,14 @@ final class GameEngine
     private readonly PriorityManager $priority;
     private readonly CombatManager $combat;
     private readonly HandSizeManager $handSize;
+    private readonly StateBasedActions $sba;
 
     public function __construct(
         AgentRegistry $agents,
         ?CheckpointListener $listener = null,
         ?LegalActionGenerator $legal = null,
     ) {
-        $sba = new StateBasedActions();
+        $sba = $this->sba = new StateBasedActions();
         $legal ??= new LegalActionGenerator();
         $this->combat = new CombatManager($agents, $legal);
         $this->handSize = new HandSizeManager($agents, $legal);
@@ -72,8 +73,8 @@ final class GameEngine
                         $this->priority->runRound($s, $injected);
                     }
                 }
-                if ($s->phase === Phase::Cleanup) {
-                    $this->handSize->run($s, $injected);
+                if ($s->phase === Phase::Cleanup && $this->cleanup($s, $injected)) {
+                    continue; // nouvelle étape de cleanup (règle 514.3a)
                 }
                 if ($s->over) {
                     break;
@@ -85,5 +86,36 @@ final class GameEngine
         }
 
         return new AdvanceResult($s->drainEvents(), null, true);
+    }
+
+    /**
+     * Cleanup : défausse à 7, puis règle 514.3a — si des SBA agissent ou si des triggers attendent, une ronde de priorité
+     * complète s'ouvre (octrois journalisés, checkpoints), puis une nouvelle étape de cleanup commence. `cleanupRound`
+     * marque cette ronde : à la reprise après une décision, la défausse n'est pas rejouée. Peut lever DecisionRequired.
+     *
+     * @return bool true si une nouvelle étape de cleanup doit commencer
+     */
+    private function cleanup(GameState $s, ?Action &$injected): bool
+    {
+        if (!$s->cleanupRound) {
+            $this->handSize->run($s, $injected);
+            $seq = $s->eventSeq;
+            $this->sba->check($s);
+            if ($s->over || ($s->eventSeq === $seq && $s->pendingTriggers === [])) {
+                return false;
+            }
+            $s->cleanupRound = true;
+            $first = $s->player($s->activePlayer)->lost ? $s->nextAlive($s->activePlayer) : $s->activePlayer;
+            $s->priority = new PriorityState($first);
+        }
+
+        $this->priority->runRound($s, $injected);
+        $s->cleanupRound = false;
+        if ($s->over) {
+            return false;
+        }
+        $s->stepStarted = false;
+
+        return true;
     }
 }
