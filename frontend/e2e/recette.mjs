@@ -60,7 +60,15 @@ async function run() {
       await page.click('text=Nouvelle partie Commander')
       await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prev)
       await page.waitForSelector('.actions', { timeout: TIMEOUT })
-      const hand = (await page.locator('h4:has-text("Main (")').first().locator('xpath=..').textContent()) ?? ''
+      // Attend que la main se stabilise : en CI (lente), l'identifiant change avant que la main de la nouvelle partie soit rendue.
+      const readHand = async () => (await page.locator('h4:has-text("Main (")').first().locator('xpath=..').textContent()) ?? ''
+      let hand = await readHand()
+      for (let i = 0; i < 20; i++) {
+        await page.waitForTimeout(250)
+        const again = await readHand()
+        if (again === hand) break
+        hand = again
+      }
       const lands = (hand.match(/Mountain|Forest|Island|Plains|Swamp/g) ?? []).length
       if (cards.every((c) => hand.includes(c)) && lands >= minLands) return seed
     }

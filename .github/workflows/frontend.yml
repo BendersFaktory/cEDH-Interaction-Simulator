@@ -1,0 +1,50 @@
+name: Frontend
+
+# Typecheck, tests, build, et contrat PHP <-> reducer : la fixture régénérée doit être identique à celle versionnée.
+on:
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Dépendances backend
+        run: composer install --no-interaction --prefer-dist
+        working-directory: backend
+
+      - name: Dépendances frontend
+        run: npm ci
+        working-directory: frontend
+
+      - name: Typecheck
+        run: npx vue-tsc --noEmit
+        working-directory: frontend
+
+      - name: Tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build
+        run: npx vite build
+        working-directory: frontend
+
+      - name: Fixture à jour
+        run: |
+          php backend/bin/export-fixture.php 42 > frontend/src/engine/__fixtures__/game.json
+          git diff --exit-code frontend/src/engine/__fixtures__/game.json
