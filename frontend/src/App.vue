@@ -27,6 +27,7 @@ const playAsJ0 = ref(true)
       <template v-if="store.simulation.parentId">(fork de #{{ store.simulation.parentId }} @ {{ store.simulation.forkEventSeq }})</template>
       — {{ store.simulation.status }}
     </span>
+    <span v-if="store.waiting" class="muted">Simulation en cours…<template v-if="store.progress"> tour {{ store.progress }}</template></span>
     <span v-if="store.error" class="error">{{ store.error }}</span>
   </header>
 

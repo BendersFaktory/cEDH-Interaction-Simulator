@@ -18,6 +18,10 @@ export const useSimulationStore = defineStore('simulation', () => {
   const showVerbose = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** Tour courant de la simulation en cours côté serveur (null hors attente). */
+  const progress = ref<number | null>(null)
+  const waiting = ref(false)
+  const POLL_MS = 200
 
   let timer: ReturnType<typeof setInterval> | null = null
 
@@ -75,9 +79,28 @@ export const useSimulationStore = defineStore('simulation', () => {
         seed,
         controllers: { 0: playAsJ0 ? 'human:auto' : ai, 1: ai, 2: ai, 3: ai },
       })
+      const done = await waitUntilPlayed(sim)
       // Si la partie t'attend déjà, on se place à la fin du journal pour voir tes actions possibles.
-      await load(sim.id, sim.status === 'waiting')
+      await load(done.id, done.status === 'waiting')
     })
+  }
+
+  /** La simulation est jouée en tâche de fond : on sonde GET /simulations/{id} jusqu'à un autre statut que queued/running. */
+  async function waitUntilPlayed(sim: SimulationView): Promise<SimulationView> {
+    let current = sim
+    waiting.value = true
+    try {
+      while (current.status === 'queued' || current.status === 'running') {
+        progress.value = current.progress ?? null
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+        current = await api.get(sim.id)
+      }
+    } finally {
+      waiting.value = false
+      progress.value = null
+    }
+    if (current.status === 'failed') throw new Error(current.error ?? 'La simulation a échoué.')
+    return current
   }
 
   // --- navigation ---
@@ -174,7 +197,7 @@ export const useSimulationStore = defineStore('simulation', () => {
   onScopeDispose(pause)
 
   return {
-    simulation, events, cursor, playing, speedMs, showVerbose, loading, error,
+    simulation, events, cursor, playing, speedMs, showVerbose, loading, error, progress, waiting,
     lastSeq, atEnd, view, visibleEvents, checkpointSeqs, forkPoint, pending,
     humanSeats, stopsOf, setStops,
     load, create, step, stepBack, seek, play, pause, setSpeed, forkHere, decide,

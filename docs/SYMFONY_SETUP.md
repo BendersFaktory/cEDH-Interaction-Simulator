@@ -227,3 +227,13 @@ Lecture : le ralentissement de `create` par rapport au 2026-10-12 (seed 42 ~0,22
 - `make:migration` n'est pas installé : utiliser `doctrine:migrations:diff`. Les migrations sont écrites pour MySQL (SQL propre à MySQL) ; ne pas les rejouer sur une autre base.
 - `config/reference.php` est généré automatiquement par Symfony et change selon l'environnement : le versionner tel quel.
 - Le `memory_limit` du serveur doit rester confortable (le test d'API le fixe à 512 Mo).
+
+## Worker (simulations asynchrones)
+
+`POST /api/simulations` répond 202 (statut `queued`) et met un message `RunSimulation` dans la table `messenger_messages` (transport Doctrine, `auto_setup=0` : la table vient de la migration). Un worker doit tourner pour jouer la partie ; le front sonde `GET /api/simulations/{id}` (champs `status`, `progress`) :
+
+```bash
+cd backend && php bin/console messenger:consume async -vv
+```
+
+Sans worker, les simulations restent `queued`. En échec (`failed`), le message d'erreur est dans le champ `error` ; pas de relance automatique. En environnement `test`, le transport est `sync://` : la partie est jouée dans la requête.

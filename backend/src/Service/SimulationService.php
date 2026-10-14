@@ -13,7 +13,9 @@ use App\Engine\Game\StopConfig;
 use App\Engine\Rules\LegalActionGenerator;
 use App\Entity\GameEventRecord;
 use App\Entity\Simulation;
+use App\Message\RunSimulation;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * Colle entre le moteur (PHP pur) et la persistance (Doctrine).
@@ -25,6 +27,7 @@ class SimulationService
         private readonly EntityManagerInterface $em,
         private readonly BulkInserter $bulk,
         private readonly StateReconstructor $reconstructor,
+        private readonly MessageBusInterface $bus,
         /** Ancre complète tous les N tours ; le reste se reconstruit par rejeu (voir SparseCheckpoints). */
         private readonly int $checkpointEveryNTurns = 1,
     ) {
@@ -36,9 +39,25 @@ class SimulationService
         $this->assertControllers($controllers);
 
         $sim = new Simulation($seed);
+        $sim->setStatus(Simulation::QUEUED);
+        $sim->setControllers($controllers);
         $this->em->persist($sim);
+        $this->em->flush();
 
-        return $this->run($sim, GameFactory::create($seed, $controllers), null);
+        $this->bus->dispatch(new RunSimulation((int) $sim->getId()));
+
+        return $sim;
+    }
+
+    /** Joue une simulation QUEUED (appelé par le handler Messenger). */
+    public function start(Simulation $sim): Simulation
+    {
+        $controllers = [];
+        foreach ($sim->getControllers() ?? [] as $id => $key) {
+            $controllers[(int) $id] = (string) $key;
+        }
+
+        return $this->run($sim, GameFactory::create($sim->getSeed(), $controllers), null);
     }
 
     /** Reprend une branche suspendue avec la décision du joueur humain. */
@@ -180,7 +199,11 @@ class SimulationService
      */
     private function run(Simulation $sim, GameState $state, ?Action $decision, ?array $anchorBefore = null): Simulation
     {
-        $checkpoints = new SparseCheckpoints($this->checkpointEveryNTurns, $anchorBefore !== null ? $state->turn : null);
+        $checkpoints = new SparseCheckpoints(
+            $this->checkpointEveryNTurns,
+            $anchorBefore !== null ? $state->turn : null,
+            $sim->getStatus() === Simulation::QUEUED ? fn (int $turn) => $this->writeProgress($sim, $turn) : null,
+        );
         $result = (new GameEngine(new AgentRegistry(), $checkpoints))->advance($state, $decision);
 
         // Une seule transaction (tout ou rien). Les événements et checkpoints sont écrits en masse, hors
@@ -205,6 +228,12 @@ class SimulationService
         });
 
         return $sim;
+    }
+
+    /** UPDATE direct, hors UnitOfWork et hors transaction principale : visible tout de suite par le polling. */
+    private function writeProgress(Simulation $sim, int $turn): void
+    {
+        $this->em->getConnection()->executeStatement('UPDATE simulation SET progress = ? WHERE id = ?', [$turn, $sim->getId()]);
     }
 
     /** @param array<int, string> $controllers */

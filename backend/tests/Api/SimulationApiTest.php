@@ -47,7 +47,7 @@ final class SimulationApiTest extends WebTestCase
     private function createGame(int $seed, ?array $controllers = null): array
     {
         [$status, $sim] = $this->call('POST', self::BASE, ['seed' => $seed] + ($controllers === null ? [] : ['controllers' => $controllers]));
-        self::assertSame(201, $status);
+        self::assertSame(202, $status);
 
         return $sim;
     }
@@ -376,5 +376,26 @@ final class SimulationApiTest extends WebTestCase
         self::assertSame(200, $st);
         self::assertSame($later, $state['eventSeq']);
         self::assertArrayNotHasKey('stops', $state['state']);
+    }
+
+    public function testQueuedSimulationExposesStatusAndRefusesGameEndpoints(): void
+    {
+        $em = static::getContainer()->get(EntityManagerInterface::class);
+        $sim = new \App\Entity\Simulation(42);
+        $sim->setStatus(\App\Entity\Simulation::QUEUED);
+        $sim->setControllers([0 => 'ai:heuristic']);
+        $em->persist($sim);
+        $em->flush();
+        $id = $sim->getId();
+
+        [$status, $view] = $this->call('GET', self::BASE . "/$id");
+        self::assertSame(200, $status);
+        self::assertSame('queued', $view['status']);
+        self::assertNull($view['progress']);
+
+        foreach ([['GET', "/$id/events"], ['GET', "/$id/state"], ['POST', "/$id/decisions"], ['POST', "/$id/fork"], ['PUT', "/$id/stops"]] as [$method, $path]) {
+            [$status] = $this->call($method, self::BASE . $path, $method === 'GET' ? null : ['actionId' => 'x', 'atEvent' => 1, 'player' => 0, 'stops' => null]);
+            self::assertSame(409, $status, "$method $path");
+        }
     }
 }

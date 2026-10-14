@@ -46,3 +46,53 @@ describe('stops', () => {
     expect(store.stopsOf(0)).toBeNull()
   })
 })
+
+describe('création asynchrone', () => {
+  const fetchMock = vi.fn()
+  beforeEach(() => {
+    vi.useFakeTimers()
+    setActivePinia(createPinia())
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  const ok = (body: unknown) => ({ ok: true, json: async () => body })
+
+  it('sonde GET /simulations/{id} toutes les 200 ms jusqu\'à la fin puis charge le journal', async () => {
+    const store = useSimulationStore()
+    fetchMock
+      .mockResolvedValueOnce(ok({ ...base, status: 'queued', progress: null })) // POST
+      .mockResolvedValueOnce(ok({ ...base, status: 'running', progress: 3 })) // poll 1
+      .mockResolvedValueOnce(ok({ ...base, status: 'over', progress: 9 })) // poll 2
+      .mockResolvedValueOnce(ok({ ...base, status: 'over' })) // load: get
+      .mockResolvedValueOnce(ok([])) // load: events
+    const done = store.create(1, false)
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.waiting).toBe(true)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(store.progress).toBe(3)
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/simulations/7')
+    await vi.advanceTimersByTimeAsync(200)
+    await done
+
+    expect(store.waiting).toBe(false)
+    expect(store.simulation?.status).toBe('over')
+    expect(store.error).toBeNull()
+  })
+
+  it('affiche une erreur quand la simulation échoue', async () => {
+    const store = useSimulationStore()
+    fetchMock
+      .mockResolvedValueOnce(ok({ ...base, status: 'queued' }))
+      .mockResolvedValueOnce(ok({ ...base, status: 'failed', error: 'boum' }))
+    const done = store.create(1, false)
+    await vi.advanceTimersByTimeAsync(200)
+    await done
+    expect(store.error).toBe('boum')
+  })
+})
