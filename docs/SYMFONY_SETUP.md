@@ -41,7 +41,7 @@ vendor/bin/phpunit                          # 35 tests : suites "engine" (18), "
 vendor/bin/phpunit --testsuite api          # API seule (contrôleur -> service -> moteur -> Doctrine/MySQL)
 php bin/console lint:container
 php bin/console doctrine:schema:validate
-php bin/console debug:router                # 7 routes sous /api/simulations
+php bin/console debug:router                # 8 routes sous /api/simulations
 ```
 
 Les tests d'API (`tests/Api/SimulationApiTest.php`) utilisent la base `mtg_sim_test` (`.env.test` + `.env.test.local`), dont le schéma est recréé à chaque test : **MySQL doit tourner** pour les lancer.
@@ -57,6 +57,7 @@ Les tests d'API (`tests/Api/SimulationApiTest.php`) utilisent la base `mtg_sim_t
 | GET | `/api/simulations/{id}/pending` | Décision en attente (`actions`) |
 | POST | `/api/simulations/{id}/fork` | Bifurque (corps : `atEvent`, `controllers`) |
 | POST | `/api/simulations/{id}/decisions` | Répond à la décision en attente (`actionId`) |
+| PUT | `/api/simulations/{id}/stops` | Change les stops d'un joueur humain (`{player, stops}` (`stops` : objet ou `null`)) à la pause ou au checkpoint courant |
 
 Défaut = Commander à 4, J0 en `human:auto`. Pour 4 IA : `{"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}`.
 Erreurs : 409 (état incompatible : aucune décision attendue, aucun checkpoint), 422 (action, agent ou joueur inconnu), 404 (simulation absente), 400 (JSON invalide).

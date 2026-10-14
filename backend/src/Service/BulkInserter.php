@@ -49,6 +49,18 @@ class BulkInserter
     }
 
     /**
+     * Ancre au point courant : remplace l'état d'une ancre déjà posée à ce seq (fork ou ancre de tour au même point,
+     * changement de stops répété), sinon l'insère. Le seq étant celui de la tête, aucune ancre passée n'est touchée.
+     */
+    public function upsertCheckpoint(int $simulationId, int $seq, array $state): void
+    {
+        $this->connection->executeStatement(
+            'INSERT INTO checkpoint (simulation_id, event_seq, state, decision) VALUES (?, ?, ?, NULL) ON DUPLICATE KEY UPDATE state = VALUES(state)',
+            [$simulationId, $seq, $this->json($state)],
+        );
+    }
+
+    /**
      * Ancre posée à une pause humaine : complète l'ancre existante à ce seq (une ancre de tour peut coïncider
      * avec la pause, contrainte unique), sinon en insère une.
      */

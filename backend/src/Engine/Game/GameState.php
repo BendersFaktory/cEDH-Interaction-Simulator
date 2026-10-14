@@ -41,6 +41,13 @@ final class GameState
      * défausse). Tant qu'elle est vraie, la défausse n'est pas rejouée ; à la fin de la ronde, nouvelle étape de cleanup.
      */
     public bool $cleanupRound = false;
+    /**
+     * Stops de l'auto-pass par joueur (voir StopConfig) ; un joueur absent garde le comportement par défaut. Sérialisé
+     * sous la clé `stops`, omise quand le tableau est vide (ne gonfle pas les états des parties sans config).
+     *
+     * @var array<int, StopConfig>
+     */
+    public array $stops = [];
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -257,9 +264,23 @@ final class GameState
         $this->queuePlayerTriggers($playerId, TriggeredAbility::DISCARD);
     }
 
+    /** Change les stops d'un joueur ; `null` (ou une config équivalente au défaut) revient au comportement par défaut. */
+    public function setStops(int $playerId, ?StopConfig $config): void
+    {
+        if (!isset($this->players[$playerId])) {
+            throw new \InvalidArgumentException("Joueur inconnu : $playerId");
+        }
+        if ($config === null || $config->isDefault()) {
+            unset($this->stops[$playerId]);
+        } else {
+            $this->stops[$playerId] = $config;
+            ksort($this->stops);
+        }
+    }
+
     public function toArray(): array
     {
-        return [
+        $d = [
             'version' => self::FORMAT_VERSION,
             'turn' => $this->turn,
             'activePlayer' => $this->activePlayer,
@@ -283,6 +304,11 @@ final class GameState
             'controllers' => $this->controllers,
             'players' => array_map(static fn (PlayerState $p) => $p->toArray(), $this->players),
         ];
+        if ($this->stops !== []) {
+            $d['stops'] = array_map(static fn (StopConfig $c) => $c->toArray(), $this->stops);
+        }
+
+        return $d;
     }
 
     public static function fromArray(array $d): self
@@ -319,6 +345,9 @@ final class GameState
         $s->eventSeq = (int) $d['eventSeq'];
         $s->over = (bool) $d['over'];
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];
+        foreach ($d['stops'] ?? [] as $id => $config) {
+            $s->stops[(int) $id] = StopConfig::fromArray($config);
+        }
 
         return $s;
     }

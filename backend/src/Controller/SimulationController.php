@@ -85,6 +85,25 @@ final class SimulationController extends AbstractController
         return $this->guard(fn () => $this->view($this->simulations->decide($simulation, $actionId)));
     }
 
+    /** Body : {"player": 0, "stops": {"steps": ["main1"], "onOpponentSpell": true, ...} | null} */
+    #[Route('/{id}/stops', methods: ['PUT'], requirements: ['id' => '\d+'])]
+    public function stops(Simulation $simulation, Request $request): JsonResponse
+    {
+        $body = $request->toArray();
+        $stops = $body['stops'] ?? null;
+        if (!isset($body['player']) || !is_int($body['player']) || ($stops !== null && !is_array($stops))) {
+            return $this->json(['error' => 'Body attendu : {"player": int, "stops": object|null}'], 400);
+        }
+
+        try {
+            return $this->json($this->view($this->simulations->setStops($simulation, $body['player'], $stops)));
+        } catch (\ValueError|\InvalidArgumentException $e) {
+            return $this->json(['error' => $e->getMessage()], 400);
+        } catch (\DomainException $e) {
+            return $this->json(['error' => $e->getMessage()], 409);
+        }
+    }
+
     private function view(Simulation $s): array
     {
         return [
@@ -96,6 +115,7 @@ final class SimulationController extends AbstractController
             'pending' => $s->getPending(),
             'eventCount' => $s->getState()['eventSeq'] ?? 0,
             'controllers' => $s->getState()['controllers'] ?? [],
+            'stops' => (object) ($s->getState()['stops'] ?? []),
         ];
     }
 

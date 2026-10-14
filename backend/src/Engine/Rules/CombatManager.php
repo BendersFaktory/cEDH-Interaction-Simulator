@@ -6,6 +6,7 @@ namespace App\Engine\Rules;
 
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Action\Action;
+use App\Engine\Action\AssignCombatDamage;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
@@ -75,10 +76,14 @@ final class CombatManager
                 $s->combat->queue = $this->defendersInTurnOrder($s);
                 break;
             case Phase::FirstStrikeDamage:
-                $this->resolver->resolve($s, true);
-                break;
             case Phase::CombatDamage:
-                $this->resolver->resolve($s, false);
+                // Un attaquant humain a une répartition à choisir : les dégâts attendent sa décision (runDeclaration).
+                // Sinon (toutes les IA), dégâts immédiats avec la répartition par défaut, comme avant.
+                if ($this->legal->assignmentActions($s, $s->activePlayer) !== []) {
+                    $s->combat->declaring = CombatState::DAMAGE;
+                } else {
+                    $this->resolver->resolve($s, $s->phase === Phase::FirstStrikeDamage);
+                }
                 break;
             case Phase::EndCombat:
                 if ($s->combat->attackers !== []) {
@@ -99,6 +104,11 @@ final class CombatManager
         for ($i = 0; $i < self::MAX_DECLARATIONS; $i++) {
             $c = $s->combat;
             if ($c->declaring === null) {
+                return;
+            }
+            if ($c->declaring === CombatState::DAMAGE) {
+                $this->runAssignment($s, $injected);
+
                 return;
             }
 
@@ -143,6 +153,40 @@ final class CombatManager
         }
 
         throw new \LogicException('Déclaration de combat sans fin (garde-fou).');
+    }
+
+    /**
+     * Répartition des dégâts par le contrôleur humain (CR 510.1c, 702.19b) : un choix par attaquant concerné, dans
+     * l'ordre de déclaration, puis les dégâts de l'étape sont infligés d'un coup (simultanés). Décision hors priorité,
+     * sans ronde ; l'état (`declaring = damage`, choix déjà faits) est dans CombatState, donc la reprise est exacte.
+     */
+    private function runAssignment(GameState $s, ?Action &$injected): void
+    {
+        for ($i = 0; $i < self::MAX_DECLARATIONS; $i++) {
+            $player = $s->activePlayer;
+            $legal = $this->legal->assignmentActions($s, $player);
+            if ($legal === []) {
+                $this->resolver->resolve($s, $s->phase === Phase::FirstStrikeDamage);
+                $s->combat->assignments = [];
+                $this->finish($s);
+
+                return;
+            }
+
+            $s->priority = new PriorityState($player, [], true);
+            if ($injected !== null) {
+                $action = $this->legal->match($injected, $player, $legal);
+                $injected = null;
+            } else {
+                $action = $this->agents->get($s->controllers[$player])->decide($s, $player, $legal);
+            }
+            if (!$action instanceof AssignCombatDamage) {
+                throw new \LogicException('Une répartition des dégâts est obligatoire : ' . $action::class);
+            }
+            $s->combat->assignments[$action->attackerId] = $action->assignment;
+        }
+
+        throw new \LogicException('Répartition des dégâts sans fin (garde-fou).');
     }
 
     private function currentDeclarer(GameState $s): ?int

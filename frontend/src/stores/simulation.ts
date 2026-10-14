@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref } from 'vue'
 import { api } from '../api/client'
 import { replay } from '../engine/reducer'
-import type { GameEvent, SimulationView } from '../types/engine'
+import type { GameEvent, SimulationView, StopsConfig } from '../types/engine'
 
 /**
  * Store central : journal d'événements + curseur.
@@ -148,11 +148,35 @@ export const useSimulationStore = defineStore('simulation', () => {
     })
   }
 
+  /** Sièges humains (contrôleur `human:*`) de la simulation courante. */
+  const humanSeats = computed(() =>
+    Object.entries(simulation.value?.controllers ?? {})
+      .filter(([, c]) => c.startsWith('human'))
+      .map(([id]) => Number(id)),
+  )
+
+  /** Stops d'un joueur tels que renvoyés par le serveur (null = défaut). */
+  function stopsOf(player: number): StopsConfig | null {
+    return simulation.value?.stops?.[String(player)] ?? null
+  }
+
+  /** Applique des stops (`null` = défaut) ; la réponse est traitée comme celle d'une décision. */
+  async function setStops(player: number, stops: StopsConfig | null): Promise<void> {
+    if (!simulation.value) return
+    await run(async () => {
+      const after = lastSeq.value
+      simulation.value = await api.setStops(simulation.value!.id, player, stops)
+      events.value = [...events.value, ...(await api.events(simulation.value.id, after))]
+      cursor.value = lastSeq.value
+    })
+  }
+
   onScopeDispose(pause)
 
   return {
     simulation, events, cursor, playing, speedMs, showVerbose, loading, error,
     lastSeq, atEnd, view, visibleEvents, checkpointSeqs, forkPoint, pending,
+    humanSeats, stopsOf, setStops,
     load, create, step, stepBack, seek, play, pause, setSpeed, forkHere, decide,
   }
 })

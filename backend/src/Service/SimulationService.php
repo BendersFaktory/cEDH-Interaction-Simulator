@@ -9,6 +9,7 @@ use App\Engine\Agent\AgentRegistry;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
 use App\Engine\Game\GameState;
+use App\Engine\Game\StopConfig;
 use App\Engine\Rules\LegalActionGenerator;
 use App\Entity\GameEventRecord;
 use App\Entity\Simulation;
@@ -58,6 +59,53 @@ class SimulationService
         }
 
         throw new \InvalidArgumentException("Action illégale : $actionId");
+    }
+
+    /**
+     * Change les stops d'un joueur humain au point courant de la branche (sans la forker).
+     *
+     * Le point courant est la pause : on l'ancre avec les stops (jamais d'ancre passée réécrite), puis on reprend
+     * le moteur, qui redemande sa décision à l'agent avec la nouvelle config (il peut donc passer tout seul).
+     *
+     * @param array|null $stops JSON de StopConfig, ou null pour revenir au comportement par défaut
+     * @throws \ValueError si une étape est inconnue
+     */
+    public function setStops(Simulation $sim, int $playerId, ?array $stops): Simulation
+    {
+        if ($sim->getStatus() === Simulation::OVER) {
+            throw new \DomainException('La partie est terminée.');
+        }
+        $state = GameState::fromArray($sim->getState());
+        if (!isset($state->players[$playerId])) {
+            throw new \InvalidArgumentException("Joueur inconnu : $playerId");
+        }
+        if (!str_starts_with($state->controllers[$playerId] ?? '', 'human')) {
+            throw new \InvalidArgumentException("Le joueur $playerId n'est pas contrôlé par un humain.");
+        }
+        $config = $stops === null ? null : StopConfig::fromArray($stops);
+
+        // Le point courant doit être une pause humaine (déjà point d'ancre, complétée ensuite par anchorDecision)
+        // ou un checkpoint (règle 6) : on l'ancre avec les nouveaux stops.
+        if ($sim->getStatus() !== Simulation::WAITING && !$this->isCheckpoint($sim, $state->eventSeq)) {
+            throw new \DomainException('Les stops se changent à une pause ou à une priorité de checkpoint.');
+        }
+
+        $state->setStops($playerId, $config);
+
+        return $this->run($sim, $state, null, anchorBefore: [$state->eventSeq, $state->toArray(), null]);
+    }
+
+    private function isCheckpoint(Simulation $sim, int $seq): bool
+    {
+        $row = $this->em->createQueryBuilder()
+            ->select('e')->from(GameEventRecord::class, 'e')
+            ->where('e.simulation = :s AND e.seq = :seq')
+            ->setParameter('s', $sim)->setParameter('seq', $seq)
+            ->getQuery()->getOneOrNullResult();
+
+        $e = $row?->toArray();
+
+        return $e !== null && $e['type'] === 'PriorityGranted' && ($e['payload']['checkpoint'] ?? false) === true;
     }
 
     /**
@@ -145,7 +193,7 @@ class SimulationService
             if ($anchorBefore !== null) {
                 [$seq, $anchorState, $actionId] = $anchorBefore;
                 $actionId === null
-                    ? $this->bulk->insertCheckpoints((int) $sim->getId(), [$seq => $anchorState])
+                    ? $this->bulk->upsertCheckpoint((int) $sim->getId(), $seq, $anchorState)
                     : $this->bulk->anchorDecision((int) $sim->getId(), $seq, $anchorState, $actionId);
             }
             $this->bulk->insertCheckpoints((int) $sim->getId(), $checkpoints->states);

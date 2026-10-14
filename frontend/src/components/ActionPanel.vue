@@ -10,6 +10,7 @@ const groups = computed(() => {
   return [
     { title: 'Attaquer', items: actions.filter((a) => a.type === 'attack') },
     { title: 'Bloquer', items: actions.filter((a) => a.type === 'block') },
+    { title: 'Répartir les dégâts de combat', items: actions.filter((a) => a.type === 'assign') },
     { title: 'Terminer la déclaration', items: actions.filter((a) => a.type === 'done') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
@@ -25,7 +26,7 @@ const groups = computed(() => {
   <section v-if="store.pending" class="actions">
     <h3>À toi de jouer — J{{ store.pending.player }}</h3>
     <p class="muted">
-      Tour {{ store.pending.turn }}, {{ phaseLabel(store.pending.phase) }}{{ store.pending.declaring === 'attackers' ? ' — déclaration des attaquants' : store.pending.declaring === 'blockers' ? ' — déclaration des bloqueurs' : '' }} · pile : {{ store.pending.stack.length }}
+      Tour {{ store.pending.turn }}, {{ phaseLabel(store.pending.phase) }}{{ store.pending.declaring === 'attackers' ? ' — déclaration des attaquants' : store.pending.declaring === 'blockers' ? ' — déclaration des bloqueurs' : store.pending.declaring === 'damage' ? ' — répartition des dégâts' : '' }} · pile : {{ store.pending.stack.length }}
     </p>
     <div v-for="g in groups" :key="g.title">
       <h4>{{ g.title }}</h4>

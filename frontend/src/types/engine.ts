@@ -92,7 +92,7 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger' | 'assign'
   player: number
   cardId?: string
   targets?: string[]
@@ -105,6 +105,10 @@ export interface ActionView {
   mana?: boolean
   /** Action `trigger` : trigger en attente à mettre sur la pile. */
   pendingId?: string
+  /** Action `assign` : répartition des dégâts de l'attaquant (`target` = id de bloqueur ou `player:N`). */
+  assignment?: { target: string; amount: number }[]
+  /** Action `assign` : répartition par défaut (létal dans l'ordre de déclaration). */
+  default?: boolean
 }
 
 export interface StackItemView {
@@ -127,14 +131,28 @@ export interface DecisionRequest {
   turn: number
   phase: string
   activePlayer: number
-  /** Déclaration de combat en cours (attaquants/bloqueurs) : le déclarant occupe `priority.holder`. */
-  declaring: 'attackers' | 'blockers' | null
+  /** Déclaration de combat en cours (attaquants/bloqueurs, répartition des dégâts) : le déclarant occupe `priority.holder`. */
+  declaring: 'attackers' | 'blockers' | 'damage' | null
   priority: { holder: number; passed: number[]; announced: boolean }
   stack: StackItemView[]
   actions: ActionView[]
 }
 
 export type SimulationStatus = 'running' | 'waiting' | 'over'
+
+/** Étapes où un siège humain peut s'arrêter (valeurs de `PhaseChanged.phase`). */
+export const STOP_STEPS = [
+  'upkeep', 'draw', 'main1', 'begin_combat', 'declare_attackers', 'declare_blockers',
+  'first_strike_damage', 'combat_damage', 'end_combat', 'main2', 'end',
+] as const
+
+/** Stops configurés d'un joueur humain (absent / null = défaut : s'arrêter dès qu'une action est possible). */
+export interface StopsConfig {
+  steps: string[]
+  onOpponentSpell: boolean
+  onDeclareAttackers: boolean
+  onDeclareBlockers: boolean
+}
 
 export interface SimulationView {
   id: number
@@ -145,6 +163,8 @@ export interface SimulationView {
   pending: DecisionRequest | null
   eventCount: number
   controllers: Record<string, string>
+  /** Stops par id de joueur ; clé absente = défaut. */
+  stops?: Record<string, StopsConfig | null>
 }
 
 // --- État reconstruit côté front par le reducer ---

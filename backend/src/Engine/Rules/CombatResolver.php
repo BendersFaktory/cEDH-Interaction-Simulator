@@ -10,7 +10,8 @@ use App\Engine\Game\GameState;
 /**
  * Dégâts de combat, simultanés : tout est calculé sur l'état d'avant les dégâts, puis appliqué.
  * Sans piétinement : un attaquant bloqué ne blesse pas le joueur. Les dégâts d'un attaquant aux bloqueurs
- * suivent l'ordre de déclaration (létal au premier, le reste au suivant, le surplus au dernier).
+ * suivent par défaut l'ordre de déclaration (létal au premier, le reste au suivant, le surplus au dernier) ; un
+ * contrôleur humain a pu choisir une autre répartition (`CombatState::$assignments`, voir DamageAssignment).
  * Les créatures létalement blessées meurent ensuite via les actions basées sur l'état.
  */
 final class CombatResolver
@@ -58,7 +59,24 @@ final class CombatResolver
             $trample = $attacker->hasKeyword(CardInstance::TRAMPLE);
             $playerAlive = !$s->player($defender)->lost;
 
-            if ($power > 0 && $this->strikes($attacker, $firstStrike)) {
+            $chosen = $s->combat->assignments[$attackerId] ?? null;
+            if ($chosen !== null && $power > 0 && self::strikes($attacker, $firstStrike)) {
+                $byId = [];
+                foreach ($blockers as $blocker) {
+                    $byId[$blocker->id] = $blocker;
+                }
+                foreach ($chosen as $target => $amount) {
+                    $target = (string) $target;
+                    if ($target === 'player:' . $defender) {
+                        if ($playerAlive && $amount > 0) {
+                            $toPlayers[] = [$attacker, $defender, $amount];
+                            $deal($attacker, $attackerOwner, null, $amount);
+                        }
+                    } elseif (isset($byId[$target])) {
+                        $deal($attacker, $attackerOwner, $byId[$target], $amount);
+                    }
+                }
+            } elseif ($power > 0 && self::strikes($attacker, $firstStrike)) {
                 if (($s->combat->blockers[$attackerId] ?? []) === [] || ($blockers === [] && $trample)) {
                     if ($playerAlive) {
                         $toPlayers[] = [$attacker, $defender, $power];
@@ -84,7 +102,7 @@ final class CombatResolver
             }
 
             foreach ($blockers as $blocker) {
-                if ($this->strikes($blocker, $firstStrike)) {
+                if (self::strikes($blocker, $firstStrike)) {
                     $deal($blocker, $defender, $attacker, $blocker->currentPower());
                 }
             }
@@ -122,7 +140,7 @@ final class CombatResolver
     }
 
     /** Frappe-t-elle à cette étape ? (initiative : étape dédiée ; sinon celles sans initiative + double initiative.) */
-    private function strikes(CardInstance $card, bool $firstStrike): bool
+    public static function strikes(CardInstance $card, bool $firstStrike): bool
     {
         $double = $card->hasKeyword(CardInstance::DOUBLE_STRIKE);
         if ($firstStrike) {
