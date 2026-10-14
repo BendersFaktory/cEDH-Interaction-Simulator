@@ -15,7 +15,7 @@ use App\Engine\Event\GameEvent;
 final class GameState
 {
     /** Version du format de `toArray()` ; à incrémenter quand la sérialisation change de façon incompatible. */
-    public const FORMAT_VERSION = 1;
+    public const FORMAT_VERSION = 2;
 
     public int $turn = 1;
     public int $activePlayer;

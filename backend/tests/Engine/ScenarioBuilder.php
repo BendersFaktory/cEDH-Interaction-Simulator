@@ -36,10 +36,14 @@ final class ScenarioBuilder
     /** @var array<int, list<CardInstance>> */
     private array $creatures = [];
 
-    /** Pose une créature sur le champ de bataille (arrivée au tour 0 : elle peut attaquer au tour 1). */
-    public function creature(int $player, string $id, int $power, int $toughness, bool $commander = false, int $enteredTurn = 0): self
+    /**
+     * Pose une créature sur le champ de bataille (arrivée au tour 0 : elle peut attaquer au tour 1).
+     *
+     * @param list<string> $keywords
+     */
+    public function creature(int $player, string $id, int $power, int $toughness, bool $commander = false, int $enteredTurn = 0, array $keywords = []): self
     {
-        $this->creatures[$player][] = new CardInstance($id, $commander ? 'Test Commander' : 'Test Creature', CardInstance::CREATURE, 2, null, 0, false, $commander, $power, $toughness, 0, $enteredTurn);
+        $this->creatures[$player][] = new CardInstance($id, $commander ? 'Test Commander' : 'Test Creature', CardInstance::CREATURE, 2, null, 0, false, $commander, $power, $toughness, 0, $enteredTurn, keywords: $keywords);
 
         return $this;
     }

@@ -24,12 +24,18 @@ const abilityText = (a: NonNullable<BoardCard['abilities']>[number]): string => 
   return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}`
 }
 const abilitiesTitle = computed(() => (props.card.abilities ?? []).map(abilityText).join(' ; '))
+const keywordLabels: Record<string, string> = {
+  flying: 'vol', reach: 'portée', haste: 'célérité', vigilance: 'vigilance', defender: 'défenseur', menace: 'menace',
+  first_strike: 'initiative', double_strike: 'double initiative', trample: 'piétinement', deathtouch: 'contact mortel', lifelink: 'lien de vie',
+}
+const keywordsText = computed(() => (props.card.keywords ?? []).map((k) => keywordLabels[k] ?? k).join(', '))
 const landColor = computed(() => (hasType(props.card, 'land') && props.card.produces?.length === 1 ? props.card.produces[0] : null))
 </script>
 
 <template>
   <div class="card" :class="[typesOf(card), { tapped: card.tapped, [`land-${landColor}`]: landColor, compact, commander: card.commander, token: card.token, attacking: card.attacking !== undefined, blocking: card.blocking !== undefined }]" :title="`${card.name} — coût ${card.cost}${hasType(card, 'creature') ? ` — ${card.power}/${card.toughness}` : ''}${abilitiesTitle ? ` — ${abilitiesTitle}` : ''}`">
     <span class="card-name">{{ card.name }}</span>
+    <span v-if="keywordsText" class="card-keywords">{{ keywordsText }}</span>
     <span v-if="card.token" class="card-token">jeton</span>
     <span v-if="card.type === 'land' && card.produces?.length" class="mana-sym" :class="landColor ? `m-${landColor}` : 'hybrid'">{{ card.produces.join('') }}</span>
     <span v-if="symbols.length" class="card-mana"><span v-for="(s, i) in symbols" :key="i" class="mana-sym" :class="symbolClass(s)">{{ s }}</span></span>
@@ -41,3 +47,11 @@ const landColor = computed(() => (hasType(props.card, 'land') && props.card.prod
     <!-- TODO: image Scryfall (cache local) -->
   </div>
 </template>
+
+<style scoped>
+.card-keywords {
+  display: block;
+  font-size: 0.7em;
+  opacity: 0.7;
+}
+</style>

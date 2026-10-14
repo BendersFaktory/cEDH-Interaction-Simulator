@@ -10,6 +10,7 @@ use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Agent\AgentRegistry;
+use App\Engine\Game\CardInstance;
 use App\Engine\Game\CombatState;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
@@ -38,8 +39,28 @@ final class CombatManager
         return match ($phase) {
             Phase::DeclareAttackers => $this->legal->attackActions($s, $s->activePlayer) === [],
             Phase::DeclareBlockers, Phase::CombatDamage => $s->combat->attackers === [],
+            Phase::FirstStrikeDamage => !$this->anyFirstStriker($s),
             default => false,
         };
+    }
+
+    /** Une créature au combat (attaquant ou bloqueur) a-t-elle l'initiative ou la double initiative ? (CR 510.4) */
+    private function anyFirstStriker(GameState $s): bool
+    {
+        $inCombat = array_merge(array_keys($s->combat->attackers), ...array_values($s->combat->blockers));
+        if ($inCombat === []) {
+            return false;
+        }
+        foreach ($s->players as $p) {
+            foreach ($p->battlefield as $card) {
+                if (in_array($card->id, $inCombat, true)
+                    && ($card->hasKeyword(CardInstance::FIRST_STRIKE) || $card->hasKeyword(CardInstance::DOUBLE_STRIKE))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** Effets d'entrée dans une étape de combat (appelé par TurnManager::beginStep, après PhaseChanged). */
@@ -53,8 +74,11 @@ final class CombatManager
                 $s->combat->declaring = CombatState::BLOCKERS;
                 $s->combat->queue = $this->defendersInTurnOrder($s);
                 break;
+            case Phase::FirstStrikeDamage:
+                $this->resolver->resolve($s, true);
+                break;
             case Phase::CombatDamage:
-                $this->resolver->resolve($s);
+                $this->resolver->resolve($s, false);
                 break;
             case Phase::EndCombat:
                 if ($s->combat->attackers !== []) {
@@ -145,9 +169,11 @@ final class CombatManager
     private function declareAttacker(GameState $s, DeclareAttacker $a): void
     {
         $card = $this->find($s, $a->player(), $a->cardId);
-        $card->tapped = true;
+        if (!$card->hasKeyword(CardInstance::VIGILANCE)) {
+            $card->tapped = true;
+        }
         $s->combat->attackers[$a->cardId] = $a->defender;
-        $s->emit('AttackerDeclared', ['player' => $a->player(), 'card' => $a->cardId, 'defender' => $a->defender, 'tapped' => true]);
+        $s->emit('AttackerDeclared', ['player' => $a->player(), 'card' => $a->cardId, 'defender' => $a->defender, 'tapped' => $card->tapped]);
         // « Quand elle attaque » : posé sur la pile à la première priorité de l'étape, donc avant les bloqueurs.
         $s->queueTriggers($a->player(), $card, TriggeredAbility::ATTACKS);
     }

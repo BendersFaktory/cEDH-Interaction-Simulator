@@ -6,7 +6,7 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 |---|---|---|---|
 | `GameStarted` | non | `seed`, `format` (`commander`), `players: [{id, life, library, controller, command: [PublicCard]}]` | Crée les joueurs et leur zone de commandement |
 | `CardDrawn` | non | `player`, `card`, `library` (taille restante) | Carte en main, bibliothèque = `library` |
-| `PhaseChanged` | non | `turn`, `phase` (`untap`\|`upkeep`\|`draw`\|`main1`\|`begin_combat`\|`declare_attackers`\|`declare_blockers`\|`combat_damage`\|`end_combat`\|`main2`\|`end`\|`cleanup`), `activePlayer` | Met à jour tour/phase, efface la priorité. `untap` n'ouvre aucune ronde de priorité. `cleanup` non plus, sauf ronde de cleanup (voir « Ronde de cleanup ») : une seconde étape `cleanup` la suit alors |
+| `PhaseChanged` | non | `turn`, `phase` (`untap`\|`upkeep`\|`draw`\|`main1`\|`begin_combat`\|`declare_attackers`\|`declare_blockers`\|`first_strike_damage`\|`combat_damage`\|`end_combat`\|`main2`\|`end`\|`cleanup`), `activePlayer` | Met à jour tour/phase, efface la priorité. `untap` n'ouvre aucune ronde de priorité. `cleanup` non plus, sauf ronde de cleanup (voir « Ronde de cleanup ») : une seconde étape `cleanup` la suit alors |
 | `PermanentsUntapped` | non | `player`, `cards: [id]` | Dégage les permanents listés |
 | `PriorityGranted` | **oui** | `holder`, `passed: [id]`, `stackSize`, `checkpoint` (bool) | Détenteur de la priorité. **Point de bifurcation uniquement si `checkpoint` = true** (début de ronde ou pile non vide). Une ronde de cleanup (ci-dessous) émet des `PriorityGranted` de la même façon, pendant la phase `cleanup` |
 | `PriorityPassed` | **oui** | `player` | Marque le joueur comme ayant passé |
@@ -25,19 +25,24 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 | `TokenCreated` | non | `player`, `card` (public, `token: true`) | Ajoute le jeton au champ de bataille du joueur (ex. Treasure créé par Strike It Rich) |
 | `PermanentSacrificed` | non | `player`, `card`, `destination` (`graveyard`\|`command`\|`none`) | Champ de bataille → destination ; `none` = jeton, il cesse d'exister. Émis juste après l'événement dont il paie le coût (`SpellCast`, `ManaAbilityActivated`, `AbilityActivated`) |
 | `CardDiscarded` | non | `player`, `card`, `destination` (`graveyard`\|`command`), `hand` (taille de main résultante) | Main → cimetière (défausse à 7 au cleanup, ou coût de capacité : Wild Mongrel) |
-| `AttackerDeclared` | non | `player`, `card` (id), `defender` (joueur attaqué), `tapped` (true) | La créature attaque `defender` et s'engage |
+| `AttackerDeclared` | non | `player`, `card` (id), `defender` (joueur attaqué), `tapped` (`true`, sauf avec vigilance : `false`) | La créature attaque `defender` ; elle s'engage (`tapped`) sauf si elle a la vigilance |
 | `BlockerDeclared` | non | `player`, `blocker` (id), `attacker` (id) | La créature bloque l'attaquant |
 | `DeclarationFinished` | **oui** | `player`, `step` (`attackers`\|`blockers`) | Aucun (le déclarant a terminé ; émis seulement s'il avait encore un choix) |
 | `DamageDealt` | non | `source`, `target`, `amount`, `life` (PV résultants), `combat` (bool, présent pour le combat), `commanderDamage: {key, total}` (si l'attaquant est un commandant) | PV du joueur ciblé ; `commanderDamage[key] = total` |
+| `LifeGained` | non | `player`, `amount`, `life` (PV résultants), `source` (texte) | PV du joueur (`life` en valeur absolue) |
 | `CreatureDamaged` | non | `card`, `amount`, `damage` (marqués au total) | Aucun (les dégâts marqués sont effacés au cleanup) |
 | `CreatureDied` | non | `player`, `card`, `destination` (`graveyard`\|`command`\|`none` pour un jeton) | Champ de bataille → cimetière, ou zone de commandement pour un commandant |
 | `CombatEnded` | non | – | Efface `attacking` / `blocking` des permanents (émis s'il y a eu des attaquants) |
 | `PlayerLost` | non | `player`, `reason` (`life`\|`decked`\|`commander_damage`) | Joueur éliminé |
 | `GameOver` | non | `winner` (id ou `null`), `reason` (`last_player_standing`\|`turn_limit`) | Fin de partie. La pile n'est pas vidée : elle peut rester non vide après `GameOver` (rien ne résout plus, aucun événement n'est ajouté) |
 
+## Mots-clés publics
+
+Les cartes publiques (`PublicCard`) portent `keywords` : liste parmi `flying`, `reach`, `haste`, `vigilance`, `defender`, `menace`, `first_strike`, `double_strike`, `trample`, `deathtouch`, `lifelink`. Le champ est absent si la carte n'a aucun mot-clé.
+
 ## Déclarations de combat
 
-`AttackerDeclared` / `BlockerDeclared` ne sont **pas** des priorités : le déclarant occupe `priority.holder` de la `DecisionRequest` (champ `declaring` = `attackers` | `blockers`) et est réinterrogé après chaque choix jusqu'à l'action `done`. Les étapes `declare_attackers`, `declare_blockers` et `combat_damage` n'existent que s'il y a des attaquants ; chacune ouvre ensuite une ronde de priorité complète.
+`AttackerDeclared` / `BlockerDeclared` ne sont **pas** des priorités : le déclarant occupe `priority.holder` de la `DecisionRequest` (champ `declaring` = `attackers` | `blockers`) et est réinterrogé après chaque choix jusqu'à l'action `done`. Les étapes `declare_attackers`, `declare_blockers`, `combat_damage` n'existent que s'il y a des attaquants (`first_strike_damage`, entre `declare_blockers` et `combat_damage`, n'existe que s'il y a une créature à initiative ou à double initiative parmi les attaquants ou bloqueurs) ; chacune ouvre ensuite une ronde de priorité complète.
 
 ## Défausse au cleanup
 

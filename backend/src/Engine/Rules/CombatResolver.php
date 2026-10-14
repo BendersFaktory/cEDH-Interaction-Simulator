@@ -15,13 +15,32 @@ use App\Engine\Game\GameState;
  */
 final class CombatResolver
 {
-    public function resolve(GameState $s): void
+    public function resolve(GameState $s, bool $firstStrike = false): void
     {
         $attackerOwner = $s->activePlayer;
         /** @var array<string, int> $toCreatures id de créature => dégâts à marquer */
         $toCreatures = [];
+        /** @var array<string, true> $deathtouched créatures touchées par une source à contact mortel */
+        $deathtouched = [];
         /** @var list<array{CardInstance, int, int}> $toPlayers [attaquant, défenseur, dégâts] */
         $toPlayers = [];
+        /** @var array<string, array{CardInstance, int, int}> $lifelink id de source => [source, contrôleur, total] */
+        $lifelink = [];
+
+        $deal = function (CardInstance $source, int $controller, ?CardInstance $target, int $amount) use (&$toCreatures, &$deathtouched, &$lifelink): void {
+            if ($amount <= 0) {
+                return;
+            }
+            if ($target !== null) {
+                $toCreatures[$target->id] = ($toCreatures[$target->id] ?? 0) + $amount;
+                if ($source->hasKeyword(CardInstance::DEATHTOUCH)) {
+                    $deathtouched[$target->id] = true;
+                }
+            }
+            if ($source->hasKeyword(CardInstance::LIFELINK)) {
+                $lifelink[$source->id] = [$source, $controller, ($lifelink[$source->id][2] ?? 0) + $amount];
+            }
+        };
 
         foreach ($s->combat->attackers as $attackerId => $defender) {
             $attacker = $this->find($s, $attackerOwner, $attackerId);
@@ -35,24 +54,38 @@ final class CombatResolver
                     $blockers[] = $blocker;
                 }
             }
+            $power = $attacker->currentPower();
+            $trample = $attacker->hasKeyword(CardInstance::TRAMPLE);
+            $playerAlive = !$s->player($defender)->lost;
 
-            if (($s->combat->blockers[$attackerId] ?? []) === []) {
-                if ($attacker->currentPower() > 0 && !$s->player($defender)->lost) {
-                    $toPlayers[] = [$attacker, $defender, $attacker->currentPower()];
+            if ($power > 0 && $this->strikes($attacker, $firstStrike)) {
+                if (($s->combat->blockers[$attackerId] ?? []) === [] || ($blockers === [] && $trample)) {
+                    if ($playerAlive) {
+                        $toPlayers[] = [$attacker, $defender, $power];
+                        $deal($attacker, $attackerOwner, null, $power);
+                    }
+                } else {
+                    $remaining = $power;
+                    foreach ($blockers as $i => $blocker) {
+                        $isLast = $i === array_key_last($blockers);
+                        $lethal = max(0, $blocker->currentToughness() - $blocker->damage);
+                        if ($lethal > 0 && $attacker->hasKeyword(CardInstance::DEATHTOUCH)) {
+                            $lethal = 1;
+                        }
+                        $assign = ($isLast && !$trample) ? $remaining : min($remaining, $lethal);
+                        $remaining -= $assign;
+                        $deal($attacker, $attackerOwner, $blocker, $assign);
+                    }
+                    if ($trample && $remaining > 0 && $playerAlive) {
+                        $toPlayers[] = [$attacker, $defender, $remaining];
+                        $deal($attacker, $attackerOwner, null, $remaining);
+                    }
                 }
-                continue;
             }
 
-            $remaining = $attacker->currentPower();
-            foreach ($blockers as $i => $blocker) {
-                $isLast = $i === array_key_last($blockers);
-                $assign = $isLast ? $remaining : min($remaining, max(0, $blocker->currentToughness() - $blocker->damage));
-                $remaining -= $assign;
-                if ($assign > 0) {
-                    $toCreatures[$blocker->id] = ($toCreatures[$blocker->id] ?? 0) + $assign;
-                }
-                if ($blocker->currentPower() > 0) {
-                    $toCreatures[$attacker->id] = ($toCreatures[$attacker->id] ?? 0) + $blocker->currentPower();
+            foreach ($blockers as $blocker) {
+                if ($this->strikes($blocker, $firstStrike)) {
+                    $deal($blocker, $defender, $attacker, $blocker->currentPower());
                 }
             }
         }
@@ -75,8 +108,28 @@ final class CombatResolver
                 continue;
             }
             $card->damage += $amount;
+            if (isset($deathtouched[$cardId])) {
+                $card->deathtouchDamage = true;
+            }
             $s->emit('CreatureDamaged', ['card' => $cardId, 'amount' => $amount, 'damage' => $card->damage]);
         }
+
+        foreach ($lifelink as [$source, $controller, $total]) {
+            $player = $s->player($controller);
+            $player->life += $total;
+            $s->emit('LifeGained', ['player' => $controller, 'amount' => $total, 'life' => $player->life, 'source' => $source->name]);
+        }
+    }
+
+    /** Frappe-t-elle à cette étape ? (initiative : étape dédiée ; sinon celles sans initiative + double initiative.) */
+    private function strikes(CardInstance $card, bool $firstStrike): bool
+    {
+        $double = $card->hasKeyword(CardInstance::DOUBLE_STRIKE);
+        if ($firstStrike) {
+            return $double || $card->hasKeyword(CardInstance::FIRST_STRIKE);
+        }
+
+        return $double || !$card->hasKeyword(CardInstance::FIRST_STRIKE);
     }
 
     private function find(GameState $s, int $playerId, string $cardId): ?CardInstance

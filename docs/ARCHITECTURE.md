@@ -76,6 +76,7 @@ Le store Pinia garde `events[]` et `cursor`. L'état affiché est **toujours dé
 - **Format** : 4 joueurs, 40 PV, mini-decks de démo (1 commandant + 39 cartes). `GameFactory::create()` place le commandant en zone de commandement (`PlayerState::$command`).
 - **Lancer un commandant** : `LegalActionGenerator` considère main **et** zone de commandement ; `PlayerState::castCost()` ajoute la taxe (+2 par lancement précédent, `commanderCasts`), compteur incrémenté à chaque lancement même si le sort est contré.
 - **Remplacement** : `GameState::sendToGraveyard()` renvoie un commandant en zone de commandement au lieu du cimetière (résolution et contre). Toujours passer par cette méthode.
+- **Mots-clés de combat** : `CardInstance::$keywords` (constantes `FLYING`…`LIFELINK`, `hasKeyword()`). Légalité des déclarations dans `LegalActionGenerator` (vol/portée, menace, célérité, défenseur), vigilance dans `CombatManager::declareAttacker`, dégâts dans `CombatResolver::resolve($s, $firstStrike)` appelé par les étapes `first_strike_damage` (sautée sans initiative) et `combat_damage` ; contact mortel = `CardInstance::$deathtouchDamage`, lu par `StateBasedActions`.
 - **Dégâts de commandant** : `PlayerState::$commanderDamage` + élimination à 21 (`StateBasedActions`) sont en place ; seul le combat (à venir) les alimentera.
 - **Ton siège** : `GameFactory::create($seed, [0 => 'human:auto', 1 => 'ai:heuristic', ...])`. La simulation se suspend dès que J0 a une action utile ; un fork permet ensuite de changer de ligne depuis n'importe quel checkpoint.
 
