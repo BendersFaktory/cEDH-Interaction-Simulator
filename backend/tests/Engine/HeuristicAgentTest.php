@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Engine;
 
 use App\Engine\Action\Action;
+use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
@@ -15,6 +16,7 @@ use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
 use App\Engine\Game\PriorityState;
+use App\Engine\Game\StackItem;
 use App\Engine\Rules\LegalActionGenerator;
 use PHPUnit\Framework\TestCase;
 
@@ -119,6 +121,19 @@ final class HeuristicAgentTest extends TestCase
         $this->assertSame('red', $action->cardId);
     }
 
+    public function testTapsTheMountainItselfToKeepBothIslandsForTheCounterspell(): void
+    {
+        // 2 Îles, Montagne, Izzet Signet ; artefact à {1} : l'auto-paiement engagerait la première Île (ordre du champ de
+        // bataille) et le Contresort serait payé par le Signet ({R} perdu). L'IA engage d'abord la Montagne à la main.
+        $signet = new CardInstance('sig', 'Izzet Signet', CardInstance::ARTIFACT, 2, null, 0, false, false, 0, 0, 0, 0, '{2}', [], [ActivatedAbility::mana('{U}{R}', '{1}')]);
+        $trinket = new CardInstance('tri', 'Trinket', CardInstance::ARTIFACT, 1, null, 0, false, false, 0, 0, 0, 0, '{1}');
+        $s = $this->state([self::counterspell('c1'), $trinket], [...$this->islands(2), self::land('mnt', 'R'), $signet]);
+
+        $action = $this->decide($s);
+        $this->assertInstanceOf(ActivateAbility::class, $action);
+        $this->assertSame('mnt', $action->cardId);
+    }
+
     public function testHugeThreatIsCastEvenWithoutManaLeftForTheCounterspell(): void
     {
         // 6 Îles : le 5/5 à {3}{U}{U} (valeur 5 + 2) ne laisse qu'une Île, mais il change la partie.
@@ -128,6 +143,43 @@ final class HeuristicAgentTest extends TestCase
         $action = $this->decide($s);
         $this->assertInstanceOf(CastSpell::class, $action);
         $this->assertSame('big', $action->cardId);
+    }
+
+    // --- Profils ---
+
+    public function testAggroProfileSpendsTheManaOfItsCounterspell(): void
+    {
+        $s = $this->state([self::counterspell('c1'), self::bear('b1')], $this->islands(3));
+
+        $action = HeuristicAgent::aggro()->decide($s, 0, (new LegalActionGenerator())->for($s, 0));
+        $this->assertInstanceOf(CastSpell::class, $action);
+        $this->assertSame('b1', $action->cardId);
+    }
+
+    public function testAggroProfileKeepsNoGuard(): void
+    {
+        $s = (new ScenarioBuilder())->creature(0, 'b', 2, 4)->creature(1, 'big', 6, 6)->build(self::CONTROLLERS);
+        $s->phase = Phase::DeclareAttackers;
+        $s->combat->declaring = 'attackers';
+        $s->player(0)->life = 5;
+
+        $this->assertNotInstanceOf(DeclareAttacker::class, $this->decide($s), 'défaut : b reste en garde');
+        $action = HeuristicAgent::aggro()->decide($s, 0, (new LegalActionGenerator())->for($s, 0));
+        $this->assertInstanceOf(DeclareAttacker::class, $action);
+    }
+
+    public function testControlProfileCountersACheapThreat(): void
+    {
+        // Artefact adverse à {2} (menace 2) : sous le seuil par défaut (3), au dessus du seuil du profil contrôle (2).
+        $trinket = new CardInstance('t1', 'Trinket', CardInstance::ARTIFACT, 2, null, 0, false, false, 0, 0, 0, 0, '{2}');
+        $s = $this->state([self::counterspell('c1')], $this->islands(2));
+        $s->stack[] = new StackItem('s1', $trinket, 1);
+        $legal = (new LegalActionGenerator())->for($s, 0);
+
+        $this->assertNotInstanceOf(CastSpell::class, (new HeuristicAgent())->decide($s, 0, $legal));
+        $action = HeuristicAgent::control()->decide($s, 0, $legal);
+        $this->assertInstanceOf(CastSpell::class, $action);
+        $this->assertSame('c1', $action->cardId);
     }
 
     // --- Combat ---
@@ -157,6 +209,36 @@ final class HeuristicAgentTest extends TestCase
         $action = $this->decide($s);
         $this->assertInstanceOf(DeclareAttacker::class, $action);
         $this->assertSame('a', $action->cardId, 'la plus grande endurance (b) reste en garde');
+    }
+
+    public function testAttacksTheMostThreateningOpponentRatherThanTheWeakest(): void
+    {
+        // J1 a 10 PV et un 1/1 ; J2 a 30 PV et un 5/5 cher : l'attaque va vers J2, la menace.
+        $big = new CardInstance('big', 'Big', CardInstance::CREATURE, 6, null, 0, false, false, 5, 5, 0, 0, '{6}');
+        $s = (new ScenarioBuilder())->creature(0, 'flyer', 3, 3, false, 0, [CardInstance::FLYING])->creature(1, 'tiny', 1, 1)->permanent(2, $big)->build(self::CONTROLLERS);
+        $s->phase = Phase::DeclareAttackers;
+        $s->combat->declaring = 'attackers';
+        $s->player(1)->life = 10;
+        $s->player(2)->life = 30;
+        $s->player(3)->lost = true;
+
+        $action = $this->decide($s);
+        $this->assertInstanceOf(DeclareAttacker::class, $action);
+        $this->assertSame(2, $action->defender);
+    }
+
+    public function testLethalAttackBeatsThreat(): void
+    {
+        $big = new CardInstance('big', 'Big', CardInstance::CREATURE, 6, null, 0, false, false, 5, 5, 0, 0, '{6}');
+        $s = (new ScenarioBuilder())->creature(0, 'flyer', 3, 3, false, 0, [CardInstance::FLYING])->creature(1, 'tiny', 1, 1)->permanent(2, $big)->build(self::CONTROLLERS);
+        $s->phase = Phase::DeclareAttackers;
+        $s->combat->declaring = 'attackers';
+        $s->player(1)->life = 3;
+        $s->player(3)->lost = true;
+
+        $action = $this->decide($s);
+        $this->assertInstanceOf(DeclareAttacker::class, $action);
+        $this->assertSame(1, $action->defender);
     }
 
     public function testDoubleBlocksAnAttackerThatNoSingleBlockerKills(): void

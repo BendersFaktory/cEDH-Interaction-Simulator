@@ -78,10 +78,10 @@ final class SimulationApiTest extends WebTestCase
 
         self::assertSame('over', $sim['status']);
         self::assertNull($sim['pending']);
-        self::assertSame(3653, $sim['eventCount'], 'Même partie que bin/smoke.php 42');
+        self::assertSame(4496, $sim['eventCount'], 'Même partie que bin/smoke.php 42');
 
         $events = $this->events($sim['id']);
-        self::assertCount(3653, $events);
+        self::assertCount(4496, $events);
         self::assertSame('GameOver', end($events)['type']);
         $seqs = array_column($events, 'seq');
         $sorted = $seqs;

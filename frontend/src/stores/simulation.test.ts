@@ -85,6 +85,18 @@ describe('création asynchrone', () => {
     expect(store.error).toBeNull()
   })
 
+  it('envoie le profil d\'IA choisi pour chaque siège', async () => {
+    const store = useSimulationStore()
+    fetchMock
+      .mockResolvedValueOnce(ok({ ...base, status: 'over' })) // POST
+      .mockResolvedValueOnce(ok({ ...base, status: 'over' })) // load: get
+      .mockResolvedValueOnce(ok([])) // load: events
+    await store.create(1, true, ['ai:heuristic', 'ai:aggro', 'ai:control'])
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.controllers).toEqual({ 0: 'human:auto', 1: 'ai:aggro', 2: 'ai:control', 3: 'ai:heuristic' })
+  })
+
   it('affiche une erreur quand la simulation échoue', async () => {
     const store = useSimulationStore()
     fetchMock

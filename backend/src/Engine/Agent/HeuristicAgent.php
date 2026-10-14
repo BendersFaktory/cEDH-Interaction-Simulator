@@ -32,13 +32,43 @@ use App\Engine\Mana\ManaPayment;
  * assez de sources non engagées pour le payer (voir `keepCounterMana`).
  * Défausse (main > 7), par ordre : terrain en surplus, carte injouable (couleur introuvable ou coût hors de portée), carte la
  * plus chère ; on garde en dernier les contresorts puis les terrains dont on a besoin (voir `discard`).
- * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible (sauf le commandant s'il peut mourir, et une
+ * Combat : attaque avec toutes ses créatures sur l'adversaire qu'elle peut tuer, sinon le plus menaçant (sauf le commandant s'il peut mourir, et une
  * garde si un adversaire peut me tuer) ; bloque quand le bloqueur survit ou tue l'attaquant, bloque à deux quand la paire
  * tue l'attaquant sans mourir toute entière, et chump-bloque seulement si l'attaque est létale.
- * TODO: évaluateur de menace (ne pas contrer n'importe quoi), gestion du mana, etc.
+ * Profils (`AgentRegistry`) : `ai:heuristic` (défaut ci-dessus), `ai:aggro` (ne garde ni contresort ni bloqueur, attaque
+ * le plus faible), `ai:control` (contre plus large, garde un bloqueur dès la moitié de ses PV menacée). Le profil est figé à
+ * la construction : l'agent reste sans état.
  */
 final class HeuristicAgent implements PlayerAgent
 {
+    /**
+     * @param int  $counterThreshold menace minimale d'un sort adverse pour le contrer (voir `threat`)
+     * @param int  $hugeThreat       valeur d'un de mes sorts pour le lancer malgré la réserve de contresort
+     * @param bool $keepCounterMana  garder de quoi payer son contresort (voir `keepCounterMana`)
+     * @param int  $guardFactor      une créature reste en garde si la force d'un adversaire × ce facteur atteint mes PV (0 : jamais)
+     * @param bool $targetByThreat   cible d'attaque : le plus menaçant (sinon le plus faible en PV), après la cible létale
+     */
+    public function __construct(
+        private readonly int $counterThreshold = 3,
+        private readonly int $hugeThreat = 6,
+        private readonly bool $keepCounterMana = true,
+        private readonly int $guardFactor = 1,
+        private readonly bool $targetByThreat = true,
+    ) {
+    }
+
+    /** Agressif : tout pour l'attaque, aucune réserve de contresort ni garde, sur l'adversaire le plus faible. */
+    public static function aggro(): self
+    {
+        return new self(keepCounterMana: false, guardFactor: 0, targetByThreat: false);
+    }
+
+    /** Contrôle : contre dès une menace de 2, ne lâche sa réserve que pour un sort énorme, garde un bloqueur plus tôt. */
+    public static function control(): self
+    {
+        return new self(counterThreshold: 2, hugeThreat: 8, guardFactor: 2);
+    }
+
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
         $discards = array_values(array_filter($legal, static fn (Action $a) => $a instanceof Discard));
@@ -58,7 +88,7 @@ final class HeuristicAgent implements PlayerAgent
 
         $top = $state->topOfStack();
 
-        if ($top !== null && $top->controller !== $playerId && $this->threat($state, $playerId, $top) >= self::COUNTER_THRESHOLD) {
+        if ($top !== null && $top->controller !== $playerId && $this->threat($state, $playerId, $top) >= $this->counterThreshold) {
             foreach ($legal as $action) {
                 if ($action instanceof CastSpell && $this->isCounter($state, $action)
                     && $action->targets === ['stack:' . $top->id]) {
@@ -120,9 +150,9 @@ final class HeuristicAgent implements PlayerAgent
             $casts = $this->keepCounterMana($state, $playerId, $casts);
             if ($casts !== []) {
                 $casts = $this->leastWasteful($state, $playerId, $casts);
-                $pick = $casts[$state->rng->int(0, count($casts) - 1)];
+                $pick = $this->withBestX($state, $casts[$state->rng->int(0, count($casts) - 1)], $casts);
 
-                return $this->withBestX($state, $pick, $casts);
+                return $this->manaSparingCounter($state, $playerId, $pick, $legal) ?? $pick;
             }
 
             // Plus rien à lancer, en phase principale 2 : jetons (Kher Keep), puis pioche (Tome ; Mind Stone seulement main vide).
@@ -153,9 +183,6 @@ final class HeuristicAgent implements PlayerAgent
 
         return $t !== null && str_starts_with($t, 'player:') ? (int) substr($t, 7) : null;
     }
-
-    /** Menace minimale d'un sort adverse pour justifier un contresort. */
-    private const COUNTER_THRESHOLD = 3;
 
     /**
      * Évaluateur de menace d'un élément de pile adverse : ce qui me vise (ou protège mon sort d'un contresort adverse)
@@ -306,13 +333,10 @@ final class HeuristicAgent implements PlayerAgent
         return array_values(array_filter($kept, static fn (CastSpell $c, int $i) => $waste[$i] === $min, ARRAY_FILTER_USE_BOTH));
     }
 
-    /** Menace minimale d'un de mes sorts pour le lancer malgré la réserve de contresort (« menace énorme »). */
-    private const HUGE_THREAT = 6;
-
-    /** Sort qui change la partie : sa valeur (comme `threat()`) atteint HUGE_THREAT ; on le lance même sans garder le contresort. */
+    /** Sort qui change la partie : sa valeur (comme `threat()`) atteint `hugeThreat` ; on le lance même sans garder le contresort. */
     private function isGameChanging(CardInstance $card, CastSpell $cast): bool
     {
-        return in_array($card->effect, [null, 'damage'], true) && $this->cardValue($card, $cast->x) >= self::HUGE_THREAT;
+        return in_array($card->effect, [null, 'damage'], true) && $this->cardValue($card, $cast->x) >= $this->hugeThreat;
     }
 
     /** Valeur d'un sort : valeur de mana (+ X, + dégâts), +1 pour une créature, +1 pour une créature de force >= 3. */
@@ -334,6 +358,57 @@ final class HeuristicAgent implements PlayerAgent
         $copy->payWithPlan($plan);
 
         return max(0, $copy->pool->total() - $before);
+    }
+
+    /**
+     * Paiement qui épargne le contresort : si le paiement automatique de `$cast` ne laisse de quoi payer le contresort réservé
+     * qu'en perdant du mana (Signet à la place d'une Île), alors qu'un paiement sur les autres sources existe, renvoie la
+     * prochaine capacité de mana de ce paiement à activer à la main (le sort sera lancé ensuite, payé par la réserve).
+     * Null : lancer directement. La réserve courante est ignorée pour le contresort (elle se vide à la fin de l'étape).
+     *
+     * @param list<Action> $legal
+     */
+    private function manaSparingCounter(GameState $state, int $playerId, CastSpell $cast, array $legal): ?ActivateAbility
+    {
+        $p = $state->player($playerId);
+        $card = $p->findCastable($cast->cardId);
+        $counter = $this->reservedCounter($state, $playerId);
+        if ($card === null || $counter === null || $card->effect === 'mana') {
+            return null;
+        }
+        $after = $this->afterCast($state, $p, $card, $cast->x);
+        if ($after === null) {
+            return null;
+        }
+        $after->pool->clear();
+        if ($this->counterWaste($state, $after, $counter) === 0) {
+            return null;
+        }
+        // Sources du contresort mises de côté (engagées sur une copie), puis paiement du sort sur le reste.
+        $spared = PlayerState::fromArray($p->toArray());
+        $spared->pool->clear();
+        $counterPlan = ManaPayment::plan($spared, $spared->castCost($counter), 0, $state->turn, null, $counter);
+        if ($counterPlan === null) {
+            return null;
+        }
+        $spared = PlayerState::fromArray($p->toArray());
+        foreach ([...$counterPlan->taps, ...$counterPlan->converters] as $use) {
+            $spared->findOnBattlefield($use['card'])->tapped = true;
+        }
+        $spellCard = $spared->findCastable($card->id);
+        $plan = ManaPayment::plan($spared, $spared->castCost($spellCard), $cast->x, $state->turn, null, $spellCard);
+        $next = $plan->taps[0] ?? $plan?->converters[0] ?? null;
+        if ($next === null) {
+            return null;
+        }
+        foreach ($legal as $a) {
+            if ($a instanceof ActivateAbility && $a->mana && $a->cardId === $next['card']
+                && $a->abilityIndex === $next['ability'] && $a->option === $next['option']) {
+                return $a;
+            }
+        }
+
+        return null;
     }
 
     /** Idem pour une capacité à coût de mana (jetons, pioche) : jamais si elle prive l'IA de son contresort. */
@@ -361,6 +436,9 @@ final class HeuristicAgent implements PlayerAgent
     /** Le moins cher des contresorts de la main, s'il est payable avec l'état actuel ; sinon null. */
     private function reservedCounter(GameState $state, int $playerId): ?CardInstance
     {
+        if (!$this->keepCounterMana) {
+            return null;
+        }
         $p = $state->player($playerId);
         $best = null;
         foreach ($p->hand as $card) {
@@ -570,14 +648,7 @@ final class HeuristicAgent implements PlayerAgent
         if ($attacks === []) {
             return $this->finish($legal, $playerId);
         }
-        $target = null;
-        foreach ($attacks as $a) {
-            $life = $state->player($a->defender)->life;
-            if ($target === null || $life < $state->player($target)->life
-                || ($life === $state->player($target)->life && $a->defender < $target)) {
-                $target = $a->defender;
-            }
-        }
+        $target = $this->attackTarget($state, $attacks);
         foreach ($attacks as $a) {
             if ($a->defender === $target) {
                 return $a;
@@ -588,12 +659,60 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
+     * Adversaire visé : d'abord celui que l'attaque peut tuer (force des attaquants possibles contre lui + celle des
+     * créatures qui l'attaquent déjà >= ses PV), puis le plus menaçant (`boardThreat`), puis le plus faible en PV, puis le
+     * plus petit id. Le choix reste stable d'une déclaration à l'autre : la cible létale le reste, et la menace ne dépend
+     * pas des attaquants.
+     *
+     * @param list<DeclareAttacker> $attacks
+     */
+    private function attackTarget(GameState $state, array $attacks): int
+    {
+        $power = [];
+        foreach ($attacks as $a) {
+            $power[$a->defender][$a->cardId] = max(0, $this->battlefieldCard($state, $a->player(), $a->cardId)?->currentPower() ?? 0);
+        }
+        $best = null;
+        foreach ($power as $defender => $byCard) {
+            $total = array_sum($byCard);
+            foreach ($state->combat->attackers as $attackerId => $attacked) {
+                if ($attacked === $defender) {
+                    $total += max(0, $this->battlefieldCard($state, $state->activePlayer, (string) $attackerId)?->currentPower() ?? 0);
+                }
+            }
+            $life = $state->player($defender)->life;
+            $score = [$total >= $life ? 0 : 1, -array_sum($byCard), $this->targetByThreat ? -$this->boardThreat($state, $defender) : 0, $life, $defender];
+            if ($best === null || $score < $best[1]) {
+                $best = [$defender, $score];
+            }
+        }
+
+        return $best[0];
+    }
+
+    /** Menace d'un joueur sur la table : somme des valeurs (`cardValue`) de ses permanents non-terrains. */
+    private function boardThreat(GameState $state, int $playerId): int
+    {
+        $threat = 0;
+        foreach ($state->player($playerId)->battlefield as $card) {
+            if (!$card->isLand()) {
+                $threat += $this->cardValue($card, 0);
+            }
+        }
+
+        return $threat;
+    }
+
+    /**
      * Créature gardée à la maison pour bloquer : seulement si la force cumulée d'un adversaire (créatures sans défenseur)
      * atteint mes PV et qu'aucune autre créature capable de bloquer ne reste déjà (créature à mana, sans force, ou avec
      * vigilance). On garde la plus grande endurance (égalité : la première du champ de bataille). Null sinon.
      */
     private function guard(GameState $state, int $playerId): ?string
     {
+        if ($this->guardFactor === 0) {
+            return null;
+        }
         $me = $state->player($playerId);
         $danger = false;
         foreach ($state->players as $opponent) {
@@ -606,7 +725,7 @@ final class HeuristicAgent implements PlayerAgent
                     $power += max(0, $c->currentPower());
                 }
             }
-            $danger = $danger || $power >= $me->life;
+            $danger = $danger || $power * $this->guardFactor >= $me->life;
         }
         if (!$danger) {
             return null;

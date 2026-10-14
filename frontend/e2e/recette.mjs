@@ -416,7 +416,8 @@ async function s14({ page, log, shot, info, problem, enabled, tryClick, openGame
   }
   let blocked = false, seed14 = null
   const tried = []
-  for (const seed of [7, 18, 42, 6, 16, 122, 99, 150, 1, 2, 3, 4, 5]) {
+  // Graines où l'IA attaque J0 tôt depuis la cible d'attaque par menace (2026-10-14) : 49 (tour 6), 13, 24, 59, 22.
+  for (const seed of [49, 13, 24, 59, 22, 7, 18, 42, 6, 16, 122, 99, 150]) {
     if (blocked) break
     tried.push(seed)
     const sim = await api.createHuman(seed)
