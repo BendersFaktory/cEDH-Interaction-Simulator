@@ -28,7 +28,10 @@ use App\Engine\Mana\ManaPayment;
  *  3. à son tour, en phase principale, pile vide : lance un sort au hasard (jamais sur soi-même) ;
  *  4. sinon passe.
  * Triggers : posés dans l'ordre de la file ; une cible de dégâts est l'adversaire vivant le plus faible.
- * Défausse (main > 7) : un terrain en surplus (≥ 5 en jeu), sinon la carte la plus chère, à égalité le plus petit id.
+ * Garder de quoi contrer : avec un contresort payable en main, ne lance (sort ou capacité à coût de mana) que ce qui laisse
+ * assez de sources non engagées pour le payer (voir `keepCounterMana`).
+ * Défausse (main > 7), par ordre : terrain en surplus, carte injouable (couleur introuvable ou coût hors de portée), carte la
+ * plus chère ; on garde en dernier les contresorts puis les terrains dont on a besoin (voir `discard`).
  * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible ; bloque quand le bloqueur survit
  * ou tue l'attaquant (un seul bloqueur par attaquant), et chump-bloque seulement si l'attaque est létale.
  * TODO: évaluateur de menace (ne pas contrer n'importe quoi), gestion du mana, etc.
@@ -113,6 +116,7 @@ final class HeuristicAgent implements PlayerAgent
                 }
             }
             $casts = array_values(array_filter($casts, fn (CastSpell $c) => $this->worthCasting($state, $playerId, $c)));
+            $casts = $this->keepCounterMana($state, $playerId, $casts);
             if ($casts !== []) {
                 $casts = $this->leastWasteful($state, $playerId, $casts);
                 $pick = $casts[$state->rng->int(0, count($casts) - 1)];
@@ -125,7 +129,8 @@ final class HeuristicAgent implements PlayerAgent
                 foreach (['token', 'draw'] as $effect) {
                     foreach ($legal as $action) {
                         $ability = $action instanceof ActivateAbility ? $this->ability($state, $action) : null;
-                        if ($ability?->effect === $effect && (!$ability->sacrifice || $state->player($playerId)->hand === [])) {
+                        if ($ability?->effect === $effect && (!$ability->sacrifice || $state->player($playerId)->hand === [])
+                            && $this->abilityKeepsCounterMana($state, $playerId, $action, $ability)) {
                             return $action;
                         }
                     }
@@ -234,11 +239,11 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
-     * Copie de l'état du joueur après avoir payé `$card` (sans effet de bord) ; null si inpayable ou si le coût a un {X}.
+     * Copie de l'état du joueur après avoir payé `$card` (sans effet de bord) ; null si inpayable ou si le coût a un {X} sans `$x`.
      *
      * @return PlayerState|null
      */
-    private function afterCast(GameState $state, PlayerState $p, CardInstance $card): ?PlayerState
+    private function afterCast(GameState $state, PlayerState $p, CardInstance $card, ?int $x = null): ?PlayerState
     {
         $copy = PlayerState::fromArray($p->toArray());
         $copyCard = $copy->findCastable($card->id);
@@ -246,16 +251,103 @@ final class HeuristicAgent implements PlayerAgent
             return null;
         }
         $cost = $copy->castCost($copyCard);
-        if ($cost->hasX()) {
+        if ($cost->hasX() && $x === null) {
             return null;
         }
-        $plan = ManaPayment::plan($copy, $cost, 0, $state->turn, null, $copyCard);
+        $plan = ManaPayment::plan($copy, $cost, $x ?? 0, $state->turn, null, $copyCard);
         if ($plan === null) {
             return null;
         }
         $copy->payWithPlan($plan);
 
         return $copy;
+    }
+
+    /**
+     * Garder de quoi contrer : si la main contient un contresort payable maintenant, on n'en lance pas d'autre sort que ceux
+     * qui laissent assez de mana (réserve et sources non engagées) pour payer le moins cher des contresorts. Exceptions : un
+     * rituel (il ajoute du mana), et une rafale de dégâts létale pour un joueur (ne rien faire serait pire). Si le contresort
+     * n'est pas payable de toute façon (couleur absente, sources déjà engagées), la réserve est sans objet et rien n'est filtré.
+     *
+     * @param list<CastSpell> $casts
+     * @return list<CastSpell>
+     */
+    private function keepCounterMana(GameState $state, int $playerId, array $casts): array
+    {
+        $reserve = $this->reservedCounter($state, $playerId);
+        if ($reserve === null) {
+            return $casts;
+        }
+        $p = $state->player($playerId);
+
+        return array_values(array_filter($casts, function (CastSpell $c) use ($state, $p, $reserve): bool {
+            $card = $p->findCastable($c->cardId);
+            if ($card === null || $card->effect === 'mana' || $this->isLethalBurn($state, $card, $c)) {
+                return true;
+            }
+            $after = $this->afterCast($state, $p, $card, $c->x);
+
+            return $after !== null && $this->canPayCounter($state, $after, $reserve);
+        }));
+    }
+
+    /** Idem pour une capacité à coût de mana (jetons, pioche) : jamais si elle prive l'IA de son contresort. */
+    private function abilityKeepsCounterMana(GameState $state, int $playerId, ActivateAbility $action, ActivatedAbility $ability): bool
+    {
+        $reserve = $this->reservedCounter($state, $playerId);
+        if ($reserve === null) {
+            return true;
+        }
+        $copy = PlayerState::fromArray($state->player($playerId)->toArray());
+        if ($ability->manaCost !== null && !$ability->manaCost->hasX()) {
+            $plan = ManaPayment::plan($copy, $ability->manaCost, 0, $state->turn, $action->cardId);
+            if ($plan === null) {
+                return true;
+            }
+            $copy->payWithPlan($plan);
+        }
+        if ($ability->tap && ($source = $copy->findOnBattlefield($action->cardId)) !== null) {
+            $source->tapped = true;
+        }
+
+        return $this->canPayCounter($state, $copy, $reserve);
+    }
+
+    /** Le moins cher des contresorts de la main, s'il est payable avec l'état actuel ; sinon null. */
+    private function reservedCounter(GameState $state, int $playerId): ?CardInstance
+    {
+        $p = $state->player($playerId);
+        $best = null;
+        foreach ($p->hand as $card) {
+            if ($card->effect === 'counter' && ($best === null || $card->cost < $best->cost)) {
+                $best = $card;
+            }
+        }
+        if ($best === null || ManaPayment::plan($p, $p->castCost($best), 0, $state->turn, null, $best) === null) {
+            return null;
+        }
+
+        return $best;
+    }
+
+    private function canPayCounter(GameState $state, PlayerState $after, CardInstance $counter): bool
+    {
+        return ManaPayment::plan($after, $after->castCost($counter), 0, $state->turn, null, $counter) !== null;
+    }
+
+    /** Dégâts qui tuent un joueur vivant (X compris) : on les lance même en vidant le mana du contresort. */
+    private function isLethalBurn(GameState $state, CardInstance $card, CastSpell $cast): bool
+    {
+        if ($card->effect !== 'damage') {
+            return false;
+        }
+        foreach ($cast->targets as $t) {
+            if (str_starts_with($t, 'player:') && $state->player((int) substr($t, 7))->life <= $card->amount + $cast->x) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -321,21 +413,99 @@ final class HeuristicAgent implements PlayerAgent
         return $best[0];
     }
 
-    /** @param list<Discard> $discards */
+    /**
+     * Défausse d'une carte (la décision est reprise carte par carte). Score le plus haut défaussé en premier :
+     *  1. terrain en surplus (>= 5 en jeu, ou >= 3 en jeu et >= 3 en main) : 1000, +5 s'il n'apporte aucune couleur nouvelle ;
+     *  2. carte injouable : couleur que ni le jeu ni les terrains en main ne produisent (avec au moins 3 terrains en jeu, avant
+     *     cela les couleurs ne sont pas fixées), ou valeur de mana à plus de 3 au dessus du mana potentiel (sources en jeu +
+     *     terrains en main, au moins 4) : 800 ;
+     *  3. sinon la carte la plus chère (sa valeur de mana) ;
+     *  4. on garde en dernier : un terrain utile (-1, ou -1000 s'il y en a moins de 4 en jeu) et un contresort (-500).
+     * Égalité : plus petit id.
+     *
+     * @param list<Discard> $discards
+     */
     private function discard(GameState $state, array $discards, int $playerId): Action
     {
         $p = $state->player($playerId);
+        $handLandCards = array_values(array_filter($p->hand, static fn (CardInstance $c) => $c->isLand()));
         $lands = count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isLand()));
+        $handLands = count($handLandCards);
+        $produced = $this->producedSymbols($p->battlefield);
+        $reachable = $this->producedSymbols([...$p->battlefield, ...$handLandCards]);
+        $potential = $this->manaPotential($p->battlefield) + $handLands;
         $best = null;
         foreach ($discards as $d) {
             $card = $p->findInHand($d->cardId);
-            $score = $card->isLand() ? ($lands >= 5 ? 1000 : -1) : $card->cost;
+            if ($card->isLand()) {
+                if ($lands >= 5 || ($lands >= 3 && $handLands >= 3)) {
+                    $score = 1000 + (array_diff_key($this->producedSymbols([$card]), $produced) === [] ? 5 : 0);
+                } else {
+                    $score = $lands < 4 ? -1000 : -1;
+                }
+            } else {
+                $cost = $card->manaCost();
+                $impossible = $lands >= 3 && array_diff_key($cost->colored, $reachable) !== [];
+                if ($impossible || $cost->generic + array_sum($cost->colored) + count($cost->hybrid) > max($potential, 4) + 3) {
+                    $score = 800;
+                } else {
+                    $score = $card->effect === 'counter' ? -500 : $card->cost;
+                }
+            }
             if ($best === null || $score > $best[1] || ($score === $best[1] && $card->id < $best[0]->cardId)) {
                 $best = [$d, $score];
             }
         }
 
         return $best[0];
+    }
+
+    /**
+     * Symboles (WUBRGC) que ces permanents savent produire (toutes options de leurs capacités de mana ; un terrain en main
+     * compte via `abilities()`).
+     *
+     * @param iterable<CardInstance> $cards
+     * @return array<string, true>
+     */
+    private function producedSymbols(iterable $cards): array
+    {
+        $set = [];
+        foreach ($cards as $card) {
+            foreach ($card->abilities() as $ability) {
+                if ($ability->isManaAbility) {
+                    foreach ($ability->options as $option) {
+                        foreach ($option as $color) {
+                            $set[$color->symbol()] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return $set;
+    }
+
+    /**
+     * Mana qu'ils peuvent produire en un tour : somme, par permanent, de sa meilleure option (Sol Ring : 2).
+     *
+     * @param iterable<CardInstance> $cards
+     */
+    private function manaPotential(iterable $cards): int
+    {
+        $total = 0;
+        foreach ($cards as $card) {
+            $best = 0;
+            foreach ($card->abilities() as $ability) {
+                if ($ability->isManaAbility) {
+                    foreach ($ability->options as $option) {
+                        $best = max($best, count($option));
+                    }
+                }
+            }
+            $total += $best;
+        }
+
+        return $total;
     }
 
     /** @param list<Action> $legal */

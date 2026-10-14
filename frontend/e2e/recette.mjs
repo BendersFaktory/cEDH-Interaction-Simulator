@@ -323,6 +323,116 @@ async function run() {
   await shot('13b-stops-defaut')
   if (resetRes.status() !== 200) problems.push(`recette stops : PUT /stops (Défaut) répond ${resetRes.status()}`)
 
+  // 14 : J0 BLOQUE. J0 joue ses terrains, lance des créatures, n'attaque jamais et laisse l'IA l'attaquer ; au premier groupe
+  // « Bloquer » il bloque, puis le journal doit contenir « J0 bloque ». Si l'IA n'attaque pas J0 dans la fenêtre, graine suivante.
+  let blocked = false, seed14 = null
+  const tried14 = []
+  for (const seed of [7, 18, 42, 6, 16, 122, 99, 150, 1, 2, 3, 4, 5]) {
+    if (blocked) break
+    tried14.push(seed)
+    await page.fill('input[placeholder="aléatoire"]', String(seed))
+    const prev = (await info())?.match(/#(\d+)/)?.[1] ?? null
+    await page.click('text=Nouvelle partie Commander')
+    await page.waitForFunction((o) => (document.querySelector('.topbar .muted')?.textContent ?? '').match(/#(\d+)/)?.[1] !== o, prev)
+    await page.waitForSelector('.actions', { timeout: TIMEOUT })
+    let blockClicked = false
+    for (let i = 0; i < 400 && !blocked; i++) {
+      if (!(await page.locator('.actions').count())) break
+      const block = page.locator('.actions h4:has-text("Bloquer") ~ button:not([disabled]):has-text("avec")').first()
+      const creature = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):is(:has-text("Bears"), :has-text("Spider"), :has-text("Recluse"), :has-text("Mongrel"), :has-text("Commandant"))').first()
+      if (await block.count()) {
+        if (await tryClick(block)) {
+          blockClicked = true
+          await page.waitForTimeout(400)
+          blocked = (await page.locator('text=/J0 bloque/').count()) > 0
+          if (blocked) seed14 = seed
+        }
+      } else if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
+      else if (await enabled('Terminer la déclaration').count()) await tryClick(enabled('Terminer la déclaration'))
+      else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
+      else if (await creature.count()) await tryClick(creature)
+      else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
+      await page.waitForTimeout(100)
+      // Fenêtre dépassée sans que l'IA attaque J0 : graine suivante.
+      if (i > 250 && !blockClicked) break
+    }
+  }
+  const blockLine = blocked ? (await page.locator('text=/J0 bloque/').first().textContent())?.replace(/\s+/g, ' ').trim() : '(absent)'
+  log('14 graine retenue :', seed14, '(essayées :', tried14.join(','), ') | J0 a bloqué :', blocked, '| journal :', blockLine, '|', await info())
+  await page.locator('text=/J0 bloque/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('14-blocage')
+  if (!blocked) problems.push('recette blocage : J0 n\'a jamais pu bloquer un attaquant de l\'IA')
+
+  // 15 : J0 RÉPARTIT ses dégâts. L'IA ne double-bloque jamais (sauf menace, et aucune carte à menace n'est dans les decks de 40 cartes) :
+  // on crée donc, par l'API, une partie où J0 ET J1 sont humains (human:auto), puis on la pilote dans l'UI. J0 attaque J1 avec une
+  // seule créature ; J1 la bloque avec deux créatures ; J0 choisit alors une répartition AUTRE que celle par défaut.
+  // Aucune dépendance au comportement de l'IA : seules les mains tirées comptent, d'où le balayage de graines si J1 n'a pas deux bloqueurs.
+  const CREATURES = ':is(:has-text("Llanowar"), :has-text("Mongrel"), :has-text("Visionary"), :has-text("Golem"), :has-text("Myr"), :has-text("Pillard"), :has-text("Pyromancer"), :has-text("Mimic"), :has-text("Pinger"), :has-text("Bears"), :has-text("Commandant"))'
+  let assigned = false, seed15 = null
+  const tried15 = []
+  let assignText = '(absent)'
+  // Graine connue d'abord (3 : J1 a deux bloqueurs), puis balayage 1..25 si les decks changent.
+  for (const seed of [3, ...Array.from({ length: 25 }, (_, i) => i + 1).filter((n) => n !== 3)]) {
+    if (assigned) break
+    tried15.push(seed)
+    const res = await fetch('http://127.0.0.1:8000/api/simulations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seed, controllers: { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' } }),
+    })
+    const created = await res.json()
+    await page.fill('input[type=number] >> nth=1', String(created.id))
+    await page.click('text=Ouvrir')
+    await page.waitForTimeout(800)
+    await page.click('button[title="Fin"]')
+    await page.waitForSelector('.actions', { timeout: TIMEOUT })
+    let attacked = false
+    for (let i = 0; i < 400 && !assigned; i++) {
+      if (!(await page.locator('.actions').count())) break
+      const seat = (await page.locator('.actions h3').textContent().catch(() => ''))?.match(/J(\d)/)?.[1]
+      const options = page.locator('.actions h4:has-text("Répartir les dégâts de combat") ~ button:not([disabled])')
+      const other = page.locator('.actions h4:has-text("Répartir les dégâts de combat") ~ button:not([disabled]):not(:has-text("(par défaut)"))').first()
+      const attack = page.locator('.actions h4:has-text("Attaquer") ~ button:not([disabled]):has-text("Attaquer J1")').first()
+      const block = page.locator('.actions h4:has-text("Bloquer") ~ button:not([disabled])').first()
+      const creature = page.locator(`.actions h4:has-text("Sorts") ~ button:not([disabled])${CREATURES}`).first()
+      if (await other.count()) {
+        const total = await options.count()
+        const text = (await other.textContent())?.replace(/\s+/g, ' ').trim()
+        if (await tryClick(other)) {
+          assignText = text
+          await page.waitForTimeout(500)
+          assigned = (await page.locator('text=/inflige/').count()) > 0
+          seed15 = seed
+          log('15 répartitions proposées :', total, '| choisie :', assignText)
+        }
+      } else if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
+      // J1 (siège « bloqueur ») bloque l'attaquant avec tout ce qu'il peut, il n'attaque jamais.
+      else if (seat === '1' && await block.count()) await tryClick(block)
+      // J0 attaque J1 avec une seule créature, puis termine la déclaration.
+      else if (seat === '0' && !attacked && await attack.count()) { if (await tryClick(attack)) attacked = true }
+      else if (await enabled('Terminer la déclaration').count()) await tryClick(enabled('Terminer la déclaration'))
+      else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
+      else if (await creature.count()) await tryClick(creature)
+      else if (await enabled('Priorité').count()) { await tryClick(enabled('Priorité')); if (seat === '0') attacked = false }
+      await page.waitForTimeout(100)
+    }
+  }
+  // Le journal affiche « <id> subit N dégâts » pour chaque bloqueur blessé : on le compare à la répartition choisie.
+  const hurt = assigned ? (await page.locator('text=/subit \\d+ dégâts/').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim()) : []
+  log('15 graine retenue :', seed15, '(essayées :', tried15.join(','), ') | répartition choisie :', assignText)
+  log('15 journal des dégâts subis :', hurt.slice(-4).join(' ; '))
+  await page.locator('text=/subit \\d+ dégâts/').last().scrollIntoViewIfNeeded().catch(() => {}); await shot('15-repartition')
+  if (!assigned) problems.push('recette répartition : J0 n\'a pas pu répartir les dégâts d\'un attaquant bloqué par deux créatures')
+  else {
+    // Répartition annoncée « N → Nom (id) » par bloqueur : N > 0 => « id subit N dégâts » ; N = 0 => aucune ligne pour ce bloqueur.
+    const parts = [...assignText.matchAll(/(\d+) → [^,(]*\((p\d+_c\d+)\)/g)]
+    if (parts.length < 2) problems.push(`recette répartition : répartition illisible : ${assignText}`)
+    for (const [, n, id] of parts) {
+      const seen = hurt.some((t) => new RegExp(`${id} subit ${n} dégâts`).test(t))
+      if (Number(n) > 0 && !seen) problems.push(`recette répartition : « ${id} subit ${n} dégâts » absent du journal (${assignText})`)
+      if (Number(n) === 0 && hurt.some((t) => t.includes(`${id} subit`))) problems.push(`recette répartition : ${id} a reçu des dégâts alors que 0 lui était assigné (${assignText})`)
+    }
+  }
+
   // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
   const unexpected = problems.filter((p) => !/404/.test(p))
   log('\nPROBLÈMES inattendus:', unexpected.length ? '\n' + unexpected.join('\n') : 'aucun')
