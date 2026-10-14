@@ -7,6 +7,7 @@ namespace App\Engine\Rules;
 use App\Engine\Ability\AbilityManager;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
+use App\Engine\Action\AssignCombatDamage;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
@@ -17,6 +18,7 @@ use App\Engine\Action\PlayLand;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
+use App\Engine\Game\CombatState;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
@@ -40,6 +42,9 @@ final class LegalActionGenerator
             return $this->triggerActions($s, $playerId);
         }
 
+        if ($s->combat->declaring === CombatState::DAMAGE) {
+            return $this->assignmentActions($s, $playerId);
+        }
         if ($s->combat->declaring !== null) {
             return $this->declarationActions($s, $playerId);
         }
@@ -180,6 +185,37 @@ final class LegalActionGenerator
         }
 
         return $actions;
+    }
+
+    /**
+     * Répartition des dégâts de combat (contrôleur humain de l'attaquant) : une action par répartition légale du
+     * prochain attaquant concerné (DamageAssignment::options, la répartition par défaut en tête), pas de « passer ».
+     * Vide pour un siège IA (répartition par défaut, sans décision) ou quand il n'y a qu'une répartition possible.
+     *
+     * @return list<AssignCombatDamage>
+     */
+    public function assignmentActions(GameState $s, int $playerId): array
+    {
+        if ($playerId !== $s->activePlayer || !DamageAssignment::chooses($s)) {
+            return [];
+        }
+        $firstStrike = $s->phase === Phase::FirstStrikeDamage;
+        foreach (array_keys($s->combat->attackers) as $attackerId) {
+            $attackerId = (string) $attackerId;
+            if (isset($s->combat->assignments[$attackerId])) {
+                continue;
+            }
+            $options = DamageAssignment::options($s, $attackerId, $firstStrike);
+            if (count($options) > 1) {
+                return array_map(
+                    static fn (array $vector, int $i) => new AssignCombatDamage($playerId, $attackerId, $vector, $i === 0),
+                    $options,
+                    array_keys($options),
+                );
+            }
+        }
+
+        return [];
     }
 
     /**

@@ -4,6 +4,7 @@ import ActionPanel from './components/ActionPanel.vue'
 import EventLog from './components/EventLog.vue'
 import GameBoard from './components/GameBoard.vue'
 import PauseBar from './components/PauseBar.vue'
+import StopsPanel from './components/StopsPanel.vue'
 import PlaybackControls from './components/PlaybackControls.vue'
 import { useSimulationStore } from './stores/simulation'
 
@@ -34,6 +35,7 @@ const playAsJ0 = ref(true)
     <aside>
       <PlaybackControls />
       <ActionPanel />
+      <StopsPanel />
       <PauseBar />
       <EventLog />
     </aside>

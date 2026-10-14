@@ -295,6 +295,34 @@ async function run() {
   if (!mimicCast) problems.push('recette mana conditionnel : J0 n\'a pas pu lancer Eldrazi Mimic avec le mana du Temple')
   else if (leftRestricted) problems.push('recette mana conditionnel : le mana restreint n\'a pas été dépensé pour Eldrazi Mimic')
 
+  // 13 : stops. J0 humain ; on ne garde que l'étape « Fin de tour » (options décochées), on applique, la partie reprend jusqu'à cette étape ; puis « Défaut ».
+  await page.check('text=Je joue J0 >> input')
+  await page.fill('input[placeholder="aléatoire"]', '7')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForSelector('.stops', { timeout: TIMEOUT })
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  for (const box of await page.locator('.stops input[type=checkbox]').all()) if (await box.isChecked()) await box.uncheck()
+  await page.locator('.stops label:has-text("Fin de tour") input').check()
+  const [applyRes] = await Promise.all([
+    page.waitForResponse((r) => /\/api\/simulations\/\d+\/stops$/.test(r.url()) && r.request().method() === 'PUT'),
+    page.click('.stops button:has-text("Appliquer")'),
+  ])
+  const applyBody = await applyRes.json().catch(() => ({}))
+  await page.waitForTimeout(800)
+  const stepsNow = await page.locator('.stops input[type=checkbox]:checked').evaluateAll((els) => els.map((e) => e.parentElement.textContent.trim()))
+  log('13 Appliquer : HTTP', applyRes.status(), '| cases cochées :', JSON.stringify(stepsNow), '| décision :', (await page.locator('.actions h3').textContent().catch(() => '(aucune)'))?.trim(), '|', await info(), '|', await prog())
+  await shot('13a-stops-applique')
+  if (applyRes.status() !== 200) problems.push(`recette stops : PUT /stops répond ${applyRes.status()} après Appliquer`)
+  if (!applyBody.id) problems.push('recette stops : réponse de PUT /stops sans simulation')
+  const [resetRes] = await Promise.all([
+    page.waitForResponse((r) => /\/api\/simulations\/\d+\/stops$/.test(r.url()) && r.request().method() === 'PUT'),
+    page.click('.stops button:has-text("Défaut")'),
+  ])
+  await page.waitForTimeout(500)
+  log('13 Défaut : HTTP', resetRes.status(), '|', await info())
+  await shot('13b-stops-defaut')
+  if (resetRes.status() !== 200) problems.push(`recette stops : PUT /stops (Défaut) répond ${resetRes.status()}`)
+
   // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
   const unexpected = problems.filter((p) => !/404/.test(p))
   log('\nPROBLÈMES inattendus:', unexpected.length ? '\n' + unexpected.join('\n') : 'aucun')
