@@ -346,14 +346,17 @@ async function s12({ page, log, shot, info, problem, enabled, tryClick, openGame
     const temple = page.locator('.actions h4:has-text("Terrains") ~ button:not([disabled]):has-text("Eldrazi Temple")').first()
     const restricted = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("Eldrazi Temple"):has-text("seulement pour")').first()
     const mimic = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):has-text("Eldrazi Mimic")').first()
-    if (restrictedSeen && (await mimic.count())) {
+    // Mana restreint en réserve : attendre que le panneau réactive le Mimic, ne jamais passer la priorité
+    // (la réserve se viderait en fin d'étape ; sur une machine lente le panneau se redessine encore).
+    if (restrictedSeen) {
+      if (!(await mimic.waitFor({ timeout: 10_000 }).then(() => true, () => false))) break
       if (await tryClick(mimic)) {
-        await page.waitForTimeout(400)
+        await page.locator('text=/J0 lance Eldrazi Mimic/').first().waitFor({ timeout: 10_000 }).catch(() => {})
         mimicCast = (await page.locator('text=/J0 lance Eldrazi Mimic/').count()) > 0
       }
     } else if (await restricted.count()) {
       if (await tryClick(restricted)) {
-        await page.waitForTimeout(300)
+        await page.locator('.mana-pool .mana-sym.restricted').nth(1).waitFor({ timeout: 10_000 }).catch(() => {})
         restrictedSeen = (await page.locator('.mana-pool .mana-sym.restricted').count()) === 2
         if (restrictedSeen) await shot('12a-mana-restreint')
       }
