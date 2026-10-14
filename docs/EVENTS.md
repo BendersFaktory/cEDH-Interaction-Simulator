@@ -1,6 +1,6 @@
 # Catalogue d'événements
 
-Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et unique le long d'une branche. Les payloads utilisent des **valeurs absolues** (PV résultants, etc.). Les cartes sont sérialisées en `PublicCard` : `{ id, name, type, cost, effect, amount, commander, power, toughness }`. Les cibles sont des chaînes : `player:<id>` ou `stack:<stackId>`.
+Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et unique le long d'une branche. Les payloads utilisent des **valeurs absolues** (PV résultants, etc.). Les cartes sont sérialisées en `PublicCard` : `{ id, name, type (chaîne, ou liste pour une carte à plusieurs types), cost, effect, amount, commander, power, toughness }`. Les cibles sont des chaînes : `player:<id>` ou `stack:<stackId>`.
 
 | Type | Verbeux | Payload | Effet sur l'état affiché |
 |---|---|---|---|
@@ -33,7 +33,7 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 | `CreatureDied` | non | `player`, `card`, `destination` (`graveyard`\|`command`\|`none` pour un jeton) | Champ de bataille → cimetière, ou zone de commandement pour un commandant |
 | `CombatEnded` | non | – | Efface `attacking` / `blocking` des permanents (émis s'il y a eu des attaquants) |
 | `PlayerLost` | non | `player`, `reason` (`life`\|`decked`\|`commander_damage`) | Joueur éliminé |
-| `GameOver` | non | `winner` (id ou `null`), `reason` (`last_player_standing`\|`turn_limit`) | Fin de partie |
+| `GameOver` | non | `winner` (id ou `null`), `reason` (`last_player_standing`\|`turn_limit`) | Fin de partie. La pile n'est pas vidée : elle peut rester non vide après `GameOver` (rien ne résout plus, aucun événement n'est ajouté) |
 
 ## Déclarations de combat
 

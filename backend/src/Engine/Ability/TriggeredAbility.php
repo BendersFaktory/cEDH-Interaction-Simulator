@@ -63,7 +63,7 @@ final class TriggeredAbility
     public function matches(CardInstance $spell): bool
     {
         return match ($this->filter) {
-            self::INSTANT_SORCERY => $spell->type === CardInstance::INSTANT || $spell->type === CardInstance::SORCERY,
+            self::INSTANT_SORCERY => $spell->hasType(CardInstance::INSTANT) || $spell->hasType(CardInstance::SORCERY),
             default => true,
         };
     }

@@ -54,7 +54,7 @@ final class HeuristicAgent implements PlayerAgent
 
         $top = $state->topOfStack();
 
-        if ($top !== null && $top->controller !== $playerId) {
+        if ($top !== null && $top->controller !== $playerId && $this->threat($state, $playerId, $top) >= self::COUNTER_THRESHOLD) {
             foreach ($legal as $action) {
                 if ($action instanceof CastSpell && $this->isCounter($state, $action)
                     && $action->targets === ['stack:' . $top->id]) {
@@ -114,6 +114,7 @@ final class HeuristicAgent implements PlayerAgent
             }
             $casts = array_values(array_filter($casts, fn (CastSpell $c) => $this->worthCasting($state, $playerId, $c)));
             if ($casts !== []) {
+                $casts = $this->leastWasteful($state, $playerId, $casts);
                 $pick = $casts[$state->rng->int(0, count($casts) - 1)];
 
                 return $this->withBestX($state, $pick, $casts);
@@ -145,6 +146,116 @@ final class HeuristicAgent implements PlayerAgent
         $t = $a->targets[0] ?? null;
 
         return $t !== null && str_starts_with($t, 'player:') ? (int) substr($t, 7) : null;
+    }
+
+    /** Menace minimale d'un sort adverse pour justifier un contresort. */
+    private const COUNTER_THRESHOLD = 3;
+
+    /**
+     * Évaluateur de menace d'un élément de pile adverse : ce qui me vise (ou protège mon sort d'un contresort adverse)
+     * pèse lourd ; un rituel, un jeton de mana ou un sort bon marché (valeur de mana + dégâts < 3) qui ne me vise pas ne vaut pas
+     * un contresort. Sinon la valeur de mana (+ les dégâts), +1 pour une créature, +1 pour une créature de force >= 3.
+     */
+    private function threat(GameState $state, int $playerId, \App\Engine\Game\StackItem $item): int
+    {
+        if ($item->isAbility()) {
+            return 0;
+        }
+        if (in_array('player:' . $playerId, $item->targets, true)) {
+            return 10;
+        }
+        $card = $item->card;
+        if ($card->effect === 'counter') {
+            // Un contresort adverse qui vise un de mes sorts : le contrer protège mon sort.
+            foreach ($item->targets as $t) {
+                if (str_starts_with($t, 'stack:')) {
+                    foreach ($state->stack as $other) {
+                        if ('stack:' . $other->id === $t && $other->controller === $playerId) {
+                            return 8;
+                        }
+                    }
+                }
+            }
+
+            return 0;
+        }
+        if ($card->effect === 'mana' || $card->effect === 'treasure') {
+            return 0;
+        }
+
+        return $card->cost + $item->x + ($card->effect === 'damage' ? $card->amount : 0) + ($card->isCreature() ? 1 : 0) + ($card->isCreature() && $card->power >= 3 ? 1 : 0);
+    }
+
+    /**
+     * Garde les sorts qui laissent le moins de mana inutilisé dans la réserve (Sol Ring payant un `{1}` laisse 1 mana qui
+     * sera perdu à la fin de l'étape). Pour chaque carte, on simule le paiement puis, en regardant un sort de plus, le
+     * mana qu'il resterait au mieux une fois la réserve réutilisée par un second sort. Les sorts à X n'entrent pas dans
+     * le calcul (le X maximal absorbe le surplus). Sans simulation possible, on garde tout.
+     *
+     * @param list<CastSpell> $casts
+     * @return list<CastSpell>
+     */
+    private function leastWasteful(GameState $state, int $playerId, array $casts): array
+    {
+        $p = $state->player($playerId);
+        $cards = [];
+        foreach ($casts as $c) {
+            $cards[$c->cardId] = $p->findCastable($c->cardId);
+        }
+        if (count($cards) < 2) {
+            return $casts;
+        }
+        $score = [];
+        foreach ($cards as $id => $card) {
+            if ($card === null || $card->effect === 'mana') {
+                $score[$id] = 0;
+                continue;
+            }
+            $copy = $this->afterCast($state, $p, $card);
+            if ($copy === null) {
+                $score[$id] = 0;
+                continue;
+            }
+            $best = $copy->pool->total();
+            foreach ($cards as $id2 => $card2) {
+                if ($id2 === $id || $card2 === null || $card2->effect === 'mana') {
+                    continue;
+                }
+                $second = $this->afterCast($state, $copy, $card2);
+                if ($second !== null) {
+                    $best = min($best, $second->pool->total());
+                }
+            }
+            $score[$id] = $best;
+        }
+        $min = min($score);
+
+        return array_values(array_filter($casts, static fn (CastSpell $c) => $score[$c->cardId] === $min));
+    }
+
+    /**
+     * Copie de l'état du joueur après avoir payé `$card` (sans effet de bord) ; null si inpayable ou si le coût a un {X}.
+     *
+     * @return PlayerState|null
+     */
+    private function afterCast(GameState $state, PlayerState $p, CardInstance $card): ?PlayerState
+    {
+        $copy = PlayerState::fromArray($p->toArray());
+        $copyCard = $copy->findCastable($card->id);
+        if ($copyCard === null) {
+            return null;
+        }
+        $cost = $copy->castCost($copyCard);
+        if ($cost->hasX()) {
+            return null;
+        }
+        $plan = ManaPayment::plan($copy, $cost, 0, $state->turn, null, $copyCard);
+        if ($plan === null) {
+            return null;
+        }
+        $copy->payWithPlan($plan);
+
+        return $copy;
     }
 
     /**
