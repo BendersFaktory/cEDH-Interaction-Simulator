@@ -3,7 +3,7 @@
 // Les captures vont dans frontend/recette/ (ignoré par git), vidé puis recréé à chaque exécution.
 // Code de sortie 1 si une erreur console/réseau inattendue apparaît (seul le 404 de l'id inexistant est attendu).
 // Les scénarios sont des fonctions indépendantes (un contexte Chrome chacun) : la chaîne 1→7 est séquentielle, 8 à 15 sont
-// lancés en parallèle (pool de RECETTE_JOBS, défaut 4). Les graines des scénarios 11, 12, 14 et 15 se cherchent par l'API
+// lancés en parallèle (pool de RECETTE_JOBS, défaut 4). Les graines des scénarios 10, 11, 12, 14 et 15 se cherchent par l'API
 // (e2e/api.mjs) ; l'UI n'est ouverte que sur la partie trouvée.
 import { spawn } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
@@ -14,6 +14,8 @@ import * as api from './api.mjs'
 // Délai maximal de chaque attente/action Playwright (valeur par défaut de Playwright).
 const TIMEOUT = 30_000
 const JOBS = Math.max(1, Number(process.env.RECETTE_JOBS) || 4)
+// RECETTE_ONLY=10,15 : ne lance que ces tâches (noms de la liste de run(), dont « 1-7 »).
+const ONLY = process.env.RECETTE_ONLY?.split(',')
 const FRONT = fileURLToPath(new URL('..', import.meta.url))
 const BACK = fileURLToPath(new URL('../../backend', import.meta.url))
 const S = `${FRONT}recette`
@@ -129,7 +131,7 @@ async function run() {
     ['12', (b) => scenario(b, '12', s12)],
     ['13', (b) => scenario(b, '13', s13)],
     ['14', (b) => scenario(b, '14', s14)],
-  ]
+  ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
   const worker = async () => {
@@ -275,28 +277,33 @@ async function s9({ page, log, shot, problem, enabled, tryClick, newUiGame }) {
 }
 
 // 10 : capacité à choix de coût (seed 18 : J0 a Goblin Bombardment et Llanowar Elves en main de départ).
-// J0 joue ses terrains, lance Bombardment et des créatures, n'attaque pas, puis sacrifie une créature pour 1 dégât à J1.
-async function s10({ page, log, shot, info, problem, enabled, tryClick, newUiGame }) {
-  await newUiGame(18)
-  let sacrificed = false
-  for (let i = 0; i < 300 && !sacrificed; i++) {
-    if (!(await page.locator('.actions').count())) break
+// Un pilote API joue J0 (terrains, Bombardment et créatures, pas d'attaque) jusqu'à ce que le sacrifice d'une créature pour
+// 1 dégât à J1 soit proposé ; l'UI ouvre alors la partie et J0 clique ce sacrifice. Piloter clic par clic dépendait du timing
+// du navigateur : sur la CI, plus lente, un clic sur un bouton périmé faisait diverger la partie.
+async function s10({ page, log, shot, info, problem, tryClick, openGame }) {
+  const SAC = /en sacrifiant.*→ joueur 1/
+  const CREATURE = /Goblin Bombardment|Llanowar|Grizzly/
+  const policy = (p, step) => {
+    const first = (type, re) => p.actions.find((a) => a.type === type && (!re || re.test(a.label)))
+    if (step > 250) return null
+    if (first('ability', SAC)) return 'stop'
+    return first('discard') ?? first('done') ?? first('land') ?? first('cast', CREATURE) ?? first('pass') ?? null
+  }
+  let sacrificed = false, seed10 = null
+  for (const seed of [18, 42, 6, 16, 7, 99, 122, 150]) {
+    if (sacrificed) break
+    const sim = await api.createHuman(seed)
+    if (!(await api.drive(sim.id, policy)).stopped) continue
+    await openGame(sim.id)
     const sac = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("en sacrifiant"):has-text("→ joueur 1")').first()
-    const creature = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):is(:has-text("Goblin Bombardment"), :has-text("Llanowar"), :has-text("Grizzly"))').first()
-    if (await sac.count()) {
-      if (await tryClick(sac)) {
-        await page.waitForTimeout(400)
-        sacrificed = (await page.locator('text=/J0 sacrifie/').count()) > 0
-      }
-    } else if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
-    else if (await enabled('Terminer la déclaration').count()) await tryClick(enabled('Terminer la déclaration'))
-    else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
-    else if (await creature.count()) await tryClick(creature)
-    else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
-    await page.waitForTimeout(150)
+    if (await sac.count() && await tryClick(sac)) {
+      await page.waitForTimeout(400)
+      sacrificed = (await page.locator('text=/J0 sacrifie/').count()) > 0
+      if (sacrificed) seed10 = seed
+    }
   }
   const sacLine = sacrificed ? (await page.locator('text=/J0 sacrifie/').first().textContent())?.replace(/\s+/g, ' ').trim() : '(absent)'
-  log('10 sacrifice d\'une créature (Goblin Bombardment) par J0 :', sacrificed, '| journal :', sacLine, '|', await info())
+  log('10 graine retenue :', seed10, '| sacrifice d\'une créature (Goblin Bombardment) par J0 :', sacrificed, '| journal :', sacLine, '|', await info())
   await page.locator('text=/J0 sacrifie/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('10-cout-sacrifice')
   if (!sacrificed) problem('recette coût : J0 n\'a pas pu sacrifier une créature au Goblin Bombardment')
 }
