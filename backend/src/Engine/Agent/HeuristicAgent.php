@@ -32,8 +32,9 @@ use App\Engine\Mana\ManaPayment;
  * assez de sources non engagées pour le payer (voir `keepCounterMana`).
  * Défausse (main > 7), par ordre : terrain en surplus, carte injouable (couleur introuvable ou coût hors de portée), carte la
  * plus chère ; on garde en dernier les contresorts puis les terrains dont on a besoin (voir `discard`).
- * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible ; bloque quand le bloqueur survit
- * ou tue l'attaquant (un seul bloqueur par attaquant), et chump-bloque seulement si l'attaque est létale.
+ * Combat : attaque avec toutes ses créatures sur l'adversaire le plus faible (sauf le commandant s'il peut mourir, et une
+ * garde si un adversaire peut me tuer) ; bloque quand le bloqueur survit ou tue l'attaquant, bloque à deux quand la paire
+ * tue l'attaquant sans mourir toute entière, et chump-bloque seulement si l'attaque est létale.
  * TODO: évaluateur de menace (ne pas contrer n'importe quoi), gestion du mana, etc.
  */
 final class HeuristicAgent implements PlayerAgent
@@ -188,7 +189,7 @@ final class HeuristicAgent implements PlayerAgent
             return 0;
         }
 
-        return $card->cost + $item->x + ($card->effect === 'damage' ? $card->amount : 0) + ($card->isCreature() ? 1 : 0) + ($card->isCreature() && $card->power >= 3 ? 1 : 0);
+        return $this->cardValue($card, $item->x);
     }
 
     /**
@@ -279,16 +280,60 @@ final class HeuristicAgent implements PlayerAgent
             return $casts;
         }
         $p = $state->player($playerId);
-
-        return array_values(array_filter($casts, function (CastSpell $c) use ($state, $p, $reserve): bool {
+        $kept = [];
+        $waste = [];
+        foreach ($casts as $c) {
             $card = $p->findCastable($c->cardId);
-            if ($card === null || $card->effect === 'mana' || $this->isLethalBurn($state, $card, $c)) {
-                return true;
+            if ($card === null || $card->effect === 'mana' || $this->isLethalBurn($state, $card, $c) || $this->isGameChanging($card, $c)) {
+                $kept[] = $c;
+                $waste[] = 0;
+                continue;
             }
             $after = $this->afterCast($state, $p, $card, $c->x);
+            $lost = $after === null ? null : $this->counterWaste($state, $after, $reserve);
+            if ($lost !== null) {
+                $kept[] = $c;
+                $waste[] = $lost;
+            }
+        }
+        if ($kept === []) {
+            return [];
+        }
+        // Parmi les sorts qui gardent le contresort, ceux qui laissent de quoi le payer sans perte (une Île plutôt
+        // qu'un Signet, dont le mana en trop serait perdu).
+        $min = min($waste);
 
-            return $after !== null && $this->canPayCounter($state, $after, $reserve);
-        }));
+        return array_values(array_filter($kept, static fn (CastSpell $c, int $i) => $waste[$i] === $min, ARRAY_FILTER_USE_BOTH));
+    }
+
+    /** Menace minimale d'un de mes sorts pour le lancer malgré la réserve de contresort (« menace énorme »). */
+    private const HUGE_THREAT = 6;
+
+    /** Sort qui change la partie : sa valeur (comme `threat()`) atteint HUGE_THREAT ; on le lance même sans garder le contresort. */
+    private function isGameChanging(CardInstance $card, CastSpell $cast): bool
+    {
+        return in_array($card->effect, [null, 'damage'], true) && $this->cardValue($card, $cast->x) >= self::HUGE_THREAT;
+    }
+
+    /** Valeur d'un sort : valeur de mana (+ X, + dégâts), +1 pour une créature, +1 pour une créature de force >= 3. */
+    private function cardValue(CardInstance $card, int $x): int
+    {
+        return $card->cost + $x + ($card->effect === 'damage' ? $card->amount : 0) + ($card->isCreature() ? 1 : 0) + ($card->isCreature() && $card->power >= 3 ? 1 : 0);
+    }
+
+    /** Mana qui serait perdu en payant `$counter` avec l'état `$after` (production d'un Signet en trop) ; null si impayable. */
+    private function counterWaste(GameState $state, PlayerState $after, CardInstance $counter): ?int
+    {
+        $copy = PlayerState::fromArray($after->toArray());
+        $copyCounter = $copy->findCastable($counter->id);
+        $plan = $copyCounter === null ? null : ManaPayment::plan($copy, $copy->castCost($copyCounter), 0, $state->turn, null, $copyCounter);
+        if ($plan === null) {
+            return null;
+        }
+        $before = $copy->pool->total();
+        $copy->payWithPlan($plan);
+
+        return max(0, $copy->pool->total() - $before);
     }
 
     /** Idem pour une capacité à coût de mana (jetons, pioche) : jamais si elle prive l'IA de son contresort. */
@@ -513,10 +558,15 @@ final class HeuristicAgent implements PlayerAgent
     {
         // Les créatures à mana (Llanowar Elves) restent à la maison : leur mana vaut plus que leur attaque. Une créature
         // sans force (jeton Kobold 0/1) aussi.
+        // Le commandant n'attaque pas s'il peut mourir au blocage (même en échange : le relancer coûte la taxe). En
+        // danger de mort au prochain tour, une créature reste en garde (voir `guard`).
+        $guard = $this->guard($state, $playerId);
         $attacks = array_values(array_filter($legal, fn (Action $a) => $a instanceof DeclareAttacker
+            && $a->cardId !== $guard
             && !$this->hasManaAbility($card = $this->battlefieldCard($state, $playerId, $a->cardId))
             && ($card?->currentPower() ?? 0) > 0
-            && !$this->isSuicideAttack($state, $card, $a->defender)));
+            && !$this->isSuicideAttack($state, $card, $a->defender)
+            && !($card->commander && $this->canDieBlocked($state, $card, $a->defender))));
         if ($attacks === []) {
             return $this->finish($legal, $playerId);
         }
@@ -535,6 +585,63 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return $this->finish($legal, $playerId);
+    }
+
+    /**
+     * Créature gardée à la maison pour bloquer : seulement si la force cumulée d'un adversaire (créatures sans défenseur)
+     * atteint mes PV et qu'aucune autre créature capable de bloquer ne reste déjà (créature à mana, sans force, ou avec
+     * vigilance). On garde la plus grande endurance (égalité : la première du champ de bataille). Null sinon.
+     */
+    private function guard(GameState $state, int $playerId): ?string
+    {
+        $me = $state->player($playerId);
+        $danger = false;
+        foreach ($state->players as $opponent) {
+            if ($opponent->id === $playerId || $opponent->lost) {
+                continue;
+            }
+            $power = 0;
+            foreach ($opponent->battlefield as $c) {
+                if ($c->isCreature() && !$c->hasKeyword(CardInstance::DEFENDER)) {
+                    $power += max(0, $c->currentPower());
+                }
+            }
+            $danger = $danger || $power >= $me->life;
+        }
+        if (!$danger) {
+            return null;
+        }
+        $best = null;
+        foreach ($me->battlefield as $c) {
+            if (!$c->isCreature() || isset($state->combat->attackers[$c->id])) {
+                continue;
+            }
+            if ($c->tapped) {
+                continue;
+            }
+            if ($this->hasManaAbility($c) || $c->currentPower() <= 0 || $c->hasKeyword(CardInstance::VIGILANCE)) {
+                return null;
+            }
+            if ($best === null || $c->currentToughness() > $best->currentToughness()) {
+                $best = $c;
+            }
+        }
+
+        return $best?->id;
+    }
+
+    /** Vrai si un bloqueur possible du défenseur tuerait cet attaquant (échange compris ; vol et portée pris en compte). */
+    private function canDieBlocked(GameState $state, CardInstance $attacker, int $defender): bool
+    {
+        foreach ($state->player($defender)->battlefield as $blocker) {
+            if ($blocker->isCreature() && !$blocker->tapped
+                && (!$attacker->hasKeyword(CardInstance::FLYING) || $blocker->hasKeyword(CardInstance::FLYING) || $blocker->hasKeyword(CardInstance::REACH))
+                && $this->duel($attacker, $blocker)[1]) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param list<Action> $legal */
@@ -570,11 +677,91 @@ final class HeuristicAgent implements PlayerAgent
                 $chump = [$a, $saved];
             }
         }
+        $double = $this->doubleBlock($state, $legal, $playerId);
+        if ($double !== null) {
+            return $double;
+        }
         if ($chump !== null) {
             return $chump[0];
         }
 
         return $this->finish($legal, $playerId);
+    }
+
+    /**
+     * Blocage à deux : un attaquant qu'aucun bloqueur seul ne tue est bloqué par deux créatures qui le tuent ensemble, si
+     * l'attaquant ne peut pas tuer les deux et vaut au moins le moins cher des bloqueurs (on accepte d'en perdre un).
+     * Jamais avec le commandant, ni contre l'initiative, la double initiative ou le contact mortel (le duel à deux n'est
+     * pas simulé). La plus grande endurance est déclarée d'abord (l'attaquant répartit ses dégâts dans l'ordre). Second
+     * appel : l'attaquant déjà bloqué par une de mes créatures reçoit le second bloqueur.
+     *
+     * @param list<Action> $legal
+     */
+    private function doubleBlock(GameState $state, array $legal, int $playerId): ?DeclareBlocker
+    {
+        $options = [];
+        foreach ($legal as $a) {
+            if ($a instanceof DeclareBlocker && ($b = $this->battlefieldCard($state, $playerId, $a->cardId)) !== null && !$b->commander) {
+                $options[$a->attackerId][] = [$a, $b];
+            }
+        }
+        foreach ($options as $attackerId => $candidates) {
+            $attacker = $this->battlefieldCard($state, $state->activePlayer, (string) $attackerId);
+            if ($attacker === null || $attacker->hasKeyword(CardInstance::FIRST_STRIKE) || $attacker->hasKeyword(CardInstance::DOUBLE_STRIKE)
+                || $attacker->hasKeyword(CardInstance::DEATHTOUCH)) {
+                continue;
+            }
+            $current = [];
+            foreach ($state->combat->blockers[$attackerId] ?? [] as $id) {
+                if (($c = $this->battlefieldCard($state, $playerId, $id)) !== null) {
+                    $current[] = $c;
+                }
+            }
+            if (count($current) >= 2 || (count($current) === 1 && $this->gangKills($attacker, $current))) {
+                continue;
+            }
+            if (count($current) === 1) {
+                foreach ($candidates as [$a, $b]) {
+                    if ($this->goodPair($attacker, $current[0], $b)) {
+                        return $a;
+                    }
+                }
+                continue;
+            }
+            foreach ($candidates as $i => [$a1, $b1]) {
+                foreach ($candidates as $j => [$a2, $b2]) {
+                    if ($i !== $j && $this->goodPair($attacker, $b1, $b2)
+                        && $b1->currentToughness() - $b1->damage >= $b2->currentToughness() - $b2->damage) {
+                        return $a1;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function goodPair(CardInstance $attacker, CardInstance $b1, CardInstance $b2): bool
+    {
+        $left = static fn (CardInstance $c): int => $c->currentToughness() - $c->damage;
+
+        return $this->gangKills($attacker, [$b1, $b2])
+            && $attacker->currentPower() < $left($b1) + $left($b2)
+            && $attacker->cost >= min($b1->cost, $b2->cost);
+    }
+
+    /** @param list<CardInstance> $blockers Vrai si les bloqueurs tuent ensemble l'attaquant (force cumulée, ou contact mortel). */
+    private function gangKills(CardInstance $attacker, array $blockers): bool
+    {
+        $power = 0;
+        foreach ($blockers as $b) {
+            if ($b->currentPower() > 0 && $b->hasKeyword(CardInstance::DEATHTOUCH)) {
+                return true;
+            }
+            $power += max(0, $b->currentPower());
+        }
+
+        return $power > 0 && $power >= $attacker->currentToughness() - $attacker->damage;
     }
 
     /**
