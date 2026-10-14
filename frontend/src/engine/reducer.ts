@@ -185,6 +185,11 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'LifeGained': {
+      v.players[p.player].life = p.life
+      break
+    }
+
     case 'CardDiscarded': {
       const pl = v.players[p.player]
       removeCard(pl.hand, p.card.id)

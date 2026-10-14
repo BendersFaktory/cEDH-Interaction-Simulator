@@ -35,8 +35,8 @@ final class Decks
         $basics = ['W' => 'Plains', 'U' => 'Island', 'B' => 'Swamp', 'R' => 'Mountain', 'G' => 'Forest'];
 
         $n = 0;
-        $make = static function (string $name, string|array $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = [], array $subtypes = []) use ($playerId, &$n): CardInstance {
-            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds, false, $triggers, $subtypes);
+        $make = static function (string $name, string|array $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = [], array $subtypes = [], array $keywords = []) use ($playerId, &$n): CardInstance {
+            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds, false, $triggers, $subtypes, keywords: $keywords);
         };
 
         $commander = $make("Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, true, 3, 3, '{1}{' . $colors[0] . '}{' . $colors[1] . '}');
@@ -112,6 +112,23 @@ final class Decks
         $library[] = $make('Pillard des Cendres', CardInstance::CREATURE, 3, null, 0, false, 2, 2, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::ATTACKS, 'damage', 1)]);
         $library[] = $make('Lanterne du Crépuscule', CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::END_STEP, 'token', 1, 'Spirit:1/1')]);
         $library[] = $make('Cendrier des Regrets', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DISCARD, 'damage', 1)]);
+        // Créatures à mots-clés de combat (capacités non modélisées ignorées).
+        $kw = static fn (string ...$k): array => $k;
+        if ($hasRed) {
+            $library[] = $make('Goblin Guide', CardInstance::CREATURE, 1, null, 0, false, 2, 2, '{R}', keywords: $kw(CardInstance::HASTE));
+            $library[] = $make('Boggart Brute', CardInstance::CREATURE, 3, null, 0, false, 3, 2, '{2}{R}', keywords: $kw(CardInstance::MENACE));
+            $library[] = $make('Wall of Stone', CardInstance::CREATURE, 3, null, 0, false, 0, 8, '{1}{R}{R}', keywords: $kw(CardInstance::DEFENDER));
+        }
+        if ($hasBlue) {
+            for ($i = 0; $i < 2; $i++) {
+                $library[] = $make('Wind Drake', CardInstance::CREATURE, 3, null, 0, false, 2, 2, '{2}{U}', keywords: $kw(CardInstance::FLYING));
+            }
+        }
+        if (in_array('G', $colors, true)) {
+            $library[] = $make('Giant Spider', CardInstance::CREATURE, 4, null, 0, false, 2, 4, '{3}{G}', keywords: $kw(CardInstance::REACH));
+            $library[] = $make('Deadly Recluse', CardInstance::CREATURE, 2, null, 0, false, 1, 2, '{1}{G}', keywords: $kw(CardInstance::REACH, CardInstance::DEATHTOUCH));
+            $library[] = $make('Colossal Dreadmaw', CardInstance::CREATURE, 6, null, 0, false, 6, 6, '{4}{G}{G}', keywords: $kw(CardInstance::TRAMPLE));
+        }
         // Hybrid Bear : seulement s'il reste de la place (les decks rouges en sont pleins).
         if (count($library) < $librarySize) {
             $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');

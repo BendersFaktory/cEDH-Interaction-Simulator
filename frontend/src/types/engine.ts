@@ -61,6 +61,8 @@ export interface PublicCard {
   power?: number
   toughness?: number
   abilities?: AbilityView[]
+  /** Mots-clés (absent si vide) : flying, reach, haste, vigilance, defender, menace, first_strike, double_strike, trample, deathtouch, lifelink. */
+  keywords?: string[]
   /** Mana ajouté par un rituel (effet 'mana'). */
   adds?: string[] | string
   /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */

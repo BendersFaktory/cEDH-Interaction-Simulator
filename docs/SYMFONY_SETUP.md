@@ -203,6 +203,15 @@ Decks inchangés depuis la mesure précédente, donc comparables. Médianes de `
 
 Lecture : seul le moteur a changé. Les événements sont identiques (empreintes sha1 de `bin/bench.php`, 21 graines). N = 1 conservé.
 
+#### Après les mots-clés du combat (mesuré le 2026-10-14, graines 42 / 6 / 16, MySQL 9.3)
+
+Decks modifiés (8 cartes à mots-clés à la place d'ours de remplissage), donc parties non comparables une à une. Médianes de `bin/measure.php` :
+
+- `create()` : seed 42 ~0,42 s (4406 événements), seed 6 ~0,30 s, seed 16 ~0,55 s (5498 événements, 50 tours).
+- `fork` au milieu : ~25 à 30 ms ; reconstruction au pire écart entre ancres : ≤ 44 ms ; taille en base : ~1,9 à 2,7 Mo.
+
+Lecture : le ralentissement de `create` par rapport au 2026-10-12 (seed 42 ~0,22 s) précède ce lot : `bin/bench.php` donnait déjà 5,0 s pour 21 graines (3,7 s le 2026-10-12) sur le code d'avant les mots-clés, avec des empreintes identiques. Cause non recherchée (charge de la machine ou travaux du 2026-10-13/14). N = 1 conservé.
+
 ## Persistance : `json_text` et insertions par lots
 
 - Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.

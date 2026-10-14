@@ -39,9 +39,10 @@ final class StateBasedActions
     {
         foreach ($s->players as $p) {
             foreach ($p->battlefield as $card) {
-                if ($card->isCreature() && $card->damage >= $card->currentToughness() && $card->damage > 0) {
+                if ($card->isCreature() && $card->damage > 0 && ($card->damage >= $card->currentToughness() || $card->deathtouchDamage)) {
                     $p->takeFromBattlefield($card->id);
                     $card->damage = 0;
+                    $card->deathtouchDamage = false;
                     $card->tapped = false;
                     $destination = $s->sendToGraveyard($p->id, $card);
                     $s->emit('CreatureDied', ['player' => $p->id, 'card' => $card->toPublic(), 'destination' => $destination]);

@@ -345,7 +345,8 @@ final class HeuristicAgent implements PlayerAgent
         // sans force (jeton Kobold 0/1) aussi.
         $attacks = array_values(array_filter($legal, fn (Action $a) => $a instanceof DeclareAttacker
             && !$this->hasManaAbility($card = $this->battlefieldCard($state, $playerId, $a->cardId))
-            && ($card?->currentPower() ?? 0) > 0));
+            && ($card?->currentPower() ?? 0) > 0
+            && !$this->isSuicideAttack($state, $card, $a->defender)));
         if ($attacks === []) {
             return $this->finish($legal, $playerId);
         }
@@ -387,11 +388,16 @@ final class HeuristicAgent implements PlayerAgent
             if ($attacker === null || $blocker === null) {
                 continue;
             }
-            if ($blocker->currentToughness() - $blocker->damage > $attacker->currentPower() || $blocker->currentPower() >= $attacker->currentToughness() - $attacker->damage) {
+            [$survives, $kills] = $this->duel($attacker, $blocker);
+            if ($survives || $kills) {
                 return $a;
             }
-            if ($lethal && !$blocker->commander && ($chump === null || $attacker->currentPower() > $chump[1])) {
-                $chump = [$a, $attacker->currentPower()];
+            // Contre le piétinement, le chump block ne retient que l'endurance du bloqueur.
+            $saved = $attacker->hasKeyword(CardInstance::TRAMPLE)
+                ? min($attacker->currentPower(), $blocker->currentToughness() - $blocker->damage)
+                : $attacker->currentPower();
+            if ($lethal && !$blocker->commander && ($chump === null || $saved > $chump[1])) {
+                $chump = [$a, $saved];
             }
         }
         if ($chump !== null) {
@@ -399,6 +405,45 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return $this->finish($legal, $playerId);
+    }
+
+    /**
+     * Issue d'un duel attaquant / bloqueur (contact mortel et initiative compris).
+     *
+     * @return array{bool, bool} [le bloqueur survit, l'attaquant meurt]
+     */
+    private function duel(CardInstance $attacker, CardInstance $blocker): array
+    {
+        $kills = static fn (CardInstance $by, CardInstance $on): bool => $by->currentPower() > 0
+            && ($by->hasKeyword(CardInstance::DEATHTOUCH) || $by->currentPower() >= $on->currentToughness() - $on->damage);
+        $first = static fn (CardInstance $c): bool => $c->hasKeyword(CardInstance::FIRST_STRIKE) || $c->hasKeyword(CardInstance::DOUBLE_STRIKE);
+        $blockerDies = $kills($attacker, $blocker);
+        $attackerDies = $kills($blocker, $attacker);
+        if ($first($attacker) && !$first($blocker) && $blockerDies) {
+            $attackerDies = false;
+        } elseif ($first($blocker) && !$first($attacker) && $attackerDies) {
+            $blockerDies = false;
+        }
+
+        return [!$blockerDies, $attackerDies];
+    }
+
+    /** Vrai si un bloqueur possible du défenseur tuerait cet attaquant sans mourir (hors vol, piétinement, menace). */
+    private function isSuicideAttack(GameState $state, CardInstance $attacker, int $defender): bool
+    {
+        if ($attacker->hasKeyword(CardInstance::TRAMPLE) || $attacker->hasKeyword(CardInstance::FLYING) || $attacker->hasKeyword(CardInstance::MENACE)) {
+            return false;
+        }
+        foreach ($state->player($defender)->battlefield as $blocker) {
+            if ($blocker->isCreature() && !$blocker->tapped) {
+                [$survives, $kills] = $this->duel($attacker, $blocker);
+                if ($survives && $kills) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

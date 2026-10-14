@@ -191,6 +191,20 @@ final class LegalActionGenerator
     private function declarationActions(GameState $s, int $playerId): array
     {
         $choices = $s->combat->declaring === 'attackers' ? $this->attackActions($s, $playerId) : $this->blockActions($s, $playerId);
+        if ($s->combat->declaring !== 'attackers') {
+            $half = [];
+            foreach ($s->combat->blockers as $attackerId => $blockers) {
+                if (count($blockers) === 1 && $this->isMenaceAttacker($s, $attackerId)) {
+                    $half[$attackerId] = true;
+                }
+            }
+            if ($half !== []) {
+                $completing = array_values(array_filter($choices, static fn ($c) => isset($half[$c->attackerId])));
+                if ($completing !== []) {
+                    return $completing;
+                }
+            }
+        }
 
         return [...$choices, new FinishDeclaration($playerId)];
     }
@@ -208,7 +222,8 @@ final class LegalActionGenerator
         }
         $actions = [];
         foreach ($s->player($playerId)->battlefield as $card) {
-            if (!$card->isCreature() || $card->tapped || $card->enteredTurn >= $s->turn || isset($s->combat->attackers[$card->id])) {
+            if (!$card->isCreature() || $card->tapped || $card->hasKeyword(CardInstance::DEFENDER)
+                || ($card->enteredTurn >= $s->turn && !$card->hasKeyword(CardInstance::HASTE)) || isset($s->combat->attackers[$card->id])) {
                 continue;
             }
             foreach ($s->alivePlayerIds() as $defender) {
@@ -235,16 +250,49 @@ final class LegalActionGenerator
             }
         }
         $actions = [];
+        $free = [];
         foreach ($s->player($playerId)->battlefield as $card) {
-            if (!$card->isCreature() || $card->tapped || $s->combat->isBlocking($card->id)) {
+            if ($card->isCreature() && !$card->tapped && !$s->combat->isBlocking($card->id)) {
+                $free[] = $card;
+            }
+        }
+        $allowed = [];
+        foreach ($attackers as $attackerId) {
+            $attacker = $this->findCard($s, $s->activePlayer, $attackerId);
+            $able = array_filter($free, static fn (CardInstance $c) => !$attacker->hasKeyword(CardInstance::FLYING)
+                || $c->hasKeyword(CardInstance::FLYING) || $c->hasKeyword(CardInstance::REACH));
+            if ($attacker->hasKeyword(CardInstance::MENACE) && count($s->combat->blockers[$attackerId] ?? []) === 0 && count($able) < 2) {
                 continue;
             }
+            foreach ($able as $card) {
+                $allowed[$card->id][$attackerId] = true;
+            }
+        }
+        foreach ($free as $card) {
             foreach ($attackers as $attackerId) {
-                $actions[] = new DeclareBlocker($playerId, $card->id, $attackerId);
+                if (isset($allowed[$card->id][$attackerId])) {
+                    $actions[] = new DeclareBlocker($playerId, $card->id, $attackerId);
+                }
             }
         }
 
         return $actions;
+    }
+
+    private function isMenaceAttacker(GameState $s, string $attackerId): bool
+    {
+        return $this->findCard($s, $s->activePlayer, $attackerId)?->hasKeyword(CardInstance::MENACE) ?? false;
+    }
+
+    private function findCard(GameState $s, int $playerId, string $cardId): ?CardInstance
+    {
+        foreach ($s->player($playerId)->battlefield as $card) {
+            if ($card->id === $cardId) {
+                return $card;
+            }
+        }
+
+        return null;
     }
 
     private function onBattlefield(GameState $s, int $playerId, string $cardId): bool

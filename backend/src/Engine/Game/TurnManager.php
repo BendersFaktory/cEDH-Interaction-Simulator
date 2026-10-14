@@ -44,6 +44,7 @@ final class TurnManager
             foreach ($s->players as $p) {
                 foreach ($p->battlefield as $card) {
                     $card->damage = 0;
+                    $card->deathtouchDamage = false;
                     // Fin des effets « jusqu'à la fin du tour » (règle 514.2).
                     if ($card->powerBonus !== 0 || $card->toughnessBonus !== 0) {
                         $card->powerBonus = 0;
