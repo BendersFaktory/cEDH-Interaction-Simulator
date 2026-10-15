@@ -14,7 +14,7 @@ final class Subtypes
 {
     /** @var array<string, list<string>> */
     private const BY_TYPE = [
-        CardInstance::CREATURE => ['Eldrazi', 'Elf', 'Druid', 'Shaman', 'Dog', 'Myr', 'Bear', 'Kobold', 'Goblin', 'Human', 'Wizard'],
+        CardInstance::CREATURE => ['Eldrazi', 'Elf', 'Druid', 'Shaman', 'Dog', 'Myr', 'Bear', 'Kobold', 'Goblin', 'Human', 'Wizard', 'Golem'],
         CardInstance::ARTIFACT => ['Equipment', 'Treasure'],
         CardInstance::ENCHANTMENT => ['Aura'],
         CardInstance::LAND => ['Forest', 'Island', 'Mountain', 'Plains', 'Swamp'],
@@ -28,16 +28,19 @@ final class Subtypes
     }
 
     /**
-     * Vérifie une table `type => sous-types` pour une carte de type `$type` : chaque clé doit être ce type et chaque
-     * sous-type doit être admis pour lui.
+     * Vérifie une table `type => sous-types` pour une carte de type(s) `$types` : chaque clé doit être l'un de ces types et
+     * chaque sous-type doit être admis pour sa clé.
      *
+     * @param string|list<string> $types
      * @param array<string, list<string>> $subtypes
      */
-    public static function assertValid(string $type, array $subtypes, string $cardName): void
+    public static function assertValid(string|array $types, array $subtypes, string $cardName): void
     {
+        $types = (array) $types;
         foreach ($subtypes as $key => $list) {
-            if ($key !== $type) {
-                throw new \InvalidArgumentException("$cardName : sous-types rattachés au type « $key », mais la carte est « $type »");
+            $type = $key;
+            if (!in_array($key, $types, true)) {
+                throw new \InvalidArgumentException("$cardName : sous-types rattachés au type « $key », mais la carte est « " . implode(' ', $types) . ' »');
             }
             if (!is_array($list) || !array_is_list($list)) {
                 throw new \InvalidArgumentException("$cardName : sous-types de « $key » invalides");

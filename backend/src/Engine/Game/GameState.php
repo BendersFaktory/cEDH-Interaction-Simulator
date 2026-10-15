@@ -14,6 +14,9 @@ use App\Engine\Event\GameEvent;
  */
 final class GameState
 {
+    /** Version du format de `toArray()` ; à incrémenter quand la sérialisation change de façon incompatible. */
+    public const FORMAT_VERSION = 2;
+
     public int $turn = 1;
     public int $activePlayer;
     public Phase $phase = Phase::Untap;
@@ -33,6 +36,18 @@ final class GameState
     public int $nextTriggerId = 1;
     /** Détenteur de priorité à rétablir après un choix de triggers en cours ; null hors de ce choix. */
     public ?int $triggerResumeHolder = null;
+    /**
+     * Ronde de priorité ouverte pendant le cleanup (règle 514.3a : des SBA ont agi ou des triggers attendent après la
+     * défausse). Tant qu'elle est vraie, la défausse n'est pas rejouée ; à la fin de la ronde, nouvelle étape de cleanup.
+     */
+    public bool $cleanupRound = false;
+    /**
+     * Stops de l'auto-pass par joueur (voir StopConfig) ; un joueur absent garde le comportement par défaut. Sérialisé
+     * sous la clé `stops`, omise quand le tableau est vide (ne gonfle pas les états des parties sans config).
+     *
+     * @var array<int, StopConfig>
+     */
+    public array $stops = [];
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -210,30 +225,63 @@ final class GameState
     }
 
     /**
-     * Met en file les triggers de `$card` pour l'événement `$event` (`TriggeredAbility::ETB|DIES|UPKEEP`). La source est
-     * copiée (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
+     * Met en file les triggers de `$card` pour l'événement `$event` (constantes de `TriggeredAbility`). Pour `cast`,
+     * `$spell` est le sort lancé : seuls les triggers dont le filtre l'accepte sont retenus. La source est copiée
+     * (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
      */
-    public function queueTriggers(int $controller, CardInstance $card, string $event): void
+    public function queueTriggers(int $controller, CardInstance $card, string $event, ?CardInstance $spell = null): void
     {
         foreach ($card->triggers as $index => $trigger) {
-            if ($trigger->event === $event) {
+            if ($trigger->event === $event && ($spell === null || $trigger->matches($spell))) {
                 $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index);
             }
         }
     }
 
-    /** Défausse une carte de la main (cimetière via `sendToGraveyard()`) et journalise `CardDiscarded`. Seul chemin de la défausse. */
+    /**
+     * Met en file, pour chaque permanent du joueur, les triggers de l'événement `$event` (`upkeep`, `end_step`, `discard`,
+     * `cast` avec le sort lancé `$spell`), dans l'ordre du champ de bataille.
+     */
+    public function queuePlayerTriggers(int $playerId, string $event, ?CardInstance $spell = null): void
+    {
+        foreach ($this->player($playerId)->battlefield as $card) {
+            if ($card->triggers !== []) {
+                $this->queueTriggers($playerId, $card, $event, $spell);
+            }
+        }
+    }
+
+    /**
+     * Défausse une carte de la main (cimetière via `sendToGraveyard()`), journalise `CardDiscarded` et met en file les
+     * triggers `discard` du joueur. Seul chemin de la défausse (cleanup, coût de capacité).
+     */
     public function discard(int $playerId, string $cardId): void
     {
         $p = $this->player($playerId);
         $card = $p->takeFromHand($cardId) ?? throw new \DomainException("Carte à défausser absente de la main : $cardId");
         $destination = $this->sendToGraveyard($playerId, $card);
         $this->emit('CardDiscarded', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'hand' => count($p->hand)]);
+        $this->queuePlayerTriggers($playerId, TriggeredAbility::DISCARD);
+    }
+
+    /** Change les stops d'un joueur ; `null` (ou une config équivalente au défaut) revient au comportement par défaut. */
+    public function setStops(int $playerId, ?StopConfig $config): void
+    {
+        if (!isset($this->players[$playerId])) {
+            throw new \InvalidArgumentException("Joueur inconnu : $playerId");
+        }
+        if ($config === null || $config->isDefault()) {
+            unset($this->stops[$playerId]);
+        } else {
+            $this->stops[$playerId] = $config;
+            ksort($this->stops);
+        }
     }
 
     public function toArray(): array
     {
-        return [
+        $d = [
+            'version' => self::FORMAT_VERSION,
             'turn' => $this->turn,
             'activePlayer' => $this->activePlayer,
             'phase' => $this->phase->value,
@@ -243,6 +291,7 @@ final class GameState
             'pendingTriggers' => array_map(static fn (PendingTrigger $t) => $t->toArray(), $this->pendingTriggers),
             'nextTriggerId' => $this->nextTriggerId,
             'triggerResumeHolder' => $this->triggerResumeHolder,
+            'cleanupRound' => $this->cleanupRound,
             'stack' => array_map(static fn (StackItem $i) => $i->toArray(), $this->stack),
             'landsPlayed' => $this->landsPlayed,
             'nextStackId' => $this->nextStackId,
@@ -255,10 +304,20 @@ final class GameState
             'controllers' => $this->controllers,
             'players' => array_map(static fn (PlayerState $p) => $p->toArray(), $this->players),
         ];
+        if ($this->stops !== []) {
+            $d['stops'] = array_map(static fn (StopConfig $c) => $c->toArray(), $this->stops);
+        }
+
+        return $d;
     }
 
     public static function fromArray(array $d): self
     {
+        // Une ancre écrite sans version est un état d'avant le versionnage (format 1).
+        $version = (int) ($d['version'] ?? 1);
+        if ($version > self::FORMAT_VERSION) {
+            throw new \DomainException("Format d'état $version plus récent que le moteur (" . self::FORMAT_VERSION . ')');
+        }
         $players = [];
         foreach ($d['players'] as $id => $p) {
             $players[(int) $id] = PlayerState::fromArray($p);
@@ -278,6 +337,7 @@ final class GameState
         $s->pendingTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['pendingTriggers'] ?? []);
         $s->nextTriggerId = (int) ($d['nextTriggerId'] ?? 1);
         $s->triggerResumeHolder = isset($d['triggerResumeHolder']) ? (int) $d['triggerResumeHolder'] : null;
+        $s->cleanupRound = (bool) ($d['cleanupRound'] ?? false);
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];
@@ -285,6 +345,9 @@ final class GameState
         $s->eventSeq = (int) $d['eventSeq'];
         $s->over = (bool) $d['over'];
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];
+        foreach ($d['stops'] ?? [] as $id => $config) {
+            $s->stops[(int) $id] = StopConfig::fromArray($config);
+        }
 
         return $s;
     }

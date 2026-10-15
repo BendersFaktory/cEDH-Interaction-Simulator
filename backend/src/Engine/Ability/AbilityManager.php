@@ -57,7 +57,7 @@ final class AbilityManager
             return true;
         }
 
-        return !$card->tapped && !($turn !== null && $card->isCreature() && $card->enteredTurn >= $turn);
+        return !$card->tapped && !($turn !== null && $card->isCreature() && $card->enteredTurn >= $turn && !$card->hasKeyword(CardInstance::HASTE));
     }
 
     /**

@@ -35,8 +35,8 @@ final class Decks
         $basics = ['W' => 'Plains', 'U' => 'Island', 'B' => 'Swamp', 'R' => 'Mountain', 'G' => 'Forest'];
 
         $n = 0;
-        $make = static function (string $name, string $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = [], array $subtypes = []) use ($playerId, &$n): CardInstance {
-            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds, false, $triggers, $subtypes);
+        $make = static function (string $name, string|array $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = [], array $subtypes = [], array $keywords = []) use ($playerId, &$n): CardInstance {
+            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds, false, $triggers, $subtypes, keywords: $keywords);
         };
 
         $commander = $make("Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, true, 3, 3, '{1}{' . $colors[0] . '}{' . $colors[1] . '}');
@@ -67,10 +67,13 @@ final class Decks
             $library[] = $make('Kher Keep', CardInstance::LAND, 0, null, 0, false, 0, 0, null, [], [ActivatedAbility::token('Kobold:0/1', 1, '{1}{R}')]);
             // Goblin Bombardment : sacrifier une créature : 1 dégât (à un joueur ici).
             $library[] = $make('Goblin Bombardment', CardInstance::ENCHANTMENT, 2, null, 0, false, 0, 0, '{1}{R}', [], [ActivatedAbility::bombardment(1)]);
-            for ($i = 0; $i < 5; $i++) {
+            // Young Pyromancer : quand vous lancez un éphémère ou un rituel, créer un jeton Elemental 1/1.
+            $library[] = $make('Young Pyromancer', CardInstance::CREATURE, 2, null, 0, false, 2, 1, '{1}{R}', triggers: [new TriggeredAbility(TriggeredAbility::CAST, 'token', 1, 'Elemental:1/1', TriggeredAbility::INSTANT_SORCERY)]);
+            // 4 Bolt et 1 Rite of Flame (au lieu de 5 et 2) : place pour Young Pyromancer et les cartes de triggers ci-dessous.
+            for ($i = 0; $i < 4; $i++) {
                 $library[] = $make('Lightning Bolt', CardInstance::INSTANT, 1, 'damage', 3, false, 0, 0, '{R}');
             }
-            for ($i = 0; $i < 2; $i++) {
+            for ($i = 0; $i < 1; $i++) {
                 $library[] = $make('Rite of Flame', CardInstance::INSTANT, 1, 'mana', 0, false, 0, 0, '{R}', [], [], '{R}{R}');
             }
             // Strike It Rich : rituel qui crée un jeton Treasure ({T}, sacrifier : un mana de la couleur de son choix).
@@ -100,10 +103,36 @@ final class Decks
             $library[] = $make('Elvish Visionary', CardInstance::CREATURE, 2, null, 0, false, 1, 1, '{1}{G}', triggers: [new TriggeredAbility(TriggeredAbility::ETB, 'draw', 1)]);
         }
         // Perilous Myr : quand il meurt, 2 dégâts (à un joueur ciblé ici).
+        // Artefact-créature (cartes multi-types) : prend la place d'un ours.
+        $library[] = $make('Golem de Fer', [CardInstance::ARTIFACT, CardInstance::CREATURE], 3, null, 0, false, 2, 2, '{3}', subtypes: [CardInstance::CREATURE => ['Golem']]);
         $library[] = $make('Perilous Myr', CardInstance::CREATURE, 2, null, 0, false, 1, 1, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DIES, 'damage', 2)]);
         // Carte factice de démonstration : au début de votre entretien, piocher une carte.
         $library[] = $make("Idole de l'Érudit", CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::UPKEEP, 'draw', 1)]);
-        $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');
+        // Cartes factices de démonstration des triggers d'attaque, de fin de tour et de défausse.
+        $library[] = $make('Pillard des Cendres', CardInstance::CREATURE, 3, null, 0, false, 2, 2, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::ATTACKS, 'damage', 1)]);
+        $library[] = $make('Lanterne du Crépuscule', CardInstance::ARTIFACT, 3, null, 0, false, 0, 0, '{3}', triggers: [new TriggeredAbility(TriggeredAbility::END_STEP, 'token', 1, 'Spirit:1/1')]);
+        $library[] = $make('Cendrier des Regrets', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DISCARD, 'damage', 1)]);
+        // Créatures à mots-clés de combat (capacités non modélisées ignorées).
+        $kw = static fn (string ...$k): array => $k;
+        if ($hasRed) {
+            $library[] = $make('Goblin Guide', CardInstance::CREATURE, 1, null, 0, false, 2, 2, '{R}', keywords: $kw(CardInstance::HASTE));
+            $library[] = $make('Boggart Brute', CardInstance::CREATURE, 3, null, 0, false, 3, 2, '{2}{R}', keywords: $kw(CardInstance::MENACE));
+            $library[] = $make('Wall of Stone', CardInstance::CREATURE, 3, null, 0, false, 0, 8, '{1}{R}{R}', keywords: $kw(CardInstance::DEFENDER));
+        }
+        if ($hasBlue) {
+            for ($i = 0; $i < 2; $i++) {
+                $library[] = $make('Wind Drake', CardInstance::CREATURE, 3, null, 0, false, 2, 2, '{2}{U}', keywords: $kw(CardInstance::FLYING));
+            }
+        }
+        if (in_array('G', $colors, true)) {
+            $library[] = $make('Giant Spider', CardInstance::CREATURE, 4, null, 0, false, 2, 4, '{3}{G}', keywords: $kw(CardInstance::REACH));
+            $library[] = $make('Deadly Recluse', CardInstance::CREATURE, 2, null, 0, false, 1, 2, '{1}{G}', keywords: $kw(CardInstance::REACH, CardInstance::DEATHTOUCH));
+            $library[] = $make('Colossal Dreadmaw', CardInstance::CREATURE, 6, null, 0, false, 6, 6, '{4}{G}{G}', keywords: $kw(CardInstance::TRAMPLE));
+        }
+        // Hybrid Bear : seulement s'il reste de la place (les decks rouges en sont pleins).
+        if (count($library) < $librarySize) {
+            $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{' . $colors[0] . '/' . $colors[1] . '}{1}');
+        }
         $bearName = $profile['bear'] === 'G' ? 'Grizzly Bears' : 'Mist Bears';
         while (count($library) < $librarySize) {
             $library[] = $make($bearName, CardInstance::CREATURE, 2, null, 0, false, 2, 2, '{1}{' . $profile['bear'] . '}');

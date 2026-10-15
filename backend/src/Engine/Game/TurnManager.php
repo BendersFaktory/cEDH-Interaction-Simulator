@@ -31,9 +31,11 @@ final class TurnManager
 
         // Triggers « au début de votre entretien » : mis sur la pile avant la première priorité de l'étape.
         if ($s->phase === Phase::Upkeep) {
-            foreach ($s->player($s->activePlayer)->battlefield as $card) {
-                $s->queueTriggers($s->activePlayer, $card, TriggeredAbility::UPKEEP);
-            }
+            $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::UPKEEP);
+        }
+        // Triggers « au début de votre étape de fin » : idem, à l'étape de fin du joueur actif.
+        if ($s->phase === Phase::End) {
+            $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::END_STEP);
         }
 
         $this->combat->beginStep($s);
@@ -42,6 +44,7 @@ final class TurnManager
             foreach ($s->players as $p) {
                 foreach ($p->battlefield as $card) {
                     $card->damage = 0;
+                    $card->deathtouchDamage = false;
                     // Fin des effets « jusqu'à la fin du tour » (règle 514.2).
                     if ($card->powerBonus !== 0 || $card->toughnessBonus !== 0) {
                         $card->powerBonus = 0;
@@ -58,7 +61,7 @@ final class TurnManager
         }
 
         if (!$s->phase->hasPriority()) {
-            // Untap / Cleanup : aucune ronde de priorité.
+            // Untap / Cleanup : pas de ronde de priorité d'office (au cleanup, voir GameEngine : règle 514.3a).
             $s->stepStarted = true;
 
             return;

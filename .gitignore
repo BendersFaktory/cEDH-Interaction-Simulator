@@ -56,6 +56,8 @@ backend/vendor/
 backend/var/
 backend/.env.local
 backend/.env.*.local
+# Généré par Symfony Flex à chaque composer install/update (autocomplétion IDE, aucun effet à l'exécution)
+backend/config/reference.php
 .phpunit.result.cache
 
 # Worktrees des sous-agents (locaux)

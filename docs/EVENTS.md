@@ -1,20 +1,20 @@
 # Catalogue d'événements
 
-Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et unique le long d'une branche. Les payloads utilisent des **valeurs absolues** (PV résultants, etc.). Les cartes sont sérialisées en `PublicCard` : `{ id, name, type, cost, effect, amount, commander, power, toughness }`. Les cibles sont des chaînes : `player:<id>` ou `stack:<stackId>`.
+Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et unique le long d'une branche. Les payloads utilisent des **valeurs absolues** (PV résultants, etc.). Les cartes sont sérialisées en `PublicCard` : `{ id, name, type (chaîne, ou liste pour une carte à plusieurs types), cost, effect, amount, commander, power, toughness }`. Les cibles sont des chaînes : `player:<id>` ou `stack:<stackId>`.
 
 | Type | Verbeux | Payload | Effet sur l'état affiché |
 |---|---|---|---|
 | `GameStarted` | non | `seed`, `format` (`commander`), `players: [{id, life, library, controller, command: [PublicCard]}]` | Crée les joueurs et leur zone de commandement |
 | `CardDrawn` | non | `player`, `card`, `library` (taille restante) | Carte en main, bibliothèque = `library` |
-| `PhaseChanged` | non | `turn`, `phase` (`untap`\|`upkeep`\|`draw`\|`main1`\|`begin_combat`\|`declare_attackers`\|`declare_blockers`\|`combat_damage`\|`end_combat`\|`main2`\|`end`\|`cleanup`), `activePlayer` | Met à jour tour/phase, efface la priorité. `untap` et `cleanup` n'ouvrent aucune ronde de priorité |
+| `PhaseChanged` | non | `turn`, `phase` (`untap`\|`upkeep`\|`draw`\|`main1`\|`begin_combat`\|`declare_attackers`\|`declare_blockers`\|`first_strike_damage`\|`combat_damage`\|`end_combat`\|`main2`\|`end`\|`cleanup`), `activePlayer` | Met à jour tour/phase, efface la priorité. `untap` n'ouvre aucune ronde de priorité. `cleanup` non plus, sauf ronde de cleanup (voir « Ronde de cleanup ») : une seconde étape `cleanup` la suit alors |
 | `PermanentsUntapped` | non | `player`, `cards: [id]` | Dégage les permanents listés |
-| `PriorityGranted` | **oui** | `holder`, `passed: [id]`, `stackSize`, `checkpoint` (bool) | Détenteur de la priorité. **Point de bifurcation uniquement si `checkpoint` = true** (début de ronde ou pile non vide) |
+| `PriorityGranted` | **oui** | `holder`, `passed: [id]`, `stackSize`, `checkpoint` (bool) | Détenteur de la priorité. **Point de bifurcation uniquement si `checkpoint` = true** (début de ronde ou pile non vide). Une ronde de cleanup (ci-dessous) émet des `PriorityGranted` de la même façon, pendant la phase `cleanup` |
 | `PriorityPassed` | **oui** | `player` | Marque le joueur comme ayant passé |
 | `LandPlayed` | non | `player`, `card` | Main → champ de bataille |
 | `SpellCast` | non | `player`, `card`, `stackId`, `targets`, `tapped: [id]` (un Treasure engagé y figure, son `PermanentSacrificed` suit), `cost` (valeur de mana payée, taxe et X inclus), `manaCost` (coût canonique, taxe incluse, ex. `{X}{R}`), `x` (valeur de {X}, 0 sinon), `paid` (mana produit par les capacités de mana activées pour payer, ex. `{"R":1,"C":2}`), `fromPool` (mana pris dans la réserve existante, même forme), `pool` (réserve libre restante après paiement, valeurs absolues), `restricted` (partie restreinte de la réserve après, absolue, omis si vide : voir « Mana conditionnel »), `fromCommand` (bool) | Main **ou zone de commandement** → pile, paie (réserve d'abord, puis capacités de mana des permanents non engagés ; `tapped` = permanents engagés), remet `passed` à zéro. Le surplus de mana reste dans la réserve |
 | `ManaAbilityActivated` | **oui** (son `PermanentSacrificed` éventuel ne l'est pas) | `player`, `card` (public, source), `abilityIndex`, `ability` (sérialisée), `option` (alternative produite), `mana` (produit, ex. `{"C":2}`), `tapped: [id]` (la source si elle s'engage, puis les sources engagées pour payer son coût de mana, ex. Signet), `pool` (réserve libre après, absolue), `restricted` (partie restreinte de la réserve après, absolue, omis si vide : voir « Mana conditionnel ») | Capacité de mana activée à la main (jamais sur la pile, résolue sur-le-champ, la priorité reste au joueur, aucune passe remise à zéro) : paie son coût éventuel, engage la source, ajoute à la réserve |
 | `AbilityActivated` | non | `player`, `stackId`, `card` (public, source), `abilityIndex`, `ability`, `targets`, `tapped: [id]` (la source si `{T}`, puis les sources engagées pour le coût de mana) | Capacité activée non-mana → pile, remet `passed` à zéro. Ses coûts « cartes » suivent : `CardDiscarded` (défausse), puis `PermanentSacrificed` (la source ou la créature choisie) |
-| `AbilityTriggered` | non | `player` (contrôleur), `stackId`, `card` (public, source telle qu'au moment du trigger : une créature morte n'est plus sur le champ de bataille), `triggerIndex`, `trigger` (sérialisé : `event`, `effect`, `amount`, `spec` éventuel), `label` (ex. « Quand elle meurt : 2 dégâts »), `targets` | Trigger → pile, remet `passed` à zéro. Émis avant le `PriorityGranted` qui suit l'événement à l'origine du trigger, dans l'ordre APNAP |
+| `AbilityTriggered` | non | `player` (contrôleur), `stackId`, `card` (public, source telle qu'au moment du trigger : une créature morte n'est plus sur le champ de bataille), `triggerIndex`, `trigger` (sérialisé : `event`, `effect`, `amount`, `spec` et `filter` éventuels), `label` (ex. « Quand elle meurt : 2 dégâts »), `targets` | Trigger → pile, remet `passed` à zéro. Émis avant le `PriorityGranted` qui suit l'événement à l'origine du trigger, dans l'ordre APNAP |
 | `AbilityResolved` | non | `stackId`, `controller`, `card` (public, source), `abilityIndex`, `trigger: true` (seulement pour un trigger ; `abilityIndex` est alors le rang dans `triggers`) | Retire l'élément de pile de la capacité (ses effets suivent : `DamageDealt`, `CardDrawn`, `TokenCreated`, `CreatureBoosted`...) |
 | `CreatureBoosted` | non | `player`, `card` (id), `power`, `toughness` (valeurs actuelles, absolues) | Force/endurance de la créature. Émis par un bonus jusqu'à la fin du tour (`pump`) et au cleanup quand le bonus se termine (retour aux valeurs de base) |
 | `ManaAdded` | non | `player`, `mana` (ajouté), `pool` (réserve libre après, absolue), `restricted` (partie restreinte de la réserve après, absolue, omis si vide : voir « Mana conditionnel »), `source` (`stackId` du rituel) | Un sort `effect 'mana'` (rituel) se résout et ajoute à la réserve |
@@ -25,23 +25,32 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 | `TokenCreated` | non | `player`, `card` (public, `token: true`) | Ajoute le jeton au champ de bataille du joueur (ex. Treasure créé par Strike It Rich) |
 | `PermanentSacrificed` | non | `player`, `card`, `destination` (`graveyard`\|`command`\|`none`) | Champ de bataille → destination ; `none` = jeton, il cesse d'exister. Émis juste après l'événement dont il paie le coût (`SpellCast`, `ManaAbilityActivated`, `AbilityActivated`) |
 | `CardDiscarded` | non | `player`, `card`, `destination` (`graveyard`\|`command`), `hand` (taille de main résultante) | Main → cimetière (défausse à 7 au cleanup, ou coût de capacité : Wild Mongrel) |
-| `AttackerDeclared` | non | `player`, `card` (id), `defender` (joueur attaqué), `tapped` (true) | La créature attaque `defender` et s'engage |
+| `AttackerDeclared` | non | `player`, `card` (id), `defender` (joueur attaqué), `tapped` (`true`, sauf avec vigilance : `false`) | La créature attaque `defender` ; elle s'engage (`tapped`) sauf si elle a la vigilance |
 | `BlockerDeclared` | non | `player`, `blocker` (id), `attacker` (id) | La créature bloque l'attaquant |
 | `DeclarationFinished` | **oui** | `player`, `step` (`attackers`\|`blockers`) | Aucun (le déclarant a terminé ; émis seulement s'il avait encore un choix) |
 | `DamageDealt` | non | `source`, `target`, `amount`, `life` (PV résultants), `combat` (bool, présent pour le combat), `commanderDamage: {key, total}` (si l'attaquant est un commandant) | PV du joueur ciblé ; `commanderDamage[key] = total` |
+| `LifeGained` | non | `player`, `amount`, `life` (PV résultants), `source` (texte) | PV du joueur (`life` en valeur absolue) |
 | `CreatureDamaged` | non | `card`, `amount`, `damage` (marqués au total) | Aucun (les dégâts marqués sont effacés au cleanup) |
 | `CreatureDied` | non | `player`, `card`, `destination` (`graveyard`\|`command`\|`none` pour un jeton) | Champ de bataille → cimetière, ou zone de commandement pour un commandant |
 | `CombatEnded` | non | – | Efface `attacking` / `blocking` des permanents (émis s'il y a eu des attaquants) |
 | `PlayerLost` | non | `player`, `reason` (`life`\|`decked`\|`commander_damage`) | Joueur éliminé |
-| `GameOver` | non | `winner` (id ou `null`), `reason` (`last_player_standing`\|`turn_limit`) | Fin de partie |
+| `GameOver` | non | `winner` (id ou `null`), `reason` (`last_player_standing`\|`turn_limit`) | Fin de partie. La pile n'est pas vidée : elle peut rester non vide après `GameOver` (rien ne résout plus, aucun événement n'est ajouté) |
+
+## Mots-clés publics
+
+Les cartes publiques (`PublicCard`) portent `keywords` : liste parmi `flying`, `reach`, `haste`, `vigilance`, `defender`, `menace`, `first_strike`, `double_strike`, `trample`, `deathtouch`, `lifelink`. Le champ est absent si la carte n'a aucun mot-clé.
 
 ## Déclarations de combat
 
-`AttackerDeclared` / `BlockerDeclared` ne sont **pas** des priorités : le déclarant occupe `priority.holder` de la `DecisionRequest` (champ `declaring` = `attackers` | `blockers`) et est réinterrogé après chaque choix jusqu'à l'action `done`. Les étapes `declare_attackers`, `declare_blockers` et `combat_damage` n'existent que s'il y a des attaquants ; chacune ouvre ensuite une ronde de priorité complète.
+`AttackerDeclared` / `BlockerDeclared` ne sont **pas** des priorités : le déclarant occupe `priority.holder` de la `DecisionRequest` (champ `declaring` = `attackers` | `blockers`) et est réinterrogé après chaque choix jusqu'à l'action `done`. Les étapes `declare_attackers`, `declare_blockers`, `combat_damage` n'existent que s'il y a des attaquants (`first_strike_damage`, entre `declare_blockers` et `combat_damage`, n'existe que s'il y a une créature à initiative ou à double initiative parmi les attaquants ou bloqueurs) ; chacune ouvre ensuite une ronde de priorité complète.
 
 ## Défausse au cleanup
 
 Comme les déclarations de combat, la défausse n'est pas une priorité : le joueur actif dont la main dépasse 7 cartes occupe `priority.holder` de la `DecisionRequest` (phase `cleanup`, actions de type `discard`, une par nom de carte) et est réinterrogé jusqu'à 7 cartes. Aucun état n'est ajouté à `GameState`.
+
+## Ronde de cleanup (règle 514.3a)
+
+Au cleanup, après la défausse à 7, si des états basés sur l'état ont agi ou si des triggers attendent, une ronde de priorité complète s'ouvre (`PriorityGranted`, `PriorityPassed`, pile résolue comme ailleurs), puis une **seconde étape `cleanup`** est émise (second `PhaseChanged` avec `phase: cleanup`, priorité remise à zéro). `GameState::$cleanupRound` (sauvegardé dans le snapshot) marque cette ronde : une reprise après une décision humaine pendant la ronde ne rejoue pas la défausse. Une ronde ne s'ouvre pas si rien ne s'est passé : le cleanup ne produit alors qu'un seul `PhaseChanged`. Le front n'a aucune règle à appliquer : il traite ces événements comme les autres.
 
 ## Triggers à mettre sur la pile
 
@@ -49,7 +58,7 @@ Quand un joueur a plusieurs façons de poser ses triggers (plusieurs triggers di
 
 ## Cartes publiques (`card`)
 
-`toPublic()` d'une carte. `token: true` n'est présent que pour un jeton, et `triggers` (liste : `event` = `etb` | `dies` | `upkeep`, `effect` = `damage` | `draw` | `token`, `amount`, `spec`) que pour une carte qui en a (clés omises sinon : au-delà de 16 clés par carte, PHP double la mémoire des tableaux d'état). Les capacités sérialisées portent `sacrifice` (bool : le coût sacrifie la source) et, seulement s'ils diffèrent de leur valeur par défaut, `sacrificeCreature` (bool), `discard` (nombre), `sorcerySpeed` (bool) et `spec` (`Nom:F/E` pour un jeton, `+F/+E` pour un bonus). Les effets possibles : `mana`, `damage`, `draw`, `token`, `pump`. Le type `enchantment` s'ajoute aux types de carte. `subtypes` (table type → sous-types, ex. `{"creature": ["Eldrazi"]}`, règle 205.3 : un sous-type est rangé sous son type) n'est présent que pour une carte qui en a.
+`toPublic()` d'une carte. `token: true` n'est présent que pour un jeton, et `triggers` (liste : `event` = `etb` | `dies` | `upkeep` | `attacks` | `end_step` | `cast` | `discard`, `effect` = `damage` | `draw` | `token`, `amount`, `spec`, `filter` = `instant_sorcery` seulement pour `cast`, omis sinon) que pour une carte qui en a (clés omises sinon : au-delà de 16 clés par carte, PHP double la mémoire des tableaux d'état). Les capacités sérialisées portent `sacrifice` (bool : le coût sacrifie la source) et, seulement s'ils diffèrent de leur valeur par défaut, `sacrificeCreature` (bool), `discard` (nombre), `sorcerySpeed` (bool) et `spec` (`Nom:F/E` pour un jeton, `+F/+E` pour un bonus). Les effets possibles : `mana`, `damage`, `draw`, `token`, `pump`. Le type `enchantment` s'ajoute aux types de carte. `subtypes` (table type → sous-types, ex. `{"creature": ["Eldrazi"]}`, règle 205.3 : un sous-type est rangé sous son type) n'est présent que pour une carte qui en a.
 
 ## Mana conditionnel
 

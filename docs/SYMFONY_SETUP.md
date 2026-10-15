@@ -41,7 +41,7 @@ vendor/bin/phpunit                          # 35 tests : suites "engine" (18), "
 vendor/bin/phpunit --testsuite api          # API seule (contrôleur -> service -> moteur -> Doctrine/MySQL)
 php bin/console lint:container
 php bin/console doctrine:schema:validate
-php bin/console debug:router                # 7 routes sous /api/simulations
+php bin/console debug:router                # 8 routes sous /api/simulations
 ```
 
 Les tests d'API (`tests/Api/SimulationApiTest.php`) utilisent la base `mtg_sim_test` (`.env.test` + `.env.test.local`), dont le schéma est recréé à chaque test : **MySQL doit tourner** pour les lancer.
@@ -57,6 +57,7 @@ Les tests d'API (`tests/Api/SimulationApiTest.php`) utilisent la base `mtg_sim_t
 | GET | `/api/simulations/{id}/pending` | Décision en attente (`actions`) |
 | POST | `/api/simulations/{id}/fork` | Bifurque (corps : `atEvent`, `controllers`) |
 | POST | `/api/simulations/{id}/decisions` | Répond à la décision en attente (`actionId`) |
+| PUT | `/api/simulations/{id}/stops` | Change les stops d'un joueur humain (`{player, stops}` (`stops` : objet ou `null`)) à la pause ou au checkpoint courant |
 
 Défaut = Commander à 4, J0 en `human:auto`. Pour 4 IA : `{"controllers":{"0":"ai:heuristic","1":"ai:heuristic","2":"ai:heuristic","3":"ai:heuristic"}}`.
 Erreurs : 409 (état incompatible : aucune décision attendue, aucun checkpoint), 422 (action, agent ou joueur inconnu), 404 (simulation absente), 400 (JSON invalide).
@@ -203,6 +204,15 @@ Decks inchangés depuis la mesure précédente, donc comparables. Médianes de `
 
 Lecture : seul le moteur a changé. Les événements sont identiques (empreintes sha1 de `bin/bench.php`, 21 graines). N = 1 conservé.
 
+#### Après les mots-clés du combat (mesuré le 2026-10-14, graines 42 / 6 / 16, MySQL 9.3)
+
+Decks modifiés (8 cartes à mots-clés à la place d'ours de remplissage), donc parties non comparables une à une. Médianes de `bin/measure.php` :
+
+- `create()` : seed 42 ~0,42 s (4406 événements), seed 6 ~0,30 s, seed 16 ~0,55 s (5498 événements, 50 tours).
+- `fork` au milieu : ~25 à 30 ms ; reconstruction au pire écart entre ancres : ≤ 44 ms ; taille en base : ~1,9 à 2,7 Mo.
+
+Lecture : le ralentissement de `create` par rapport au 2026-10-12 (seed 42 ~0,22 s) précède ce lot : `bin/bench.php` donnait déjà 5,0 s pour 21 graines (3,7 s le 2026-10-12) sur le code d'avant les mots-clés, avec des empreintes identiques. Cause non recherchée (charge de la machine ou travaux du 2026-10-13/14). N = 1 conservé.
+
 ## Persistance : `json_text` et insertions par lots
 
 - Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.
@@ -217,3 +227,13 @@ Lecture : seul le moteur a changé. Les événements sont identiques (empreintes
 - `make:migration` n'est pas installé : utiliser `doctrine:migrations:diff`. Les migrations sont écrites pour MySQL (SQL propre à MySQL) ; ne pas les rejouer sur une autre base.
 - `config/reference.php` est généré automatiquement par Symfony et change selon l'environnement : le versionner tel quel.
 - Le `memory_limit` du serveur doit rester confortable (le test d'API le fixe à 512 Mo).
+
+## Worker (simulations asynchrones)
+
+`POST /api/simulations` répond 202 (statut `queued`) et met un message `RunSimulation` dans la table `messenger_messages` (transport Doctrine, `auto_setup=0` : la table vient de la migration). Un worker doit tourner pour jouer la partie ; le front sonde `GET /api/simulations/{id}` (champs `status`, `progress`) :
+
+```bash
+cd backend && php bin/console messenger:consume async -vv
+```
+
+Sans worker, les simulations restent `queued`. En échec (`failed`), le message d'erreur est dans le champ `error` ; pas de relance automatique. En environnement `test`, le transport est `sync://` : la partie est jouée dans la requête.
