@@ -230,6 +230,16 @@ async function chain({ page, log, shot, info, prog }) {
 async function s8({ page, log, shot, info, problem, newUiGame }) {
   await newUiGame(7)
   const first = (title) => page.locator(`.actions h4:has-text("${title}") ~ button`).first()
+  // Cartes : celles que J0 peut jouer sont mises en évidence, et le survol ouvre l'aperçu agrandi.
+  await page.locator('.actions').waitFor({ timeout: TIMEOUT })
+  const playable = await page.locator('.card.playable').count()
+  if (!playable) problem('recette cartes : aucune carte jouable mise en évidence alors que J0 a la main')
+  else {
+    await page.locator('.card.playable').first().hover()
+    if (!(await page.locator('.card-preview').isVisible())) problem('recette cartes : le survol n\'ouvre pas l\'aperçu')
+  }
+  log('8 cartes jouables en évidence:', playable); await shot('8a-cartes')
+  await page.mouse.move(0, 0)
   let attacked = false, sawBlock = false
   for (let i = 0; i < 400 && !attacked; i++) {
     if (!(await page.locator('.actions').count())) break

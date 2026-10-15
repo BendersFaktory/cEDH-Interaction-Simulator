@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useSimulationStore } from '../stores/simulation'
 import PlayerArea from './PlayerArea.vue'
 import StackPanel from './StackPanel.vue'
+import CardPreview from './CardPreview.vue'
 import { phaseLabel } from '../engine/phases'
 
 const store = useSimulationStore()
@@ -39,5 +40,6 @@ const seated = computed(() => {
         :has-passed="view.priority.passed.includes(s.player.id)"
       />
     </div>
+    <CardPreview />
   </div>
 </template>

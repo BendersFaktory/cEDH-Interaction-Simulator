@@ -7,6 +7,8 @@
   --accent: #6aa9ff;
   --warn: #f2b84b;
   --bad: #ef6b6b;
+  --gold: #d4b25a;
+  --playable: #7ee08a;
   --mana-W: #f3ecc8; --mana-U: #5aa9e6; --mana-B: #a79bb5; --mana-R: #e8735a; --mana-G: #5fb86a; --mana-C: #c4c7cf; --mana-N: #9aa1b2;
   color-scheme: dark;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -86,7 +88,9 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .card.commander { box-shadow: 0 0 0 1px var(--warn) inset; }
 /* Engagée : pivotée d'un quart de tour ; writing-mode garde la place réservée dans le flux (pas de chevauchement). */
 .card.tapped { writing-mode: vertical-rl; opacity: .6; max-height: 120px; overflow: hidden; white-space: nowrap; }
-.card.tapped .card-mana, .card.tapped .card-abilities { display: inline-flex; flex-direction: column; }
+.card.tapped .card-mana { display: inline-flex; flex-direction: column; }
+/* Engagée : nom, coût et F/E seulement (le reste est dans l'aperçu), pour que la carte reste basse. */
+.card.tapped .card-abilities, .card.tapped .card-type, .card.tapped .card-keywords { display: none; }
 .card.token { border-style: dashed; }
 .card-token { margin-left: 5px; font-size: .75em; font-style: italic; opacity: .8; }
 @media (prefers-color-scheme: light) {
@@ -149,3 +153,25 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .stops input[type='checkbox'] { margin: 0; padding: 0; flex: none; width: 14px; height: 14px; }
 .stops .muted { margin: 8px 0 4px; }
 .stops > .inline:last-child { display: flex; gap: 6px; margin-top: 8px; }
+
+/* Cartes : cadre à la couleur de la carte, ligne de type, jouables en évidence */
+.card { border-left-width: 3px; cursor: default; }
+.card.frame-W { border-left-color: var(--mana-W); } .card.frame-U { border-left-color: var(--mana-U); } .card.frame-B { border-left-color: var(--mana-B); }
+.card.frame-R { border-left-color: var(--mana-R); } .card.frame-G { border-left-color: var(--mana-G); }
+.card.frame-C { border-left-color: var(--mana-C); } .card.frame-multi { border-left-color: var(--gold); }
+.card-type, .card-keywords { display: block; font-size: .7em; color: var(--muted); }
+.card-keywords { font-style: italic; }
+.card-pt { float: right; margin-left: 8px; padding: 0 4px; border-radius: 3px; background: rgba(255,255,255,.08); }
+.card.playable { box-shadow: 0 0 0 2px var(--playable), 0 0 8px var(--playable); }
+.card.playable.commander { box-shadow: 0 0 0 2px var(--playable), 0 0 8px var(--playable), 0 0 0 1px var(--warn) inset; }
+
+/* Aperçu agrandi de la carte survolée (fixe, ne capte pas la souris) */
+.card-preview { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: 260px; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--mana-C); border-radius: 8px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 13px; }
+.card-preview.frame-W { border-left-color: var(--mana-W); } .card-preview.frame-U { border-left-color: var(--mana-U); } .card-preview.frame-B { border-left-color: var(--mana-B); }
+.card-preview.frame-R { border-left-color: var(--mana-R); } .card-preview.frame-G { border-left-color: var(--mana-G); } .card-preview.frame-multi { border-left-color: var(--gold); }
+.card-preview header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card-preview .preview-type { margin: 4px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.card-preview .preview-text { margin: 0; padding-left: 16px; }
+.card-preview .preview-text li { margin: 2px 0; }
+.card-preview .preview-pt { margin-top: 6px; text-align: right; font-weight: 700; font-size: 15px; }

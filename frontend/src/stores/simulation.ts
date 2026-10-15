@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref } from 'vue'
 import { api } from '../api/client'
 import { replay } from '../engine/reducer'
-import type { GameEvent, SimulationView, StopsConfig } from '../types/engine'
+import type { GameEvent, PublicCard, SimulationView, StopsConfig } from '../types/engine'
 
 /**
  * Store central : journal d'événements + curseur.
@@ -195,12 +195,22 @@ export const useSimulationStore = defineStore('simulation', () => {
     })
   }
 
+  /** Cartes que le siège humain peut utiliser maintenant, d'après les actions légales du serveur (aucune règle côté front). */
+  const playableCardIds = computed(() => {
+    const p = pending.value
+    if (!p || !humanSeats.value.includes(p.player)) return new Set<string>()
+    return new Set(p.actions.filter((a) => a.cardId && a.player === p.player).map((a) => a.cardId!))
+  })
+
+  /** Carte survolée, montrée en grand par `CardPreview`. */
+  const hoveredCard = ref<PublicCard | null>(null)
+
   onScopeDispose(pause)
 
   return {
     simulation, events, cursor, playing, speedMs, showVerbose, loading, error, progress, waiting,
     lastSeq, atEnd, view, visibleEvents, checkpointSeqs, forkPoint, pending,
-    humanSeats, stopsOf, setStops,
+    humanSeats, stopsOf, setStops, playableCardIds, hoveredCard,
     load, create, step, stepBack, seek, play, pause, setSpeed, forkHere, decide,
   }
 })
