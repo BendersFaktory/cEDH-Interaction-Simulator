@@ -10,6 +10,7 @@ use App\Engine\Decision\DecisionRequired;
 use App\Engine\Rules\CombatManager;
 use App\Engine\Rules\HandSizeManager;
 use App\Engine\Rules\LegalActionGenerator;
+use App\Engine\Rules\MulliganManager;
 use App\Engine\Rules\PriorityManager;
 use App\Engine\Rules\StackResolver;
 use App\Engine\Rules\StateBasedActions;
@@ -30,6 +31,7 @@ final class GameEngine
     private readonly PriorityManager $priority;
     private readonly CombatManager $combat;
     private readonly HandSizeManager $handSize;
+    private readonly MulliganManager $mulligans;
     private readonly StateBasedActions $sba;
 
     public function __construct(
@@ -41,6 +43,7 @@ final class GameEngine
         $legal ??= new LegalActionGenerator();
         $this->combat = new CombatManager($agents, $legal);
         $this->handSize = new HandSizeManager($agents, $legal);
+        $this->mulligans = new MulliganManager($agents, $legal);
         $this->turns = new TurnManager($sba, $this->combat);
         $this->priority = new PriorityManager(
             $agents,
@@ -60,6 +63,10 @@ final class GameEngine
             for ($step = 0; !$s->over; $step++) {
                 if ($step > self::MAX_STEPS) {
                     throw new \LogicException('Garde-fou : trop d\'étapes dans advance().');
+                }
+                // Avant-partie : mulligans, avant la première étape (aucune priorité, donc aucun checkpoint).
+                if ($s->mulligan !== null) {
+                    $this->mulligans->run($s, $injected);
                 }
                 if (!$s->stepStarted) {
                     $this->turns->beginStep($s);

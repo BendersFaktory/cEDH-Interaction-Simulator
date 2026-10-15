@@ -198,6 +198,23 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'MulliganTaken': {
+      // La main retourne dans la bibliothèque ; les 7 CardDrawn suivants la refont.
+      const pl = v.players[p.player]
+      pl.hand = []
+      pl.library = p.library
+      break
+    }
+
+    case 'CardPutOnBottom': {
+      const pl = v.players[p.player]
+      removeCard(pl.hand, p.card.id)
+      pl.library = p.library
+      break
+    }
+
+    // 'HandKept' : aucun effet sur l'état affiché (le nombre de cartes au fond est dans le journal).
+
     case 'AttackerDeclared': {
       const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
       if (c) {

@@ -71,6 +71,14 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} gagne ${p.amount} PV (${p.source}) → ${p.life}`
     case 'CardDiscarded':
       return `J${p.player} défausse ${p.card.name} (main : ${p.hand})`
+    case 'MulliganTaken':
+      return `J${p.player} prend un mulligan (${p.mulligans})`
+    case 'HandKept':
+      return p.toBottom
+        ? `J${p.player} garde sa main (${p.toBottom} carte${p.toBottom > 1 ? 's' : ''} au fond)`
+        : `J${p.player} garde sa main`
+    case 'CardPutOnBottom':
+      return `J${p.player} met une carte au fond de sa bibliothèque`
     case 'AttackerDeclared':
       return `J${p.player} attaque J${p.defender} avec ${p.card}`
     case 'BlockerDeclared':

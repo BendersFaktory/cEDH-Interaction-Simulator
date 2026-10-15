@@ -6,6 +6,9 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 |---|---|---|---|
 | `GameStarted` | non | `seed`, `format` (`commander`), `firstPlayer` (id du premier joueur, tiré au sort, CR 103.1), `players: [{id, life, library, controller, command: [PublicCard]}]` | Crée les joueurs et leur zone de commandement |
 | `CardDrawn` | non | `player`, `card`, `library` (taille restante) | Carte en main, bibliothèque = `library` |
+| `MulliganTaken` | non | `player`, `mulligans` (nombre pris, celui-ci compris), `hand: 0`, `library` (taille après remise de la main) | Avant-partie : main vidée dans la bibliothèque (mélangée) ; suivi des 7 `CardDrawn` de la nouvelle main |
+| `HandKept` | non | `player`, `mulligans`, `toBottom` (cartes à mettre au fond : `max(0, mulligans - 1)`) | Avant-partie : main gardée ; `toBottom` `CardPutOnBottom` suivent (décision par carte) |
+| `CardPutOnBottom` | non | `player`, `card`, `hand` (taille de main résultante), `library` (taille résultante) | Main → fond de la bibliothèque (après un mulligan) |
 | `PhaseChanged` | non | `turn`, `phase` (`untap`\|`upkeep`\|`draw`\|`main1`\|`begin_combat`\|`declare_attackers`\|`declare_blockers`\|`first_strike_damage`\|`combat_damage`\|`end_combat`\|`main2`\|`end`\|`cleanup`), `activePlayer` | Met à jour tour/phase, efface la priorité. `untap` n'ouvre aucune ronde de priorité. `cleanup` non plus, sauf ronde de cleanup (voir « Ronde de cleanup ») : une seconde étape `cleanup` la suit alors |
 | `PermanentsUntapped` | non | `player`, `cards: [id]` | Dégage les permanents listés |
 | `PriorityGranted` | **oui** | `holder`, `passed: [id]`, `stackSize`, `checkpoint` (bool) | Détenteur de la priorité. **Point de bifurcation uniquement si `checkpoint` = true** (début de ronde ou pile non vide). Une ronde de cleanup (ci-dessous) émet des `PriorityGranted` de la même façon, pendant la phase `cleanup` |
@@ -43,6 +46,10 @@ Les cartes publiques (`PublicCard`) portent `keywords` : liste parmi `flying`, `
 ## Déclarations de combat
 
 `AttackerDeclared` / `BlockerDeclared` ne sont **pas** des priorités : le déclarant occupe `priority.holder` de la `DecisionRequest` (champ `declaring` = `attackers` | `blockers`) et est réinterrogé après chaque choix jusqu'à l'action `done`. Les étapes `declare_attackers`, `declare_blockers`, `combat_damage` n'existent que s'il y a des attaquants (`first_strike_damage`, entre `declare_blockers` et `combat_damage`, n'existe que s'il y a une créature à initiative ou à double initiative parmi les attaquants ou bloqueurs) ; chacune ouvre ensuite une ronde de priorité complète.
+
+## Mulligan de Londres (avant-partie)
+
+Après les 7 `CardDrawn` de départ et avant la première étape, chaque joueur, **dans l'ordre du tour à partir du premier joueur** (`firstPlayer`), garde sa main (action `keep`, id `keep:{p}`) ou prend un mulligan (`mulligan`, id `mulligan:{p}`, proposé tant que moins de 7 pris) : sa main retourne dans sa bibliothèque, mélangée, et il repioche 7 cartes. Le premier mulligan est gratuit (multijoueur, CR 103.5c) : une fois la main gardée, le joueur met au fond `mulligans - 1` cartes, une décision par carte (`bottom`, id `bottom:{p}:{cardId}`, champ `cardId`, une action par carte de la main). Ce n'est pas une priorité : le décideur occupe `priority.holder` de la `DecisionRequest` (phase `untap`, tour 1). Les décisions sont **séquentielles** (un joueur finit, mises au fond comprises, avant le suivant) et non simultanées comme dans CR 103.5 : sans effet pour des agents qui ne voient que leur main. L'état vit dans `GameState::$mulligan` (`{playerId: {taken, kept}}`, `null` ensuite ; clé `mulligan` du snapshot, absente une fois l'avant-partie finie). Aucun `PriorityGranted` n'est émis pendant l'avant-partie : il n'y a donc **aucun checkpoint, aucun fork ni état reconstruit (`GET /state?at=`) avant le premier `PriorityGranted`** ; une pause humaine pendant le mulligan est ancrée (état + décision) et le rejeu en repart.
 
 ## Défausse au cleanup
 

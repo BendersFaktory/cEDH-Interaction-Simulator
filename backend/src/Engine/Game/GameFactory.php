@@ -10,7 +10,8 @@ final class GameFactory
 {
     /**
      * Crée une partie Commander (40 PV, commandant en zone de commandement, main de 7).
-     * TODO: mulligan, pioche de départ configurable, ordre des sièges aléatoire.
+     * L'avant-partie (mulligan de Londres) commence ici : `mulligan` est initialisé, MulliganManager la mène au premier advance().
+     * TODO: pioche de départ configurable, ordre des sièges aléatoire.
      *
      * @param array<int, string> $controllers id joueur => clé d'agent.
      *        Exemple « tu joues J0 contre 3 IA » : [0 => 'human:auto', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic']
@@ -57,6 +58,7 @@ final class GameFactory
                 $s->drawCard($id);
             }
         }
+        $s->mulligan = array_map(static fn () => ['taken' => 0, 'kept' => false], $s->players);
 
         return $s;
     }

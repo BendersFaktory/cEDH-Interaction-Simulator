@@ -48,6 +48,13 @@ final class GameState
      * @var array<int, StopConfig>
      */
     public array $stops = [];
+    /**
+     * Avant-partie (mulligan de Londres, voir MulliganManager) : par joueur, mulligans pris et main gardée ; null une fois
+     * toutes les mains gardées et leurs cartes mises au fond. Sérialisé sous la clé `mulligan`, omise quand null.
+     *
+     * @var array<int, array{taken: int, kept: bool}>|null
+     */
+    public ?array $mulligan = null;
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -307,6 +314,9 @@ final class GameState
         if ($this->stops !== []) {
             $d['stops'] = array_map(static fn (StopConfig $c) => $c->toArray(), $this->stops);
         }
+        if ($this->mulligan !== null) {
+            $d['mulligan'] = $this->mulligan;
+        }
 
         return $d;
     }
@@ -347,6 +357,12 @@ final class GameState
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];
         foreach ($d['stops'] ?? [] as $id => $config) {
             $s->stops[(int) $id] = StopConfig::fromArray($config);
+        }
+        if (isset($d['mulligan'])) {
+            $s->mulligan = [];
+            foreach ($d['mulligan'] as $id => $m) {
+                $s->mulligan[(int) $id] = ['taken' => (int) $m['taken'], 'kept' => (bool) $m['kept']];
+            }
         }
 
         return $s;

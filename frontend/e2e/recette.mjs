@@ -76,6 +76,19 @@ async function makeCtx(browser, name) {
     await page.fill('input[placeholder="aléatoire"]', String(seed))
     await page.click('text=Nouvelle partie Commander')
     await page.waitForSelector('.actions', { timeout: TIMEOUT })
+    await keepUi()
+  }
+  // Mulligan de Londres : J0 humain démarre sur « Main de départ » ; on garde la main (et on met au fond s'il le faut).
+  const keepUi = async () => {
+    const keep = page.locator('.actions h4:has-text("Main de départ") ~ button:has-text("Garder")')
+    await keep.first().waitFor({ timeout: TIMEOUT })
+    await keep.first().click()
+    await page.waitForFunction(() => !document.querySelector('.actions')?.textContent.includes('Main de départ'), null, { timeout: TIMEOUT })
+    for (let i = 0; i < 10; i++) {
+      const bottom = page.locator('.actions h4:has-text("Mettre au fond") ~ button:not([disabled])').first()
+      if (!(await bottom.count())) break
+      await bottom.click(); await page.waitForTimeout(300)
+    }
   }
   // Ouvre une partie créée par l'API (champ « Charger # » + Ouvrir), se place à la fin du journal et attend le panneau d'actions.
   const openGame = async (id) => {
@@ -89,7 +102,7 @@ async function makeCtx(browser, name) {
     await page.click('button[title="Fin"]')
     await page.waitForSelector('.actions', { timeout: TIMEOUT })
   }
-  return { page, context, problems, shot, log, info, prog, problem, enabled, tryClick, newUiGame, openGame }
+  return { page, context, problems, shot, log, info, prog, problem, enabled, tryClick, newUiGame, keepUi, openGame }
 }
 
 /** Joue un scénario dans son propre contexte ; renvoie ses problèmes (une exception devient un problème). */
@@ -131,6 +144,7 @@ async function run() {
     ['12', (b) => scenario(b, '12', s12)],
     ['13', (b) => scenario(b, '13', s13)],
     ['14', (b) => scenario(b, '14', s14)],
+    ['16', (b) => scenario(b, '16', s16)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -153,13 +167,14 @@ async function run() {
 // ---------------------------------------------------------------------------------------------------------------------
 // Scénarios 1 à 7 : chaîne séquentielle dans une même page (chacun dépend de l'état du précédent).
 
-async function chain({ page, log, shot, info, prog }) {
+async function chain({ page, log, shot, info, prog, keepUi }) {
   log('1 vide:', (await page.locator('.empty').textContent()).trim()); await shot('1-vide')
 
   // 2 : partie humaine
   await page.fill('input[placeholder="aléatoire"]', '7')
   await page.click('text=Nouvelle partie Commander')
   await page.waitForSelector('.actions')
+  await keepUi()
   log('2 info:', await info(), '|', await prog()); await shot('2-humain')
   log('2 actions:', await page.locator('.actions button').allTextContents())
 
@@ -393,11 +408,12 @@ async function s12({ page, log, shot, info, problem, enabled, tryClick, openGame
 }
 
 // 13 : stops. J0 humain ; on ne garde que l'étape « Fin de tour » (options décochées), on applique, la partie reprend jusqu'à cette étape ; puis « Défaut ».
-async function s13({ page, log, shot, info, prog, problem }) {
+async function s13({ page, log, shot, info, prog, problem, keepUi }) {
   await page.fill('input[placeholder="aléatoire"]', '7')
   await page.click('text=Nouvelle partie Commander')
   await page.waitForSelector('.stops', { timeout: TIMEOUT })
   await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  await keepUi()
   for (const box of await page.locator('.stops input[type=checkbox]').all()) if (await box.isChecked()) await box.uncheck()
   await page.locator('.stops label:has-text("Fin de tour") input').check()
   const [applyRes] = await Promise.all([
@@ -434,7 +450,7 @@ async function s14({ page, log, shot, info, problem, enabled, tryClick, openGame
   let blocked = false, seed14 = null
   const tried = []
   // Graines où l'IA attaque J0 tôt depuis la cible d'attaque par menace (2026-10-14) : 49 (tour 6), 13, 24, 59, 22.
-  for (const seed of [49, 13, 24, 59, 22, 7, 18, 42, 6, 16, 122, 99, 150]) {
+  for (const seed of [24, 49, 13, 59, 22, 7, 18, 42, 6, 16, 122, 99, 150]) {
     if (blocked) break
     tried.push(seed)
     const sim = await api.createHuman(seed)
@@ -482,8 +498,8 @@ async function s15({ page, log, shot, problem, openGame, tryClick }) {
   let assigned = false, seed15 = null
   let assignText = '(absent)'
   const tried = []
-  // Graine connue d'abord (3 : J1 a deux bloqueurs), puis balayage 1..25 si les decks changent.
-  for (const seed of [3, ...Array.from({ length: 25 }, (_, i) => i + 1).filter((n) => n !== 3)]) {
+  // Graine connue d'abord (5 : J1 a deux bloqueurs, depuis le mulligan), puis balayage 1..25 si les decks changent.
+  for (const seed of [5, ...Array.from({ length: 25 }, (_, i) => i + 1).filter((n) => n !== 5)]) {
     if (assigned) break
     tried.push(seed)
     attacked = false
@@ -521,4 +537,35 @@ async function s15({ page, log, shot, problem, openGame, tryClick }) {
       if (Number(n) === 0 && hurt.some((t) => t.includes(`${id} subit`))) problem(`recette répartition : ${id} a reçu des dégâts alors que 0 lui était assigné (${assignText})`)
     }
   }
+}
+
+// 16 : mulligan de Londres. J0 prend deux mulligans (journal « (1) » puis « (2) »), garde, met une carte au fond ; sa main compte alors 6 cartes
+// et la partie démarre (une décision ordinaire apparaît).
+async function s16({ page, log, shot, info, problem }) {
+  await page.fill('input[placeholder="aléatoire"]', '7')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForSelector('.actions h4:has-text("Main de départ")', { timeout: TIMEOUT })
+  const mull = page.locator('.actions h4:has-text("Main de départ") ~ button:not([disabled]):has-text("Mulligan")')
+  for (const n of [1, 2]) {
+    await mull.first().click()
+    await page.locator(`text=/prend un mulligan \\(${n}\\)/`).first().waitFor({ timeout: TIMEOUT }).catch(() => problem(`recette mulligan : journal sans « prend un mulligan (${n}) »`))
+    await page.waitForFunction(() => !document.querySelector('.actions button:disabled'), null, { timeout: TIMEOUT })
+  }
+  await page.locator('.actions h4:has-text("Main de départ") ~ button:not([disabled]):has-text("Garder")').first().click()
+  const bottom = page.locator('.actions h4:has-text("Mettre au fond") ~ button:not([disabled])').first()
+  await bottom.waitFor({ timeout: TIMEOUT })
+  await page.screenshot({ path: `${S}/16-mulligan.png`, fullPage: true })
+  await bottom.click()
+  await page.locator('text=/met une carte au fond/').first().waitFor({ timeout: TIMEOUT }).catch(() => problem('recette mulligan : journal sans « met une carte au fond »'))
+  await page.waitForFunction(() => /Priorité|Terrains|Sorts/.test(document.querySelector('.actions')?.textContent ?? ''), null, { timeout: TIMEOUT })
+  // Main de J0 juste après la dernière carte mise au fond (avant sa pioche de tour), relue dans l'état reconstruit par l'API.
+  const id = Number((await info()).match(/#(\d+)/)[1])
+  const evs = await api.events(id)
+  const list = Array.isArray(evs) ? evs : evs.events
+  const last = list.filter((e) => e.type === 'CardPutOnBottom').at(-1)
+  const cp = list.find((e) => e.seq > (last?.seq ?? Infinity) && e.type === 'PriorityGranted' && e.payload.checkpoint)
+  const stateHand = cp ? (await api.state(id, cp.seq)).players[0].hand.length : -1
+  log('16 main de J0 après la mise au fond (premier checkpoint', cp?.seq, ') :', stateHand, '|', await info())
+  if (stateHand !== 6) problem(`recette mulligan : la main de J0 compte ${stateHand} cartes au lieu de 6`)
+  if (await page.locator('text=/garde sa main/').count() === 0) problem('recette mulligan : journal sans « garde sa main »')
 }
