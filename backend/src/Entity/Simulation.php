@@ -16,6 +16,8 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Table(name: 'simulation')]
 class Simulation
 {
+    public const QUEUED = 'queued'; // créée, pas encore jouée par le worker
+    public const FAILED = 'failed'; // le worker a échoué (voir error)
     public const RUNNING = 'running';
     public const WAITING = 'waiting'; // suspendue en attente d'une décision humaine
     public const OVER = 'over';
@@ -42,6 +44,17 @@ class Simulation
     /** DecisionRequest::toArray() quand status = waiting. */
     #[ORM\Column(type: 'json_text', nullable: true)]
     private ?array $pending = null;
+
+    /** Agents par joueur (id => clé) : le worker reconstruit la partie avec GameFactory::create($seed, $controllers). */
+    #[ORM\Column(type: 'json_text', nullable: true)]
+    private ?array $controllers = null;
+
+    /** Tour courant pendant la simulation asynchrone (écrit par UPDATE DBAL hors transaction). */
+    #[ORM\Column(nullable: true)]
+    private ?int $progress = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $error = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -109,6 +122,38 @@ class Simulation
     public function setPending(?array $pending): void
     {
         $this->pending = $pending;
+    }
+
+    /** @return array<int, string>|null */
+    public function getControllers(): ?array
+    {
+        return $this->controllers;
+    }
+
+    /** @param array<int, string>|null $controllers */
+    public function setControllers(?array $controllers): void
+    {
+        $this->controllers = $controllers;
+    }
+
+    public function getProgress(): ?int
+    {
+        return $this->progress;
+    }
+
+    public function setProgress(?int $progress): void
+    {
+        $this->progress = $progress;
+    }
+
+    public function getError(): ?string
+    {
+        return $this->error;
+    }
+
+    public function setError(?string $error): void
+    {
+        $this->error = $error;
     }
 
     public function getCreatedAt(): \DateTimeImmutable

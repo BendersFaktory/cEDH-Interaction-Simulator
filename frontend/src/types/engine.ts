@@ -138,7 +138,7 @@ export interface DecisionRequest {
   actions: ActionView[]
 }
 
-export type SimulationStatus = 'running' | 'waiting' | 'over'
+export type SimulationStatus = 'queued' | 'running' | 'waiting' | 'over' | 'failed'
 
 /** Étapes où un siège humain peut s'arrêter (valeurs de `PhaseChanged.phase`). */
 export const STOP_STEPS = [
@@ -160,6 +160,9 @@ export interface SimulationView {
   forkEventSeq: number | null
   seed: number
   status: SimulationStatus
+  /** Tour courant pendant la simulation asynchrone (queued/running). */
+  progress?: number | null
+  error?: string | null
   pending: DecisionRequest | null
   eventCount: number
   controllers: Record<string, string>

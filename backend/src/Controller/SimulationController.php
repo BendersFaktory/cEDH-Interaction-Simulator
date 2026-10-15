@@ -21,7 +21,7 @@ final class SimulationController extends AbstractController
     {
     }
 
-    /** Crée et joue une partie jusqu'à sa fin (ou jusqu'à la première décision humaine). */
+    /** Met une partie en file (202) ; le worker la joue jusqu'à sa fin (ou la première décision humaine). Sonder GET /{id}. */
     #[Route('', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
@@ -34,7 +34,7 @@ final class SimulationController extends AbstractController
             $controllers[(int) $id] = (string) $key;
         }
 
-        return $this->guard(fn () => $this->view($this->simulations->create($seed, $controllers)), 201);
+        return $this->guard(fn () => $this->view($this->simulations->create($seed, $controllers)), 202);
     }
 
     #[Route('/{id}', methods: ['GET'], requirements: ['id' => '\d+'])]
@@ -46,12 +46,18 @@ final class SimulationController extends AbstractController
     #[Route('/{id}/events', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function events(Simulation $simulation, Request $request): JsonResponse
     {
+        if ($busy = $this->busy($simulation)) {
+            return $busy;
+        }
         return $this->json($this->simulations->events($simulation, $request->query->getInt('after', 0)));
     }
 
     #[Route('/{id}/state', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function state(Simulation $simulation, Request $request): JsonResponse
     {
+        if ($busy = $this->busy($simulation)) {
+            return $busy;
+        }
         $at = $request->query->getInt('at', PHP_INT_MAX);
 
         return $this->json($this->simulations->stateAt($simulation, $at) ?? ['error' => 'Aucun checkpoint'], 200);
@@ -67,6 +73,9 @@ final class SimulationController extends AbstractController
     #[Route('/{id}/fork', methods: ['POST'], requirements: ['id' => '\d+'])]
     public function fork(Simulation $simulation, Request $request): JsonResponse
     {
+        if ($busy = $this->busy($simulation)) {
+            return $busy;
+        }
         $body = $request->toArray();
         $overrides = [];
         foreach (($body['controllers'] ?? []) as $id => $key) {
@@ -80,6 +89,9 @@ final class SimulationController extends AbstractController
     #[Route('/{id}/decisions', methods: ['POST'], requirements: ['id' => '\d+'])]
     public function decide(Simulation $simulation, Request $request): JsonResponse
     {
+        if ($busy = $this->busy($simulation)) {
+            return $busy;
+        }
         $actionId = (string) ($request->toArray()['actionId'] ?? '');
 
         return $this->guard(fn () => $this->view($this->simulations->decide($simulation, $actionId)));
@@ -89,6 +101,9 @@ final class SimulationController extends AbstractController
     #[Route('/{id}/stops', methods: ['PUT'], requirements: ['id' => '\d+'])]
     public function stops(Simulation $simulation, Request $request): JsonResponse
     {
+        if ($busy = $this->busy($simulation)) {
+            return $busy;
+        }
         $body = $request->toArray();
         $stops = $body['stops'] ?? null;
         if (!isset($body['player']) || !is_int($body['player']) || ($stops !== null && !is_array($stops))) {
@@ -104,6 +119,16 @@ final class SimulationController extends AbstractController
         }
     }
 
+    /** 409 tant que la simulation n'est pas jouée (ou si elle a échoué). */
+    private function busy(Simulation $s): ?JsonResponse
+    {
+        return match ($s->getStatus()) {
+            Simulation::QUEUED, Simulation::RUNNING => $this->json(['error' => 'Simulation en cours.', 'status' => $s->getStatus()], 409),
+            Simulation::FAILED => $this->json(['error' => 'Simulation en échec : ' . $s->getError(), 'status' => Simulation::FAILED], 409),
+            default => null,
+        };
+    }
+
     private function view(Simulation $s): array
     {
         return [
@@ -112,6 +137,8 @@ final class SimulationController extends AbstractController
             'forkEventSeq' => $s->getForkEventSeq(),
             'seed' => $s->getSeed(),
             'status' => $s->getStatus(),
+            'progress' => $s->getProgress(),
+            'error' => $s->getError(),
             'pending' => $s->getPending(),
             'eventCount' => $s->getState()['eventSeq'] ?? 0,
             'controllers' => $s->getState()['controllers'] ?? [],

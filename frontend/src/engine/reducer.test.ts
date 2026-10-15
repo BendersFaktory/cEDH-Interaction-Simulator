@@ -66,7 +66,7 @@ describe('reducer — combat', () => {
   })
 
   it('une créature morte est dans un cimetière ou en zone de commandement, jamais sur le champ de bataille', () => {
-    const died = events.find((e) => e.type === 'CreatureDied')!
+    const died = events.find((e) => e.type === 'CreatureDied' && e.payload.destination !== 'none')!
     const view = replay(events, died.seq)
     const pl = view.players[died.payload.player]
     expect(pl.battlefield.some((c) => c.id === died.payload.card.id)).toBe(false)
