@@ -191,9 +191,10 @@ final class SimulationApiTest extends WebTestCase
 
         $events = $this->events($id);
         $types = array_column($events, 'type');
-        self::assertSame(2, count(array_keys($types, 'MulliganTaken', true)));
+        $mulligansOfJ0 = array_filter($events, static fn (array $e) => $e['type'] === 'MulliganTaken' && $e['payload']['player'] === 0);
+        self::assertCount(2, $mulligansOfJ0, 'Les IA peuvent aussi prendre des mulligans');
         self::assertSame(4, count(array_keys($types, 'HandKept', true)));
-        $put = array_values(array_filter($events, static fn (array $e) => $e['type'] === 'CardPutOnBottom'));
+        $put = array_values(array_filter($events, static fn (array $e) => $e['type'] === 'CardPutOnBottom' && $e['payload']['player'] === 0));
         self::assertCount(1, $put);
         self::assertSame(6, $put[0]['payload']['hand']);
 

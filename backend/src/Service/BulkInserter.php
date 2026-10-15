@@ -62,17 +62,16 @@ class BulkInserter
 
     /**
      * Ancre posée à une pause humaine : complète l'ancre existante à ce seq (une ancre de tour peut coïncider
-     * avec la pause, contrainte unique), sinon en insère une.
+     * avec la pause, contrainte unique ; son état est gardé), sinon en insère une.
+     * Une seule requête : un UPDATE sans ligne suivi d'un INSERT posait un verrou de trou en fin d'index
+     * (REPEATABLE READ) et deux décisions simultanées sur des parties différentes s'interbloquaient (deadlock 1213).
      */
     public function anchorDecision(int $simulationId, int $seq, array $state, string $actionId): void
     {
-        $updated = $this->connection->executeStatement(
-            'UPDATE checkpoint SET decision = ? WHERE simulation_id = ? AND event_seq = ?',
-            [$actionId, $simulationId, $seq],
+        $this->connection->executeStatement(
+            'INSERT INTO checkpoint (simulation_id, event_seq, state, decision) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE decision = VALUES(decision)',
+            [$simulationId, $seq, $this->json($state), $actionId],
         );
-        if ($updated === 0) {
-            $this->insertCheckpoints($simulationId, [$seq => $state], [$seq => $actionId]);
-        }
     }
 
     /**

@@ -47,6 +47,15 @@ final class CardInstance
     /** Blessée par une source à contact mortel ce tour : détruite par les actions basées sur l'état (CR 704.5h), remis à faux au cleanup. */
     public bool $deathtouchDamage = false;
 
+    /**
+     * Mémo de `toPublic()` / `toArray()` : un même tableau rendu tant que la carte ne change pas est partagé (copie sur
+     * écriture) entre tous les états sérialisés ; une bibliothèque de 99 cartes ne coûte alors presque rien par checkpoint.
+     * Pur cache d'une fonction de l'objet, jamais sérialisé.
+     */
+    private ?array $publicMemo = null;
+    private ?array $arrayMemo = null;
+    private string $arrayMemoKey = '';
+
     public function __construct(
         public readonly string $id,
         public readonly string $name,
@@ -225,7 +234,8 @@ final class CardInstance
     /** Représentation exposée dans les événements (tout est public dans ce simulateur). */
     public function toPublic(): array
     {
-        return [
+        // Ne lit que des propriétés readonly : calculé une fois.
+        return $this->publicMemo ??= [
             'id' => $this->id,
             'name' => $this->name,
             'type' => count($this->types) === 1 ? $this->types[0] : $this->types,
@@ -247,8 +257,14 @@ final class CardInstance
 
     public function toArray(): array
     {
+        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus";
+        if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
+            return $this->arrayMemo;
+        }
+        $this->arrayMemoKey = $key;
+
         // `boost` omis sans bonus : au-delà de 16 clés, PHP double la table (voir toPublic).
-        return $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
+        return $this->arrayMemo = $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
             + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : [])
             + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : []);
     }

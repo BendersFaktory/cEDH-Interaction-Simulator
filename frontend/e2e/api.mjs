@@ -46,11 +46,11 @@ export const keepHands = async (sim) => {
   throw new Error(`simulation #${sim.id} : mulligan sans fin`)
 }
 
-/** Noms des cartes en main d'un joueur et nombre de terrains de base (même comptage que la recette d'origine). */
+/** Noms des cartes en main d'un joueur et nombre de terrains (basiques ou non, d'après le type de la carte). */
 export const handOf = async (id, player = 0) => {
   const hand = (await state(id)).players[player].hand
   const names = hand.map((c) => c.name)
-  const lands = (names.join(' ').match(/Mountain|Forest|Island|Plains|Swamp/g) ?? []).length
+  const lands = hand.filter((c) => [c.type].flat().includes('land')).length
   return { names, lands }
 }
 

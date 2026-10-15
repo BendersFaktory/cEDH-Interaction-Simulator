@@ -67,7 +67,7 @@ final class MultiTypeTest extends TestCase
         foreach ([0, 1, 2, 3] as $player) {
             $deck = Decks::commanderDemo($player);
             $this->assertCount(1, array_filter($deck['library'], static fn (CardInstance $c) => $c->name === 'Golem de Fer'), "J$player");
-            $this->assertCount(39, $deck['library']);
+            $this->assertCount(Decks::LIBRARY_SIZE, $deck['library']);
         }
     }
 }

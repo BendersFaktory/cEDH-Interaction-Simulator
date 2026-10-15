@@ -23,6 +23,16 @@ final class ColorIdentityTest extends TestCase
         return new CardInstance($name, $name, $type, 2, manaCost: $manaCost, abilities: $abilities);
     }
 
+    /** Complète la bibliothèque à 99 cartes avec des Montagnes (la taille est validée avant l'identité). */
+    private static function deck(CardInstance $commander, CardInstance ...$cards): array
+    {
+        for ($i = count($cards); $i < Decks::LIBRARY_SIZE; $i++) {
+            $cards[] = new CardInstance("m$i", 'Mountain', CardInstance::LAND, produces: ['R']);
+        }
+
+        return ['commander' => $commander, 'library' => $cards];
+    }
+
     public function testHybridCostGivesBothColors(): void
     {
         $this->assertSame(['U', 'R'], self::identity(self::spell('Hybride', '{1}{U/R}')));
@@ -54,10 +64,7 @@ final class ColorIdentityTest extends TestCase
 
     public function testCardOutsideCommanderIdentityIsRefused(): void
     {
-        $deck = [
-            'commander' => self::spell('Chef', '{1}{U}{R}'),
-            'library' => [self::spell('Ok', '{R}'), self::spell('Verte', '{1}{G}')],
-        ];
+        $deck = self::deck(self::spell('Chef', '{1}{U}{R}'), self::spell('Ok', '{R}'), self::spell('Verte', '{1}{G}'));
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Verte');
         Decks::validate($deck, 2);
@@ -65,10 +72,7 @@ final class ColorIdentityTest extends TestCase
 
     public function testCardInsideIdentityIsAccepted(): void
     {
-        Decks::validate([
-            'commander' => self::spell('Chef', '{1}{U}{R}'),
-            'library' => [self::spell('Ok', '{R}'), self::spell('Incolore', '{3}')],
-        ], 0);
+        Decks::validate(self::deck(self::spell('Chef', '{1}{U}{R}'), self::spell('Ok', '{R}'), self::spell('Incolore', '{3}')), 0);
         $this->addToAssertionCount(1);
     }
 

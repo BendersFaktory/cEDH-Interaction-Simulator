@@ -301,13 +301,17 @@ async function s9({ page, log, shot, problem, enabled, tryClick, newUiGame }) {
   if (!poolSeen) problem('recette mana : la réserve n\'apparaît pas après une capacité de mana')
 }
 
-// 10 : capacité à choix de coût (seed 18 : J0 a Goblin Bombardment et Llanowar Elves en main de départ).
-// Un pilote API joue J0 (terrains, Bombardment et créatures, pas d'attaque) jusqu'à ce que le sacrifice d'une créature pour
+// 10 : capacité à choix de coût. La graine se cherche par l'API (depuis les decks de 100 cartes) : J0 a Goblin Bombardment,
+// une créature à 1-2 mana et 2 terrains en main de départ. Un pilote API joue J0 (terrains, Bombardment et créatures, pas d'attaque) jusqu'à ce que le sacrifice d'une créature pour
 // 1 dégât à J1 soit proposé ; l'UI ouvre alors la partie et J0 clique ce sacrifice. Piloter clic par clic dépendait du timing
 // du navigateur : sur la CI, plus lente, un clic sur un bouton périmé faisait diverger la partie.
 async function s10({ page, log, shot, info, problem, tryClick, openGame }) {
+  const KNOWN_SEED_10 = 15 // graine retenue au dernier passage (essayée en premier)
   const SAC = /en sacrifiant.*→ joueur 1/
-  const CREATURE = /Goblin Bombardment|Llanowar|Grizzly/
+  const CHEAP = ['Llanowar Elves', 'Fyndhorn Elves', 'Elvish Mystic', 'Boreal Druid', 'Goblin Guide', 'Raging Goblin', 'Monastery Swiftspear',
+    'Grizzly Bears', 'Runeclaw Bear', 'Balduvian Bears', 'Kalonian Tusker', 'Deadly Recluse', 'Wild Mongrel', 'Hybrid Bear', 'Young Pyromancer',
+    'Elvish Visionary', 'Eldrazi Mimic', 'Alpha Myr', 'Perilous Myr', 'Iron Myr', 'Copper Myr']
+  const CREATURE = new RegExp(['Goblin Bombardment', ...CHEAP].join('|'))
   const policy = (p, step) => {
     const first = (type, re) => p.actions.find((a) => a.type === type && (!re || re.test(a.label)))
     if (step > 250) return null
@@ -315,9 +319,13 @@ async function s10({ page, log, shot, info, problem, tryClick, openGame }) {
     return first('discard') ?? first('done') ?? first('land') ?? first('cast', CREATURE) ?? first('pass') ?? null
   }
   let sacrificed = false, seed10 = null
-  for (const seed of [18, 42, 6, 16, 7, 99, 122, 150]) {
-    if (sacrificed) break
+  let drives = 0
+  for (const seed of [KNOWN_SEED_10, ...Array.from({ length: 400 }, (_, i) => i + 1)]) {
+    if (sacrificed || drives >= 6) break
     const sim = await api.createHuman(seed)
+    const { names, lands } = await api.handOf(sim.id)
+    if (!names.includes('Goblin Bombardment') || !names.some((n) => CHEAP.includes(n)) || lands < 2) continue
+    drives++
     if (!(await api.drive(sim.id, policy)).stopped) continue
     await openGame(sim.id)
     const sac = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("en sacrifiant"):has-text("→ joueur 1")').first()
@@ -336,7 +344,7 @@ async function s10({ page, log, shot, info, problem, tryClick, openGame }) {
 // 11 : trigger à cible. J0 doit avoir Goblin Bombardment et Perilous Myr en main de départ : findHandSeed cherche la graine (API).
 // J0 lance Bombardment et le Myr, sacrifie le Myr (1 dégât à J1), puis choisit J2 comme cible du trigger « meurt ».
 async function s11({ page, log, shot, info, problem, enabled, tryClick, openGame }) {
-  const { seed, id } = await findHandSeed(['Goblin Bombardment', 'Perilous Myr'], [222, 80, 197, 239, 273, 303, 327, 349], 3)
+  const { seed, id } = await findHandSeed(['Goblin Bombardment', 'Perilous Myr'], [218, 246, 538, 580], 3)
   log('11 graine retenue :', seed)
   await openGame(id)
   let triggered = false
@@ -368,7 +376,7 @@ async function s11({ page, log, shot, info, problem, enabled, tryClick, openGame
 // 12 : mana conditionnel. J0 doit avoir Eldrazi Temple et Eldrazi Mimic en main de départ : findHandSeed cherche la graine (API).
 // J0 joue le Temple, l'engage à la main pour {C}{C} restreint (pastilles marquées dans la réserve), puis lance le Mimic avec.
 async function s12({ page, log, shot, info, problem, enabled, tryClick, openGame }) {
-  const { seed, id } = await findHandSeed(['Eldrazi Temple', 'Eldrazi Mimic'], [170, 129, 154, 225, 238, 249, 258, 263])
+  const { seed, id } = await findHandSeed(['Eldrazi Temple', 'Eldrazi Mimic'], [211, 147, 453, 549])
   log('12 graine retenue :', seed)
   await openGame(id)
   let restrictedSeen = false
@@ -450,7 +458,7 @@ async function s14({ page, log, shot, info, problem, enabled, tryClick, openGame
   let blocked = false, seed14 = null
   const tried = []
   // Graines où l'IA attaque J0 tôt depuis la cible d'attaque par menace (2026-10-14) : 49 (tour 6), 13, 24, 59, 22.
-  for (const seed of [24, 49, 13, 59, 22, 7, 18, 42, 6, 16, 122, 99, 150]) {
+  for (const seed of [49, 24, 13, 59, 22, 7, 18, 42, 6, 16, 122, 99, 150]) {
     if (blocked) break
     tried.push(seed)
     const sim = await api.createHuman(seed)
@@ -471,13 +479,13 @@ async function s14({ page, log, shot, info, problem, enabled, tryClick, openGame
   if (!blocked) problem('recette blocage : J0 n\'a jamais pu bloquer un attaquant de l\'IA')
 }
 
-// 15 : J0 RÉPARTIT ses dégâts. L'IA ne double-bloque jamais (sauf menace, et aucune carte à menace n'est dans les decks de 40 cartes) :
+// 15 : J0 RÉPARTIT ses dégâts. L'IA ne double-bloque jamais (sauf menace) :
 // on crée donc, par l'API, une partie où J0 ET J1 sont humains (human:auto) et un pilote API joue : J0 attaque J1 avec une seule
 // créature ; J1 la bloque avec deux créatures ; jusqu'à ce que J0 ait une répartition AUTRE que celle par défaut. L'UI l'ouvre alors,
 // J0 choisit cette répartition et les assertions portent sur le journal.
 // Aucune dépendance au comportement de l'IA : seules les mains tirées comptent, d'où le balayage de graines si J1 n'a pas deux bloqueurs.
 async function s15({ page, log, shot, problem, openGame, tryClick }) {
-  const CREATURE = /Llanowar|Mongrel|Visionary|Golem|Myr|Pillard|Pyromancer|Mimic|Pinger|Bears|Commandant/
+  const CREATURE = /Elves|Mystic|Druid|Mongrel|Visionary|Golem|Myr|Pillard|Pyromancer|Mimic|Bear|Goblin Guide|Raging Goblin|Swiftspear|Tusker|Recluse|Courser|Armodon|Ogre|Merfolk|Sprite|Crow|Soldiers|Turtle|Drake|Sorcerer|Juggernaut|Commandant/
   const isOther = (a) => a.type === 'assign' && !/\(par défaut\)/.test(a.label)
   let attacked = false
   const policy = (p) => {
