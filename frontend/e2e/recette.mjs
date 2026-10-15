@@ -3,7 +3,7 @@
 // Les captures vont dans frontend/recette/ (ignoré par git), vidé puis recréé à chaque exécution.
 // Code de sortie 1 si une erreur console/réseau inattendue apparaît (seul le 404 de l'id inexistant est attendu).
 // Les scénarios sont des fonctions indépendantes (un contexte Chrome chacun) : la chaîne 1→7 est séquentielle, 8 à 15 sont
-// lancés en parallèle (pool de RECETTE_JOBS, défaut 4). Les graines des scénarios 10, 11, 12, 14 et 15 se cherchent par l'API
+// lancés en parallèle (pool de RECETTE_JOBS, défaut 4). Les graines des scénarios 10, 11, 12, 14, 15 et 17-19 se cherchent par l'API
 // (e2e/api.mjs) ; l'UI n'est ouverte que sur la partie trouvée.
 import { spawn } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
@@ -34,6 +34,10 @@ const start = async (name, url, cmd, args, cwd, env = {}) => {
 // Groupe de processus : php -S avec workers a des processus enfants.
 const stopAll = () => started.forEach((p) => { try { process.kill(-p.pid) } catch { p.kill() } })
 
+// Scénarios 17-19 (mots-clés de combat) : déclarés ici, la recette démarre plus bas avant la fin du module.
+const CHEAP_CREATURES = /Elves|Mystic|Druid|Goblin Guide|Raging Goblin|Swiftspear|Bear|Tusker|Recluse|Mongrel|Visionary|Mimic|Myr|Pyromancer|Merfolk|Soldiers|Crow|Sprite/
+const FLYER = /Storm Crow|Cloud Sprite|Wind Drake|Snapping Drake|Phantom Monster|Furnace Whelp/
+const TWO_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
 const T0 = Date.now()
 try {
   await start('API', 'http://127.0.0.1:8000/api/simulations/0', 'php', ['-d', 'memory_limit=512M', '-d', 'variables_order=EGPCS', '-S', '127.0.0.1:8000', '-t', 'public'], BACK, { PHP_CLI_SERVER_WORKERS: '4' })
@@ -145,6 +149,9 @@ async function run() {
     ['13', (b) => scenario(b, '13', s13)],
     ['14', (b) => scenario(b, '14', s14)],
     ['16', (b) => scenario(b, '16', s16)],
+    ['17', (b) => scenario(b, '17', s17)],
+    ['18', (b) => scenario(b, '18', s18)],
+    ['19', (b) => scenario(b, '19', s19)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -545,6 +552,139 @@ async function s15({ page, log, shot, problem, openGame, tryClick }) {
       if (Number(n) === 0 && hurt.some((t) => t.includes(`${id} subit`))) problem(`recette répartition : ${id} a reçu des dégâts alors que 0 lui était assigné (${assignText})`)
     }
   }
+}
+
+// 17-19 : mots-clés de combat vus par J0, sur le modèle du scénario 15 : J0 et J1 humains (human:auto), J2 et J3 IA. Un pilote API
+// joue les deux sièges humains jusqu'à la situation voulue, puis l'UI ouvre la partie et J0 fait le clic vérifié. Graines connues
+// (mains de départ trouvées côté moteur, 2026-10-16) d'abord, puis balayage court.
+
+/** Politique commune : défausse, terrains, sorts choisis, attaques choisies (une par combat), sinon « terminer » ou passer. */
+function seatPolicy({ cast, attack, block, stop, maxSteps = 600 }) {
+  const attacked = { 0: false, 1: false }
+  return (p, step) => {
+    const first = (type, re) => p.actions.find((a) => a.type === type && (!re || re.test(a.label)))
+    if (step > maxSteps) return null
+    if (stop(p, first)) return 'stop'
+    const seat = p.player
+    const discard = first('discard')
+    if (discard) return discard
+    const atk = attack[seat] && first('attack', attack[seat])
+    if (atk && !attacked[seat]) { attacked[seat] = true; return atk }
+    const blk = block[seat] && first('block', block[seat])
+    if (blk) return blk
+    const next = first('done') ?? first('land') ?? (cast[seat] && first('cast', cast[seat]))
+    if (next) return next
+    attacked[seat] = false
+    return first('pass') ?? null
+  }
+}
+
+/** Joue les graines jusqu'à ce que `check(page)` réussisse sur la partie ouverte. Renvoie { seed, tried }. */
+async function twoHumanSeeds(known, policy, openGame, check) {
+  const tried = []
+  for (const seed of [...known, ...Array.from({ length: 6 }, (_, i) => i + 1)]) {
+    tried.push(seed)
+    const sim = await api.create(seed, TWO_HUMANS)
+    const r = await api.drive(sim.id, policy(), 900)
+    if (!r.stopped) { console.log(`  graine ${seed} : situation non atteinte (${r.steps} décisions, ${r.sim.status})`); continue }
+    console.log(`  graine ${seed} : situation atteinte (#${sim.id}, ${r.steps} décisions), vérification dans l'UI`)
+    await openGame(sim.id)
+    if (await check()) return { seed, tried }
+  }
+  return { seed: null, tried }
+}
+
+// 17 : portée. J1 attaque J0 avec un volant ; J0 a Giant Spider ou Deadly Recluse et bloque le volant avec. Seules les créatures
+// à vol ou portée de J0 doivent être proposées pour bloquer le volant.
+async function s17({ page, log, shot, problem, openGame, tryClick }) {
+  const REACH = /Giant Spider|Deadly Recluse/
+  const policy = () => seatPolicy({
+    cast: { 0: new RegExp(`${REACH.source}|Elves|Mystic|Druid`), 1: FLYER },
+    attack: { 1: new RegExp(`Attaquer J0 avec (${FLYER.source})`) },
+    block: {},
+    stop: (p, first) => p.player === 0 && !!p.actions.find((a) => a.type === 'block' && new RegExp(`Bloquer (${FLYER.source}).* avec (${REACH.source})`).test(a.label)),
+  })
+  let blockLine = '(absent)', offered = []
+  const { seed, tried } = await twoHumanSeeds([120, 539], policy, openGame, async () => {
+    const buttons = page.locator('.actions h4:has-text("Bloquer") ~ button:not([disabled])')
+    offered = (await buttons.allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => FLYER.test(t.split(' avec ')[0]))
+    const reach = page.locator(`.actions h4:has-text("Bloquer") ~ button:not([disabled]):text-matches("(${FLYER.source}).* avec (${REACH.source})")`).first()
+    if (!(await reach.count()) || !(await tryClick(reach))) return false
+    await page.locator('text=/J0 bloque/').first().waitFor({ timeout: 10_000 }).catch(() => {})
+    blockLine = (await page.locator('text=/J0 bloque/').first().textContent().catch(() => null))?.replace(/\s+/g, ' ').trim() ?? '(absent)'
+    return blockLine !== '(absent)'
+  })
+  log('17 graine retenue :', seed, '(essayées :', tried.join(','), ') | blocages proposés sur le volant :', offered.join(' ; '), '| journal :', blockLine)
+  await page.locator('text=/J0 bloque/').first().scrollIntoViewIfNeeded().catch(() => {}); await shot('17-portee')
+  if (!seed) problem('recette portée : J0 n\'a jamais pu bloquer un volant avec Giant Spider ou Deadly Recluse')
+  const illegal = offered.filter((t) => !REACH.test(t.split(' avec ')[1] ?? ''))
+  if (illegal.length) problem(`recette portée : blocage d'un volant proposé à une créature sans vol ni portée : ${illegal.join(' ; ')}`)
+}
+
+// 18 : menace. J1 attaque J0 avec Boggart Brute ; J0 doit le bloquer avec deux créatures : après le premier bloqueur, « Terminer les
+// blocages » n'est pas proposé tant que le second n'est pas déclaré.
+async function s18({ page, log, shot, problem, openGame, tryClick }) {
+  const settle = () => page.waitForFunction(() => !document.querySelector('.actions button:disabled'), null, { timeout: TIMEOUT }).catch(() => {})
+  const policy = () => seatPolicy({
+    cast: { 0: CHEAP_CREATURES, 1: /Boggart Brute/ },
+    attack: { 1: /Attaquer J0 avec Boggart Brute/ },
+    block: {},
+    stop: (p, first) => p.player === 0 && !!first('block', /Bloquer Boggart Brute/),
+  })
+  const brute = () => page.locator('.actions h4:has-text("Bloquer") ~ button:not([disabled]):has-text("Bloquer Boggart Brute")')
+  let doneAfterOne = null, lines = []
+  const { seed, tried } = await twoHumanSeeds([211, 332, 458, 577], policy, openGame, async () => {
+    await settle()
+    const bruteId = ((await brute().first().textContent().catch(() => '')) ?? '').match(/Boggart Brute \((p\d+_c\d+)\)/)?.[1]
+    if (!bruteId || !(await tryClick(brute().first()))) { log('18 premier blocage impossible :', (await page.locator('.actions').textContent())?.replace(/\s+/g, ' ').slice(0, 400)); return false }
+    await page.locator('text=/J0 bloque/').first().waitFor({ timeout: 10_000 }).catch(() => {})
+    await settle()
+    doneAfterOne = (await page.locator('.actions button:not([disabled]):has-text("Terminer les blocages")').count()) > 0
+    if (!(await brute().count()) || !(await tryClick(brute().first()))) { log('18 second blocage impossible :', (await page.locator('.actions').textContent())?.replace(/\s+/g, ' ').slice(0, 300)); return false }
+    // Le journal nomme les cartes par leur id : « J0 bloque p1_c46 avec p0_c44 ».
+    await page.locator(`text=/J0 bloque ${bruteId} avec/`).nth(1).waitFor({ timeout: 10_000 }).catch(() => {})
+    lines = (await page.locator(`text=/J0 bloque ${bruteId} avec/`).allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())
+    return lines.length >= 2
+  })
+  log('18 graine retenue :', seed, '(essayées :', tried.join(','), ') | « Terminer » après un seul bloqueur :', doneAfterOne, '| journal :', lines.join(' ; '))
+  await page.locator('text=/J0 bloque p1_c\\d+ avec/').last().scrollIntoViewIfNeeded().catch(() => {}); await shot('18-menace')
+  if (!seed) problem('recette menace : J0 n\'a jamais pu bloquer Boggart Brute avec deux créatures')
+  if (doneAfterOne) problem('recette menace : « Terminer les blocages » proposé avec un seul bloqueur sur un attaquant à menace')
+}
+
+// 19 : piétinement. J0 attaque J1 avec Colossal Dreadmaw ou Yavimaya Wurm, J1 le bloque avec une seule créature ; J0 choisit la
+// répartition par défaut (létal au bloqueur, surplus à J1) : le journal doit montrer les deux.
+async function s19({ page, log, shot, problem, openGame, tryClick }) {
+  const TRAMPLER = /Colossal Dreadmaw|Yavimaya Wurm/
+  let blocked = false
+  const policy = () => {
+    blocked = false
+    return seatPolicy({
+      cast: { 0: new RegExp(`${TRAMPLER.source}|Elves|Mystic|Druid|Copper Myr`), 1: CHEAP_CREATURES },
+      attack: { 0: new RegExp(`Attaquer J1 avec (${TRAMPLER.source})`) },
+      block: { 1: { test: (label) => !blocked && TRAMPLER.test(label) && !/Wall of Stone/.test(label) && (blocked = true) } },
+      stop: (p) => p.player === 0 && p.actions.some((a) => a.type === 'assign' && / → joueur 1/.test(a.label) && /\(par défaut\)/.test(a.label)),
+    })
+  }
+  let assignText = '(absent)', hurt = [], toPlayer = []
+  const { seed, tried } = await twoHumanSeeds([67, 17, 83, 103, 106], policy, openGame, async () => {
+    const def = page.locator('.actions h4:has-text("Répartir les dégâts de combat") ~ button:not([disabled]):has-text("(par défaut)")').first()
+    if (!(await def.count())) return false
+    assignText = (await def.textContent())?.replace(/\s+/g, ' ').trim()
+    if (!(await tryClick(def))) return false
+    await page.waitForTimeout(500)
+    hurt = (await page.locator('text=/subit \\d+ dégâts/').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())
+    toPlayer = (await page.locator('text=/inflige \\d+ à J1/').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())
+    return true
+  })
+  log('19 graine retenue :', seed, '(essayées :', tried.join(','), ') | répartition :', assignText, '| journal :', [...hurt.slice(-1), ...toPlayer.slice(-1)].join(' ; '))
+  await page.locator('text=/inflige \\d+ à J1/').last().scrollIntoViewIfNeeded().catch(() => {}); await shot('19-pietinement')
+  if (!seed) { problem('recette piétinement : J0 n\'a jamais eu à répartir les dégâts d\'un piétineur bloqué'); return }
+  const m = assignText.match(/: (\d+) → [^,]*\((p\d+_c\d+)\), (\d+) → joueur 1/)
+  if (!m) { problem(`recette piétinement : répartition illisible : ${assignText}`); return }
+  const [, toBlocker, blockerId, surplus] = m
+  if (!hurt.some((t) => new RegExp(`${blockerId} subit ${toBlocker} dégâts`).test(t))) problem(`recette piétinement : « ${blockerId} subit ${toBlocker} dégâts » absent du journal`)
+  if (!toPlayer.some((t) => new RegExp(`inflige ${surplus} à J1`).test(t))) problem(`recette piétinement : surplus de ${surplus} à J1 absent du journal`)
 }
 
 // 16 : mulligan de Londres. J0 prend deux mulligans (journal « (1) » puis « (2) »), garde, met une carte au fond ; sa main compte alors 6 cartes
