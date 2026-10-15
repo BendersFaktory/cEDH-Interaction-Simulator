@@ -10,7 +10,7 @@ final class GameFactory
 {
     /**
      * Crée une partie Commander (40 PV, commandant en zone de commandement, main de 7).
-     * TODO: mulligan, pioche de départ configurable, ordre du tour tiré au sort (via $rng).
+     * TODO: mulligan, pioche de départ configurable, ordre des sièges aléatoire.
      *
      * @param array<int, string> $controllers id joueur => clé d'agent.
      *        Exemple « tu joues J0 contre 3 IA » : [0 => 'human:auto', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic']
@@ -28,15 +28,21 @@ final class GameFactory
         $players = [];
         foreach (array_keys($controllers) as $id) {
             $deck = $deckBuilder($id);
+            Decks::validate($deck, $id);
             $player = new PlayerState($id, $startingLife, $rng->shuffle($deck['library']));
             $player->command[] = $deck['commander'];
             $players[$id] = $player;
         }
 
         $s = new GameState($players, $rng, $controllers);
+        // CR 103.1 : le premier joueur est tiré au sort (les sièges et l'ordre du tour restent fixes).
+        $ids = array_keys($s->players);
+        $s->activePlayer = $ids[$rng->int(0, count($ids) - 1)];
+        $s->priority = new PriorityState($s->activePlayer);
         $s->emit('GameStarted', [
             'seed' => $seed,
             'format' => 'commander',
+            'firstPlayer' => $s->activePlayer,
             'players' => array_map(static fn (PlayerState $p) => [
                 'id' => $p->id,
                 'life' => $p->life,

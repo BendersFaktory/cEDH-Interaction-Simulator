@@ -4,7 +4,7 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 
 | Type | Verbeux | Payload | Effet sur l'état affiché |
 |---|---|---|---|
-| `GameStarted` | non | `seed`, `format` (`commander`), `players: [{id, life, library, controller, command: [PublicCard]}]` | Crée les joueurs et leur zone de commandement |
+| `GameStarted` | non | `seed`, `format` (`commander`), `firstPlayer` (id du premier joueur, tiré au sort, CR 103.1), `players: [{id, life, library, controller, command: [PublicCard]}]` | Crée les joueurs et leur zone de commandement |
 | `CardDrawn` | non | `player`, `card`, `library` (taille restante) | Carte en main, bibliothèque = `library` |
 | `PhaseChanged` | non | `turn`, `phase` (`untap`\|`upkeep`\|`draw`\|`main1`\|`begin_combat`\|`declare_attackers`\|`declare_blockers`\|`first_strike_damage`\|`combat_damage`\|`end_combat`\|`main2`\|`end`\|`cleanup`), `activePlayer` | Met à jour tour/phase, efface la priorité. `untap` n'ouvre aucune ronde de priorité. `cleanup` non plus, sauf ronde de cleanup (voir « Ronde de cleanup ») : une seconde étape `cleanup` la suit alors |
 | `PermanentsUntapped` | non | `player`, `cards: [id]` | Dégage les permanents listés |

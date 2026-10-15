@@ -17,7 +17,7 @@ export function describeEvent(e: GameEvent): string {
   const p = e.payload
   switch (e.type) {
     case 'GameStarted':
-      return `Début de partie (seed ${p.seed})`
+      return p.firstPlayer === undefined ? `Début de partie (seed ${p.seed})` : `Début de partie (seed ${p.seed}) — J${p.firstPlayer} commence`
     case 'CardDrawn':
       return `J${p.player} pioche ${p.card.name}`
     case 'PhaseChanged':

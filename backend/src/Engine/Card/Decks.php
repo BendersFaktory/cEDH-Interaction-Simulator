@@ -7,12 +7,34 @@ namespace App\Engine\Card;
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Game\CardInstance;
+use App\Engine\Mana\Color;
 
 /**
  * Decks de démo codés en dur. TODO: DeckLoader branché sur Scryfall (cache en base) + CardDefinition.
  */
 final class Decks
 {
+    /**
+     * Identité de couleurs Commander (CR 903.4) : toute carte de la bibliothèque doit avoir une identité incluse dans celle
+     * du commandant. (La règle singleton n'est pas appliquée : les decks de démo ont des doublons.)
+     *
+     * @param array{commander: CardInstance, library: list<CardInstance>} $deck
+     * @throws \InvalidArgumentException
+     */
+    public static function validate(array $deck, int $playerId): void
+    {
+        $allowed = array_map(static fn (Color $c) => $c->symbol(), $deck['commander']->colorIdentity());
+        foreach ($deck['library'] as $card) {
+            $outside = array_diff(array_map(static fn (Color $c) => $c->symbol(), $card->colorIdentity()), $allowed);
+            if ($outside !== []) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Joueur %d : « %s » (couleurs %s) sort de l\'identité de couleurs du commandant « %s » (%s).',
+                    $playerId, $card->name, implode('', $outside), $deck['commander']->name, implode('', $allowed) ?: 'incolore',
+                ));
+            }
+        }
+    }
+
     /**
      * Mini-Commander de démonstration : 1 commandant + 39 cartes (un vrai deck en compte 99).
      * Volontairement court pour garder des parties et des snapshots légers pendant le développement.

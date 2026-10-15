@@ -78,10 +78,14 @@ final class SimulationApiTest extends WebTestCase
 
         self::assertSame('over', $sim['status']);
         self::assertNull($sim['pending']);
-        self::assertSame(4496, $sim['eventCount'], 'Même partie que bin/smoke.php 42');
+        // Même partie que bin/smoke.php 42 : le moteur seul donne le nombre d'événements attendu.
+        $expected = count((new \App\Engine\Game\GameEngine(new \App\Engine\Agent\AgentRegistry()))->advance(
+            \App\Engine\Game\GameFactory::create(42, [0 => 'ai:heuristic', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic']),
+        )->events);
+        self::assertSame($expected, $sim['eventCount']);
 
         $events = $this->events($sim['id']);
-        self::assertCount(4496, $events);
+        self::assertCount($expected, $events);
         self::assertSame('GameOver', end($events)['type']);
         $seqs = array_column($events, 'seq');
         $sorted = $seqs;

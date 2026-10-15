@@ -113,6 +113,48 @@ final class CardInstance
         return $cost->hybrid === [] && array_diff(array_keys($cost->colored), ['C']) === [];
     }
 
+    /**
+     * Identité de couleurs (CR 903.4) : couleurs des symboles du coût de mana (hybride `{U/R}` = U et R ; `{C}` et générique
+     * n'ajoutent rien) et de ceux des capacités activées (coût et mana produit, dont `produces` d'un terrain). Calculée à la
+     * demande, jamais sérialisée.
+     *
+     * @return list<Color> triée dans l'ordre WUBRG, sans doublon
+     */
+    public function colorIdentity(): array
+    {
+        $found = [];
+        $addCost = static function (ManaCost $cost) use (&$found): void {
+            foreach (array_keys($cost->colored) as $symbol) {
+                $found[$symbol] = true;
+            }
+            foreach ($cost->hybrid as [$a, $b]) {
+                $found[$a->symbol()] = true;
+                $found[$b->symbol()] = true;
+            }
+        };
+        if (!$this->isLand()) {
+            $addCost($this->manaCost());
+        }
+        foreach ($this->abilities() as $ability) {
+            if ($ability->manaCost !== null) {
+                $addCost($ability->manaCost);
+            }
+            foreach ($ability->options as $option) {
+                foreach ($option as $color) {
+                    $found[$color->symbol()] = true;
+                }
+            }
+        }
+        if ($this->adds !== null) {
+            $addCost(ManaCost::parse($this->adds));
+        }
+
+        return array_values(array_filter(
+            Color::cases(),
+            static fn (Color $c) => $c !== Color::Colorless && isset($found[$c->symbol()]),
+        ));
+    }
+
     /** Coût de mana structuré (les terrains n'ont pas de coût). */
     public function manaCost(): ManaCost
     {
