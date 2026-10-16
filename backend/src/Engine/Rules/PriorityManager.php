@@ -48,10 +48,10 @@ final class PriorityManager
         for ($i = 0; $i < self::MAX_ITERATIONS; $i++) {
             $p = $s->priority;
 
-            // Triggers en attente (y compris après une action spéciale comme jouer un terrain, ou à la reprise d'un choix
-            // d'ordre/cible) : posés avant que quiconque reçoive la priorité.
-            if (!$p->announced || $s->pendingTriggers !== []) {
-                $this->sba->check($s);
+            // SBA puis triggers en attente (y compris après une action spéciale comme jouer un terrain, ou à la reprise d'un
+            // choix de légende, d'ordre ou de cible) : avant que quiconque reçoive la priorité.
+            if (!$p->announced || $s->pendingTriggers !== [] || $s->sbaResume !== null) {
+                $this->sba->check($s, $injected);
                 if ($s->over) {
                     return;
                 }

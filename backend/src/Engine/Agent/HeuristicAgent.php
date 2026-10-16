@@ -7,11 +7,15 @@ namespace App\Engine\Agent;
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
+use App\Engine\Action\BottomCard;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
+use App\Engine\Action\KeepHand;
+use App\Engine\Action\KeepLegend;
+use App\Engine\Action\Mulligan;
 use App\Engine\Action\PlayLand;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Game\CardInstance;
@@ -32,6 +36,8 @@ use App\Engine\Mana\ManaPayment;
  * assez de sources non engagées pour le payer (voir `keepCounterMana`).
  * Défausse (main > 7), par ordre : terrain en surplus, carte injouable (couleur introuvable ou coût hors de portée), carte la
  * plus chère ; on garde en dernier les contresorts puis les terrains dont on a besoin (voir `discard`).
+ * Mulligan (tous profils) : garde une main de 2 à 5 terrains, sinon prend un mulligan tant qu'il en a pris moins de 2,
+ * sinon garde ; les cartes à mettre au fond sont choisies comme une défausse (voir `discard`).
  * Combat : attaque avec toutes ses créatures sur l'adversaire qu'elle peut tuer, sinon le plus menaçant (sauf le commandant s'il peut mourir, et une
  * garde si un adversaire peut me tuer) ; bloque quand le bloqueur survit ou tue l'attaquant, bloque à deux quand la paire
  * tue l'attaquant sans mourir toute entière, et chump-bloque seulement si l'attaque est létale.
@@ -71,6 +77,9 @@ final class HeuristicAgent implements PlayerAgent
 
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
+        if ($state->mulligan !== null) {
+            return $this->mulliganDecision($state, $legal, $playerId);
+        }
         $discards = array_values(array_filter($legal, static fn (Action $a) => $a instanceof Discard));
         if ($discards !== []) {
             return $this->discard($state, $discards, $playerId);
@@ -78,6 +87,10 @@ final class HeuristicAgent implements PlayerAgent
         $triggers = array_values(array_filter($legal, static fn (Action $a) => $a instanceof PutTrigger));
         if ($triggers !== []) {
             return $this->putTrigger($state, $triggers, $playerId);
+        }
+        $legends = array_values(array_filter($legal, static fn (Action $a) => $a instanceof KeepLegend));
+        if ($legends !== []) {
+            return $this->keepLegend($state, $legends, $playerId);
         }
         if ($state->combat->declaring === 'attackers') {
             return $this->declareAttackers($state, $legal, $playerId);
@@ -510,6 +523,27 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
+     * Règle des légendes : garde le permanent dégagé (il peut encore servir ce tour), à défaut le plus ancien sur le champ
+     * de bataille (premier proposé à égalité).
+     *
+     * @param non-empty-list<KeepLegend> $legends
+     */
+    private function keepLegend(GameState $state, array $legends, int $playerId): KeepLegend
+    {
+        $best = $legends[0];
+        $bestKey = null;
+        foreach ($legends as $action) {
+            $card = $state->player($playerId)->findOnBattlefield($action->cardId);
+            $key = [$card?->tapped ? 1 : 0, $card?->enteredTurn ?? PHP_INT_MAX];
+            if ($bestKey === null || $key < $bestKey) {
+                [$best, $bestKey] = [$action, $key];
+            }
+        }
+
+        return $best;
+    }
+
+    /**
      * Premier trigger de la file ; s'il cible, l'adversaire vivant le plus faible (égalité : plus petit id), jamais soi-même
      * s'il y a un autre choix.
      *
@@ -537,7 +571,31 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
-     * Défausse d'une carte (la décision est reprise carte par carte). Score le plus haut défaussé en premier :
+     * Avant-partie : garder 2 à 5 terrains ; sinon mulligan tant que moins de 2 pris ; mise au fond = classement de la défausse.
+     *
+     * @param list<Action> $legal
+     */
+    private function mulliganDecision(GameState $state, array $legal, int $playerId): Action
+    {
+        $bottoms = array_values(array_filter($legal, static fn (Action $a) => $a instanceof BottomCard));
+        if ($bottoms !== []) {
+            return $this->discard($state, $bottoms, $playerId);
+        }
+        $lands = count(array_filter($state->player($playerId)->hand, static fn (CardInstance $c) => $c->isLand()));
+        $taken = $state->mulligan[$playerId]['taken'] ?? 0;
+        $wanted = ($lands < 2 || $lands > 5) && $taken < 2 ? Mulligan::class : KeepHand::class;
+        foreach ($legal as $action) {
+            if ($action instanceof $wanted) {
+                return $action;
+            }
+        }
+
+        return $legal[0];
+    }
+
+    /**
+     * Défausse d'une carte (la décision est reprise carte par carte). Sert aussi à choisir les cartes à mettre au fond
+     * après un mulligan (aucun terrain en jeu : un terrain n'y est en surplus qu'à partir de 5 en main). Score le plus haut défaussé en premier :
      *  1. terrain en surplus (>= 5 en jeu, ou >= 3 en jeu et >= 3 en main) : 1000, +5 s'il n'apporte aucune couleur nouvelle ;
      *  2. carte injouable : couleur que ni le jeu ni les terrains en main ne produisent (avec au moins 3 terrains en jeu, avant
      *     cela les couleurs ne sont pas fixées), ou valeur de mana à plus de 3 au dessus du mana potentiel (sources en jeu +
@@ -546,7 +604,7 @@ final class HeuristicAgent implements PlayerAgent
      *  4. on garde en dernier : un terrain utile (-1, ou -1000 s'il y en a moins de 4 en jeu) et un contresort (-500).
      * Égalité : plus petit id.
      *
-     * @param list<Discard> $discards
+     * @param list<Discard|BottomCard> $discards
      */
     private function discard(GameState $state, array $discards, int $playerId): Action
     {
@@ -561,7 +619,7 @@ final class HeuristicAgent implements PlayerAgent
         foreach ($discards as $d) {
             $card = $p->findInHand($d->cardId);
             if ($card->isLand()) {
-                if ($lands >= 5 || ($lands >= 3 && $handLands >= 3)) {
+                if ($lands >= 5 || ($lands >= 3 && $handLands >= 3) || ($state->mulligan !== null && $handLands >= 5)) {
                     $score = 1000 + (array_diff_key($this->producedSymbols([$card]), $produced) === [] ? 5 : 0);
                 } else {
                     $score = $lands < 4 ? -1000 : -1;

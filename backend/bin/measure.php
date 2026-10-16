@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * Mesure taille en base et latence (création, fork, reconstruction d'état) sur des parties 4 IA.
+ * Mesure taille en base et latence (création + partie jouée, fork, reconstruction d'état) sur des parties 4 IA.
  *   APP_DEBUG=0 php -d memory_limit=512M bin/measure.php [seed...]      (MySQL doit tourner)
  * Les parties créées sont supprimées à la fin (cascade sur événements et checkpoints).
  */
@@ -13,6 +13,8 @@ use App\Service\BulkInserter;
 use App\Service\SimulationService;
 use App\Service\StateReconstructor;
 use Symfony\Component\Dotenv\Dotenv;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -24,7 +26,14 @@ $doctrine = $kernel->getContainer()->get('doctrine');
 $em = $doctrine->getManager();
 $conn = $doctrine->getConnection();
 $reconstructor = new StateReconstructor($em);
-$service = new SimulationService($em, new BulkInserter($conn), $reconstructor, (int) $kernel->getContainer()->getParameter('app.checkpoint_every_n_turns'));
+// Bus inerte : la partie est jouée juste après par start(), comme le ferait le worker Messenger.
+$bus = new class implements MessageBusInterface {
+    public function dispatch(object $message, array $stamps = []): Envelope
+    {
+        return new Envelope($message, $stamps);
+    }
+};
+$service = new SimulationService($em, new BulkInserter($conn), $reconstructor, $bus, (int) $kernel->getContainer()->getParameter('app.checkpoint_every_n_turns'));
 
 const REPEATS = 5;
 $seeds = array_map('intval', array_slice($argv, 1)) ?: [42, 6, 16];
@@ -55,7 +64,7 @@ foreach ($seeds as $seed) {
     $creates = [];
     $sim = null;
     for ($i = 0; $i < REPEATS; $i++) {
-        [$sim, $ms] = timed(fn () => $service->create($seed, $ai));
+        [$sim, $ms] = timed(fn () => $service->start($service->create($seed, $ai)));
         $creates[] = $ms;
         $created[] = $sim->getId();
         $em->clear();

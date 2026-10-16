@@ -15,7 +15,7 @@ use App\Engine\Event\GameEvent;
 final class GameState
 {
     /** Version du format de `toArray()` ; à incrémenter quand la sérialisation change de façon incompatible. */
-    public const FORMAT_VERSION = 2;
+    public const FORMAT_VERSION = 3;
 
     public int $turn = 1;
     public int $activePlayer;
@@ -42,12 +42,24 @@ final class GameState
      */
     public bool $cleanupRound = false;
     /**
+     * Priorité à rétablir après un choix demandé par les SBA (règle des légendes, voir StateBasedActions) ; null hors de
+     * ce choix. Sérialisé sous `sbaResume`, omis quand null.
+     */
+    public ?PriorityState $sbaResume = null;
+    /**
      * Stops de l'auto-pass par joueur (voir StopConfig) ; un joueur absent garde le comportement par défaut. Sérialisé
      * sous la clé `stops`, omise quand le tableau est vide (ne gonfle pas les états des parties sans config).
      *
      * @var array<int, StopConfig>
      */
     public array $stops = [];
+    /**
+     * Avant-partie (mulligan de Londres, voir MulliganManager) : par joueur, mulligans pris et main gardée ; null une fois
+     * toutes les mains gardées et leurs cartes mises au fond. Sérialisé sous la clé `mulligan`, omise quand null.
+     *
+     * @var array<int, array{taken: int, kept: bool}>|null
+     */
+    public ?array $mulligan = null;
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -135,12 +147,17 @@ final class GameState
         return $events;
     }
 
-    /** Pioche une carte et journalise. Retourne false si la bibliothèque est vide. */
+    /**
+     * Pioche une carte et journalise. Retourne false si la bibliothèque est vide : le joueur perdra à la prochaine
+     * vérification des SBA (CR 704.5b), pas tout de suite.
+     */
     public function drawCard(int $playerId): bool
     {
         $p = $this->player($playerId);
         $card = array_shift($p->library);
         if ($card === null) {
+            $p->drewFromEmpty = true;
+
             return false;
         }
         $p->hand[] = $card;
@@ -150,19 +167,14 @@ final class GameState
     }
 
     /**
-     * Envoie une carte au cimetière de son propriétaire, SAUF un commandant qui retourne en zone de commandement
-     * (règle de remplacement de Commander) et un jeton qui cesse d'exister (règle 111.7).
-     * Retourne la destination réelle : 'graveyard' | 'command' | 'none'.
+     * Envoie une carte au cimetière de son propriétaire, SAUF un jeton qui cesse d'exister (règles 111.7 et 704.5d).
+     * Un commandant va bien au cimetière (ses triggers « meurt » se déclenchent) ; les SBA le renvoient ensuite en zone
+     * de commandement (CR 903.9a, voir StateBasedActions). Retourne la destination réelle : 'graveyard' | 'none'.
      */
     public function sendToGraveyard(int $ownerId, CardInstance $card): string
     {
         if ($card->token) {
             return 'none';
-        }
-        if ($card->commander) {
-            $this->player($ownerId)->command[] = $card;
-
-            return 'command';
         }
         $this->player($ownerId)->graveyard[] = $card;
 
@@ -307,6 +319,12 @@ final class GameState
         if ($this->stops !== []) {
             $d['stops'] = array_map(static fn (StopConfig $c) => $c->toArray(), $this->stops);
         }
+        if ($this->mulligan !== null) {
+            $d['mulligan'] = $this->mulligan;
+        }
+        if ($this->sbaResume !== null) {
+            $d['sbaResume'] = $this->sbaResume->toArray();
+        }
 
         return $d;
     }
@@ -338,6 +356,7 @@ final class GameState
         $s->nextTriggerId = (int) ($d['nextTriggerId'] ?? 1);
         $s->triggerResumeHolder = isset($d['triggerResumeHolder']) ? (int) $d['triggerResumeHolder'] : null;
         $s->cleanupRound = (bool) ($d['cleanupRound'] ?? false);
+        $s->sbaResume = isset($d['sbaResume']) ? PriorityState::fromArray($d['sbaResume']) : null;
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];
@@ -347,6 +366,12 @@ final class GameState
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];
         foreach ($d['stops'] ?? [] as $id => $config) {
             $s->stops[(int) $id] = StopConfig::fromArray($config);
+        }
+        if (isset($d['mulligan'])) {
+            $s->mulligan = [];
+            foreach ($d['mulligan'] as $id => $m) {
+                $s->mulligan[(int) $id] = ['taken' => (int) $m['taken'], 'kept' => (bool) $m['kept']];
+            }
         }
 
         return $s;

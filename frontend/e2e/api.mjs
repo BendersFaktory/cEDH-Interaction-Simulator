@@ -23,20 +23,34 @@ export const waitReady = async (sim, timeout = 120_000) => {
   return sim
 }
 
-export const create = async (seed, controllers) => waitReady(await post(API, { seed, controllers }))
+export const create = async (seed, controllers, { keep = true } = {}) => {
+  const sim = await waitReady(await post(API, { seed, controllers }))
+  return keep ? keepHands(sim) : sim
+}
 /** Même configuration que le bouton « Nouvelle partie Commander » (J0 humain contre 3 IA). */
-export const createHuman = (seed) => create(seed, { 0: 'human:auto', 1: 'ai:heuristic', 2: 'ai:heuristic', 3: 'ai:heuristic' })
+export const createHuman = (seed) => create(seed, { 0: 'human:auto', 1: 'ai:heuristic', 2: 'ai:heuristic', 3: 'ai:heuristic' }, { keep: true })
 export const get = (id) => json(`${API}/${id}`)
 export const pending = (id) => json(`${API}/${id}/pending`)
 export const events = (id) => json(`${API}/${id}/events`)
-export const state = async (id, seq) => (await json(`${API}/${id}/state${seq === undefined ? '' : `?seq=${seq}`}`)).state
+export const state = async (id, seq) => (await json(`${API}/${id}/state${seq === undefined ? '' : `?at=${seq}`}`)).state
 export const decide = async (id, actionId) => waitReady(await post(`${API}/${id}/decisions`, { actionId }))
 
-/** Noms des cartes en main d'un joueur et nombre de terrains de base (même comptage que la recette d'origine). */
+/** Mulligan de Londres : tant qu'un siège humain a une décision « Main de départ » / « Mettre au fond », garde la main (keep, puis 1re carte au fond). */
+export const keepHands = async (sim) => {
+  for (let i = 0; i < 40; i++) {
+    const actions = sim.status === 'waiting' ? (sim.pending?.actions ?? []) : []
+    const a = actions.find((x) => x.type === 'keep') ?? actions.find((x) => x.type === 'bottom')
+    if (!a) return sim
+    sim = await decide(sim.id, a.id)
+  }
+  throw new Error(`simulation #${sim.id} : mulligan sans fin`)
+}
+
+/** Noms des cartes en main d'un joueur et nombre de terrains (basiques ou non, d'après le type de la carte). */
 export const handOf = async (id, player = 0) => {
   const hand = (await state(id)).players[player].hand
   const names = hand.map((c) => c.name)
-  const lands = (names.join(' ').match(/Mountain|Forest|Island|Plains|Swamp/g) ?? []).length
+  const lands = hand.filter((c) => [c.type].flat().includes('land')).length
   return { names, lands }
 }
 

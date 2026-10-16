@@ -213,6 +213,15 @@ Decks modifiés (8 cartes à mots-clés à la place d'ours de remplissage), donc
 
 Lecture : le ralentissement de `create` par rapport au 2026-10-12 (seed 42 ~0,22 s) précède ce lot : `bin/bench.php` donnait déjà 5,0 s pour 21 graines (3,7 s le 2026-10-12) sur le code d'avant les mots-clés, avec des empreintes identiques. Cause non recherchée (charge de la machine ou travaux du 2026-10-13/14). N = 1 conservé.
 
+#### Après les decks de 100 cartes (mesuré le 2026-10-16, graines 42 / 6 / 16, MySQL 9.3)
+
+Decks refaits (99 cartes singleton au lieu de 39), donc parties non comparables une à une. `bin/measure.php` mesure maintenant `create()` **suivi de `start()`** (la partie jouée, comme le ferait le worker Messenger : `create()` seul ne fait plus que mettre en file). Médianes :
+
+- `create()` + partie : seed 42 ~0,46 s (4038 événements, 40 tours), seed 6 ~0,58 s (4722 événements), seed 16 ~0,60 s (4372 événements).
+- `fork` au milieu : ~46 à 73 ms ; reconstruction au pire écart entre ancres : ≤ 22 ms ; ancres ~107 Ko chacune, **4,3 à 5,4 Mo par partie** (≈ 2× : bibliothèques de 99 cartes) ; pic mémoire PHP 34-42 Mo.
+
+Lecture : la taille en base suit la taille des bibliothèques ; la mémoire PHP non, grâce au mémo de `CardInstance::toArray()` (tableau partagé entre états tant que la carte ne change pas). N = 1 conservé.
+
 ## Persistance : `json_text` et insertions par lots
 
 - Les colonnes `Simulation.state`, `Simulation.pending`, `Checkpoint.state` et `GameEventRecord.payload` utilisent le type Doctrine `json_text` (`src/Doctrine/Type/JsonTextType.php`) : du JSON stocké comme `LONGTEXT`, **jamais le type `json` natif de MySQL**. On ne les interroge pas en SQL, et le type natif réordonne les clés des objets et ralentit les écritures. Avec `json_text`, une valeur relue est identique à celle écrite, **clés dans le même ordre** : les tests peuvent comparer avec `assertSame`.
