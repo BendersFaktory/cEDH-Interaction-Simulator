@@ -39,12 +39,12 @@ final class GameEngine
         ?CheckpointListener $listener = null,
         ?LegalActionGenerator $legal = null,
     ) {
-        $sba = $this->sba = new StateBasedActions();
         $legal ??= new LegalActionGenerator();
+        $sba = $this->sba = new StateBasedActions($agents, $legal);
         $this->combat = new CombatManager($agents, $legal);
         $this->handSize = new HandSizeManager($agents, $legal);
         $this->mulligans = new MulliganManager($agents, $legal);
-        $this->turns = new TurnManager($sba, $this->combat);
+        $this->turns = new TurnManager($this->combat);
         $this->priority = new PriorityManager(
             $agents,
             $legal,
@@ -107,7 +107,7 @@ final class GameEngine
         if (!$s->cleanupRound) {
             $this->handSize->run($s, $injected);
             $seq = $s->eventSeq;
-            $this->sba->check($s);
+            $this->sba->check($s, $injected);
             if ($s->over || ($s->eventSeq === $seq && $s->pendingTriggers === [])) {
                 return false;
             }

@@ -237,6 +237,14 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'CommanderReturned': {
+      // SBA (CR 903.9a) : le commandant quitte le cimetière pour la zone de commandement.
+      const pl = v.players[p.player]
+      removeCard(pl.graveyard, p.card.id)
+      pl.command.push(board(p.card))
+      break
+    }
+
     case 'CreatureBoosted': {
       // Valeurs absolues : force/endurance actuelles (bonus du tour compris, ou remises à la base au cleanup).
       const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
@@ -270,6 +278,14 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'PlayerLost':
       v.players[p.player].lost = true
       break
+
+    case 'PlayerLeftGame': {
+      // CR 800.4a : permanents et éléments de pile du joueur éliminé quittent la partie.
+      const pl = v.players[p.player]
+      pl.battlefield = pl.battlefield.filter((c) => !p.battlefield.includes(c.id))
+      v.stack = v.stack.filter((i) => !p.stack.includes(i.id))
+      break
+    }
 
     case 'GameOver':
       v.over = true

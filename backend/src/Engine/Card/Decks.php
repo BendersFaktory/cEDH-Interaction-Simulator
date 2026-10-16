@@ -21,7 +21,8 @@ final class Decks
     public const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes'];
 
     /**
-     * Règles de construction Commander : 99 cartes en bibliothèque (CR 903.5a), singleton hors terrains de base
+     * Règles de construction Commander : commandant créature légendaire (CR 903.3), 99 cartes en bibliothèque (CR 903.5a),
+     * singleton hors terrains de base
      * (CR 903.5b) et identité de couleurs (CR 903.4) : toute carte doit avoir une identité incluse dans celle du commandant.
      *
      * @param array{commander: CardInstance, library: list<CardInstance>} $deck
@@ -29,6 +30,11 @@ final class Decks
      */
     public static function validate(array $deck, int $playerId): void
     {
+        if (!$deck['commander']->isLegendary() || !$deck['commander']->isCreature()) {
+            throw new \InvalidArgumentException(sprintf(
+                'Joueur %d : le commandant « %s » doit être une créature légendaire.', $playerId, $deck['commander']->name,
+            ));
+        }
         if (count($deck['library']) !== self::LIBRARY_SIZE) {
             throw new \InvalidArgumentException(sprintf(
                 'Joueur %d : la bibliothèque compte %d cartes au lieu de %d.', $playerId, count($deck['library']), self::LIBRARY_SIZE,
@@ -86,7 +92,7 @@ final class Decks
         $counter = static fn (string $name, int $cost, string $manaCost): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'counter', 0, false, 0, 0, $manaCost);
         $ritual = static fn (string $name, int $cost, string $manaCost, string $adds): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'mana', 0, false, 0, 0, $manaCost, [], [], $adds);
 
-        $commander = $make("Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, true, 3, 3, "{1}{{$a}}{{$b}}");
+        $commander = new CardInstance(sprintf('p%d_c%d', $playerId, $n++), "Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, false, true, 3, 3, 0, 0, "{1}{{$a}}{{$b}}", supertypes: [CardInstance::LEGENDARY]);
 
         // Terrains non-basiques (les basiques complètent le deck à la fin). Dégâts des pain lands, entrée engagée et
         // paiement de PV des shock / check lands non modélisés.

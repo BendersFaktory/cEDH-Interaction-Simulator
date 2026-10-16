@@ -34,9 +34,11 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 | `DamageDealt` | non | `source`, `target`, `amount`, `life` (PV résultants), `combat` (bool, présent pour le combat), `commanderDamage: {key, total}` (si l'attaquant est un commandant) | PV du joueur ciblé ; `commanderDamage[key] = total` |
 | `LifeGained` | non | `player`, `amount`, `life` (PV résultants), `source` (texte) | PV du joueur (`life` en valeur absolue) |
 | `CreatureDamaged` | non | `card`, `amount`, `damage` (marqués au total) | Aucun (les dégâts marqués sont effacés au cleanup) |
-| `CreatureDied` | non | `player`, `card`, `destination` (`graveyard`\|`command`\|`none` pour un jeton) | Champ de bataille → cimetière, ou zone de commandement pour un commandant |
+| `CreatureDied` | non | `player`, `card`, `destination` (`graveyard`\|`none` pour un jeton), `reason` (`toughness`\|`damage`\|`deathtouch`) | Champ de bataille → cimetière (un commandant revient ensuite par `CommanderReturned`) |
+| `CommanderReturned` | non | `player`, `card`, `from` (`graveyard`) | Cimetière → zone de commandement (SBA, CR 903.9a : le commandant va d'abord au cimetière, ses triggers « meurt » se déclenchent, puis il revient au passage de SBA suivant) |
 | `CombatEnded` | non | – | Efface `attacking` / `blocking` des permanents (émis s'il y a eu des attaquants) |
 | `PlayerLost` | non | `player`, `reason` (`life`\|`decked`\|`commander_damage`) | Joueur éliminé |
+| `PlayerLeftGame` | non | `player`, `battlefield` (ids), `stack` (ids des éléments de pile) | Émis juste après `PlayerLost`, seulement s'il y avait quelque chose : ses permanents et ses éléments de pile quittent la partie (CR 800.4a) |
 | `GameOver` | non | `winner` (id ou `null`), `reason` (`last_player_standing`\|`turn_limit`) | Fin de partie. La pile n'est pas vidée : elle peut rester non vide après `GameOver` (rien ne résout plus, aucun événement n'est ajouté) |
 
 ## Mots-clés publics

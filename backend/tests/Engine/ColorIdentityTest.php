@@ -23,6 +23,12 @@ final class ColorIdentityTest extends TestCase
         return new CardInstance($name, $name, $type, 2, manaCost: $manaCost, abilities: $abilities);
     }
 
+    /** Commandant : créature légendaire (CR 903.3). */
+    private static function chef(string $manaCost): CardInstance
+    {
+        return new CardInstance('Chef', 'Chef', CardInstance::CREATURE, 3, commander: true, power: 3, toughness: 3, manaCost: $manaCost, supertypes: [CardInstance::LEGENDARY]);
+    }
+
     /** Complète la bibliothèque à 99 cartes avec des Montagnes (la taille est validée avant l'identité). */
     private static function deck(CardInstance $commander, CardInstance ...$cards): array
     {
@@ -64,7 +70,7 @@ final class ColorIdentityTest extends TestCase
 
     public function testCardOutsideCommanderIdentityIsRefused(): void
     {
-        $deck = self::deck(self::spell('Chef', '{1}{U}{R}'), self::spell('Ok', '{R}'), self::spell('Verte', '{1}{G}'));
+        $deck = self::deck(self::chef('{1}{U}{R}'), self::spell('Ok', '{R}'), self::spell('Verte', '{1}{G}'));
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Verte');
         Decks::validate($deck, 2);
@@ -72,7 +78,7 @@ final class ColorIdentityTest extends TestCase
 
     public function testCardInsideIdentityIsAccepted(): void
     {
-        Decks::validate(self::deck(self::spell('Chef', '{1}{U}{R}'), self::spell('Ok', '{R}'), self::spell('Incolore', '{3}')), 0);
+        Decks::validate(self::deck(self::chef('{1}{U}{R}'), self::spell('Ok', '{R}'), self::spell('Incolore', '{3}')), 0);
         $this->addToAssertionCount(1);
     }
 

@@ -125,7 +125,7 @@ final class ScenarioBuilder
 
     public static function commanderCard(string $id, int $cost = 3): CardInstance
     {
-        return new CardInstance($id, 'Test Commander', CardInstance::CREATURE, $cost, null, 0, false, true);
+        return new CardInstance($id, 'Test Commander', CardInstance::CREATURE, $cost, null, 0, false, true, 3, 3, supertypes: [CardInstance::LEGENDARY]);
     }
 
     public static function counterspell(string $id): CardInstance

@@ -37,6 +37,9 @@ final class CardInstance
     public const DEATHTOUCH = 'deathtouch';
     public const LIFELINK = 'lifelink';
 
+    // Supertypes (CR 205.4).
+    public const LEGENDARY = 'legendary';
+
     /** @var list<string> types (artefact-créature : deux) ; sérialisé sous `type`, en chaîne s'il n'y en a qu'un */
     public readonly array $types;
 
@@ -82,6 +85,8 @@ final class CardInstance
         public readonly array $subtypes = [],
         /** @var list<string> mots-clés (constantes FLYING...) */
         public readonly array $keywords = [],
+        /** @var list<string> supertypes (constante LEGENDARY) */
+        public readonly array $supertypes = [],
     ) {
         $this->types = is_array($type) ? array_values($type) : [$type];
         if ($this->types === []) {
@@ -107,6 +112,12 @@ final class CardInstance
         }
 
         return false;
+    }
+
+    /** Légendaire : soumis à la règle des légendes (CR 704.5j). */
+    public function isLegendary(): bool
+    {
+        return in_array(self::LEGENDARY, $this->supertypes, true);
     }
 
     public function hasKeyword(string $keyword): bool
@@ -252,7 +263,8 @@ final class CardInstance
         ] + ($this->token ? ['token' => true] : []) // omis si faux : au-delà de 16 clés, PHP double la table (+75 % de mémoire par état)
             + ($this->triggers === [] ? [] : ['triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers)]) // idem
             + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]) // idem
-            + ($this->keywords === [] ? [] : ['keywords' => $this->keywords]); // idem
+            + ($this->keywords === [] ? [] : ['keywords' => $this->keywords]) // idem
+            + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]); // idem
     }
 
     public function toArray(): array
@@ -292,6 +304,7 @@ final class CardInstance
             array_map([TriggeredAbility::class, 'fromArray'], $d['triggers'] ?? []),
             $d['subtypes'] ?? [],
             $d['keywords'] ?? [],
+            $d['supertypes'] ?? [],
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);

@@ -15,6 +15,7 @@ use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\KeepHand;
+use App\Engine\Action\KeepLegend;
 use App\Engine\Action\Mulligan;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
@@ -43,6 +44,9 @@ final class LegalActionGenerator
     {
         if ($s->mulligan !== null) {
             return $this->mulliganActions($s, $playerId);
+        }
+        if ($s->sbaResume !== null) {
+            return $this->legendActions($s, $playerId);
         }
         if ($s->triggerResumeHolder !== null) {
             return $this->triggerActions($s, $playerId);
@@ -104,6 +108,19 @@ final class LegalActionGenerator
         }
 
         return [...$actions, ...$this->abilityActions($s, $p, $mana)];
+    }
+
+    /**
+     * Règle des légendes (voir StateBasedActions) : une action par permanent du premier groupe de légendaires homonymes.
+     *
+     * @return list<KeepLegend>
+     */
+    private function legendActions(GameState $s, int $playerId): array
+    {
+        return array_map(
+            static fn (CardInstance $c) => new KeepLegend($playerId, $c->id),
+            StateBasedActions::legendGroup($s->player($playerId)) ?? [],
+        );
     }
 
     /**

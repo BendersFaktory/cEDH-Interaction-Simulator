@@ -6,13 +6,11 @@ namespace App\Engine\Game;
 
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Rules\CombatManager;
-use App\Engine\Rules\StateBasedActions;
 
 /** Enchaîne les étapes et les tours. */
 final class TurnManager
 {
     public function __construct(
-        private readonly StateBasedActions $sba,
         private readonly CombatManager $combat,
     ) {
     }
@@ -56,8 +54,9 @@ final class TurnManager
         }
 
         // CR 103.8 : seul le premier joueur d'une partie à 2 saute sa pioche ; en multijoueur, tout le monde pioche dès le tour 1.
-        if ($s->phase === Phase::Draw &&!$s->drawCard($s->activePlayer)) {
-            $this->sba->eliminate($s, $s->activePlayer, 'decked');
+        // Bibliothèque vide : le joueur perd à la vérification des SBA qui précède la priorité (CR 704.5b).
+        if ($s->phase === Phase::Draw) {
+            $s->drawCard($s->activePlayer);
         }
 
         if (!$s->phase->hasPriority()) {

@@ -20,6 +20,11 @@ final class PlayerState
     public const MAX_HAND_SIZE = 7;
 
     public bool $lost = false;
+    /**
+     * A tenté de piocher dans une bibliothèque vide depuis la dernière vérification des SBA : il perd à la prochaine
+     * (CR 704.5b). Sérialisé sous `drewFromEmpty`, omis à faux.
+     */
+    public bool $drewFromEmpty = false;
 
     /**
      * @param list<CardInstance> $library    index 0 = dessus de la bibliothèque
@@ -267,7 +272,8 @@ final class PlayerState
             'commanderCasts' => $this->commanderCasts,
             'commanderDamage' => $this->commanderDamage,
             'pool' => $this->pool->toArray(),
-        ] + ($this->pool->restrictedToArray() === [] ? [] : ['poolRestricted' => $this->pool->restrictedToArray()]);
+        ] + ($this->pool->restrictedToArray() === [] ? [] : ['poolRestricted' => $this->pool->restrictedToArray()])
+            + ($this->drewFromEmpty ? ['drewFromEmpty' => true] : []);
     }
 
     public static function fromArray(array $d): self
@@ -286,6 +292,7 @@ final class PlayerState
             ManaPool::fromArray($d['pool'] ?? [], $d['poolRestricted'] ?? []),
         );
         $p->lost = (bool) $d['lost'];
+        $p->drewFromEmpty = (bool) ($d['drewFromEmpty'] ?? false);
 
         return $p;
     }

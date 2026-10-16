@@ -13,7 +13,7 @@ final class SingletonTest extends TestCase
 {
     private static function commander(): CardInstance
     {
-        return new CardInstance('cmd', 'Chef', CardInstance::CREATURE, 3, commander: true, power: 3, toughness: 3, manaCost: '{1}{R}{G}');
+        return new CardInstance('cmd', 'Chef', CardInstance::CREATURE, 3, commander: true, power: 3, toughness: 3, manaCost: '{1}{R}{G}', supertypes: [CardInstance::LEGENDARY]);
     }
 
     /** Cartes données puis Forêts jusqu'à 99. */

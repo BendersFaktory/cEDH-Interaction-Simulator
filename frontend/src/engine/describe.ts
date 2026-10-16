@@ -87,6 +87,8 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
     case 'CreatureDied':
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'CommanderReturned':
+      return `${p.card.name} (J${p.player}) retourne en zone de commandement`
     case 'CreatureBoosted':
       return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
     case 'TokenCreated':
@@ -97,6 +99,8 @@ export function describeEvent(e: GameEvent): string {
       return 'Fin du combat'
     case 'PlayerLost':
       return `J${p.player} est éliminé (${p.reason})`
+    case 'PlayerLeftGame':
+      return `Les objets de J${p.player} quittent la partie`
     case 'GameOver':
       return p.winner === null ? `Fin de partie (${p.reason})` : `Victoire de J${p.winner}`
     default:

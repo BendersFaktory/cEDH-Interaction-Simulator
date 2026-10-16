@@ -14,6 +14,7 @@ use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\KeepHand;
+use App\Engine\Action\KeepLegend;
 use App\Engine\Action\Mulligan;
 use App\Engine\Action\PlayLand;
 use App\Engine\Action\PutTrigger;
@@ -86,6 +87,10 @@ final class HeuristicAgent implements PlayerAgent
         $triggers = array_values(array_filter($legal, static fn (Action $a) => $a instanceof PutTrigger));
         if ($triggers !== []) {
             return $this->putTrigger($state, $triggers, $playerId);
+        }
+        $legends = array_values(array_filter($legal, static fn (Action $a) => $a instanceof KeepLegend));
+        if ($legends !== []) {
+            return $this->keepLegend($state, $legends, $playerId);
         }
         if ($state->combat->declaring === 'attackers') {
             return $this->declareAttackers($state, $legal, $playerId);
@@ -515,6 +520,27 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return false;
+    }
+
+    /**
+     * Règle des légendes : garde le permanent dégagé (il peut encore servir ce tour), à défaut le plus ancien sur le champ
+     * de bataille (premier proposé à égalité).
+     *
+     * @param non-empty-list<KeepLegend> $legends
+     */
+    private function keepLegend(GameState $state, array $legends, int $playerId): KeepLegend
+    {
+        $best = $legends[0];
+        $bestKey = null;
+        foreach ($legends as $action) {
+            $card = $state->player($playerId)->findOnBattlefield($action->cardId);
+            $key = [$card?->tapped ? 1 : 0, $card?->enteredTurn ?? PHP_INT_MAX];
+            if ($bestKey === null || $key < $bestKey) {
+                [$best, $bestKey] = [$action, $key];
+            }
+        }
+
+        return $best;
     }
 
     /**
