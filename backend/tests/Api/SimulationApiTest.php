@@ -8,6 +8,9 @@ use App\Engine\Agent\AgentRegistry;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
 use App\Engine\Snapshot\InMemoryCheckpoints;
+use App\Service\Deck\DeckLoader;
+use App\Service\Scryfall\CardCatalog;
+use App\Tests\Service\Deck\ScryfallFixtures;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -465,5 +468,48 @@ final class SimulationApiTest extends WebTestCase
             [$status] = $this->call($method, self::BASE . $path, $method === 'GET' ? null : ['actionId' => 'x', 'atEvent' => 1, 'player' => 0, 'stops' => null]);
             self::assertSame(409, $status, "$method $path");
         }
+    }
+
+    private function useFixtureCatalog(): void
+    {
+        $catalog = $this->createStub(CardCatalog::class);
+        $catalog->method('get')->willReturnCallback(static function (array $names): array {
+            $fixtures = ScryfallFixtures::all();
+            $cards = [];
+            $missing = [];
+            foreach ($names as $n) {
+                isset($fixtures[$n])
+                    ? $cards[$n] = ['data' => $fixtures[$n], 'images' => ['small' => "s/$n", 'normal' => "n/$n"], 'fetchedAt' => new \DateTimeImmutable(), 'stale' => false]
+                    : $missing[] = $n;
+            }
+
+            return ['cards' => $cards, 'missing' => $missing, 'degraded' => false];
+        });
+        static::getContainer()->set(DeckLoader::class, new DeckLoader($catalog));
+    }
+
+    public function testCustomDeckIsPlayedAndImagesExposed(): void
+    {
+        $this->useFixtureCatalog();
+        $list = "CMDR: Isamaru, Hound of Konda\n1 Sol Ring\n98 Plains";
+        [$status, $sim] = $this->call('POST', self::BASE, ['seed' => 5, 'controllers' => self::FOUR_AI, 'decks' => ['1' => $list]]);
+        self::assertSame(202, $status);
+        self::assertSame('n/Sol Ring', ((array) $sim['cardImages'])['Sol Ring']['normal']);
+
+        [, $view] = $this->call('GET', self::BASE . '/' . $sim['id']);
+        self::assertSame('over', $view['status']);
+        self::assertSame('n/Plains', $view['cardImages']['Plains']['normal']);
+        [, $events] = $this->call('GET', self::BASE . '/' . $sim['id'] . '/events');
+        $started = array_values(array_filter($events, static fn (array $e) => $e['type'] === 'GameStarted'))[0];
+        self::assertSame('Isamaru, Hound of Konda', $started['payload']['players'][1]['command'][0]['name']);
+        self::assertStringStartsWith('Commandant J0', $started['payload']['players'][0]['command'][0]['name']);
+    }
+
+    public function testRefusedDecklistReturns422WithProblems(): void
+    {
+        $this->useFixtureCatalog();
+        [$status, $body] = $this->call('POST', self::BASE, ['seed' => 5, 'decks' => ['0' => "CMDR: Isamaru, Hound of Konda\n1 Rhystic Study\n1 Inconnue"]]);
+        self::assertSame(422, $status);
+        self::assertCount(2, $body['problems']['J0']);
     }
 }

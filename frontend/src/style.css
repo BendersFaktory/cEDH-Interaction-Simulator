@@ -92,6 +92,9 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 /* Engagée : nom, coût et F/E seulement (le reste est dans l'aperçu), pour que la carte reste basse. */
 .card.tapped .card-abilities, .card.tapped .card-type, .card.tapped .card-keywords { display: none; }
 .card.token { border-style: dashed; }
+.card-art { display: block; width: 100%; height: 44px; object-fit: cover; object-position: 50% 20%; border-radius: 3px; margin-bottom: 2px; }
+.card.tapped .card-art { display: none; }
+.preview-art { display: block; width: 100%; border-radius: 8px; margin-bottom: 6px; }
 .card-token { margin-left: 5px; font-size: .75em; font-style: italic; opacity: .8; }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) { --mana-W: #d9cf8f; --mana-U: #3b8ad1; --mana-B: #8a7d9a; --mana-R: #d9573a; --mana-G: #3f9a4b; --mana-C: #aeb2bd; --mana-N: #8a91a2; }

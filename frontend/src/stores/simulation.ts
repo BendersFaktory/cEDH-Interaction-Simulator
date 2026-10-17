@@ -180,6 +180,11 @@ export const useSimulationStore = defineStore('simulation', () => {
   )
 
   /** Stops d'un joueur tels que renvoyés par le serveur (null = défaut). */
+  /** URL d'image d'une carte (`small` pour le plateau, `normal` pour l'aperçu) ; null si inconnue (deck de démo, jeton). */
+  function cardImage(name: string, size: 'small' | 'normal' = 'small'): string | null {
+    return simulation.value?.cardImages?.[name]?.[size] ?? null
+  }
+
   function stopsOf(player: number): StopsConfig | null {
     return simulation.value?.stops?.[String(player)] ?? null
   }
@@ -210,7 +215,7 @@ export const useSimulationStore = defineStore('simulation', () => {
   return {
     simulation, events, cursor, playing, speedMs, showVerbose, loading, error, progress, waiting,
     lastSeq, atEnd, view, visibleEvents, checkpointSeqs, forkPoint, pending,
-    humanSeats, stopsOf, setStops, playableCardIds, hoveredCard,
+    humanSeats, cardImage, stopsOf, setStops, playableCardIds, hoveredCard,
     load, create, step, stepBack, seek, play, pause, setSpeed, forkHere, decide,
   }
 })

@@ -168,6 +168,8 @@ export interface SimulationView {
   controllers: Record<string, string>
   /** Stops par id de joueur ; clé absente = défaut. */
   stops?: Record<string, StopsConfig | null>
+  /** URL d'images Scryfall par nom de carte (decks chargés seulement ; absent pour les decks de démo). */
+  cardImages?: Record<string, { small: string | null; normal: string | null }>
 }
 
 // --- État reconstruit côté front par le reducer ---

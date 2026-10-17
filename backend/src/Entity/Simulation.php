@@ -49,6 +49,10 @@ class Simulation
     #[ORM\Column(type: 'json_text', nullable: true)]
     private ?array $controllers = null;
 
+    /** Decks chargés par siège (id => `LoadedDeck::toArray()`) ; absent = decks de démo. Hérité par les forks (images). */
+    #[ORM\Column(type: 'json_text', nullable: true)]
+    private ?array $decks = null;
+
     /** Tour courant pendant la simulation asynchrone (écrit par UPDATE DBAL hors transaction). */
     #[ORM\Column(nullable: true)]
     private ?int $progress = null;
@@ -134,6 +138,18 @@ class Simulation
     public function setControllers(?array $controllers): void
     {
         $this->controllers = $controllers;
+    }
+
+    /** @return array<int, array<string, mixed>>|null */
+    public function getDecks(): ?array
+    {
+        return $this->decks;
+    }
+
+    /** @param array<int, array<string, mixed>>|null $decks */
+    public function setDecks(?array $decks): void
+    {
+        $this->decks = $decks;
     }
 
     public function getProgress(): ?int

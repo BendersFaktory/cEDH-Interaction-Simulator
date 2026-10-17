@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { hasType, typesOf, type BoardCard } from '../types/engine'
 import { frameOf, keywordsText, manaSymbols, symbolClass, typeLine } from '../engine/cardText'
 import { useSimulationStore } from '../stores/simulation'
@@ -10,6 +10,9 @@ const store = useSimulationStore()
 const symbols = computed(() => manaSymbols(props.card.manaCost))
 const keywords = computed(() => keywordsText(props.card))
 const landColor = computed(() => (hasType(props.card, 'land') && props.card.produces?.length === 1 ? props.card.produces[0] : null))
+const art = computed(() => (props.card.token ? null : store.cardImage(props.card.name)))
+const artFailed = ref(false)
+watch(art, () => (artFailed.value = false))
 const playable = computed(() => store.playableCardIds.has(props.card.id))
 </script>
 
@@ -20,6 +23,7 @@ const playable = computed(() => store.playableCardIds.has(props.card.id))
     @mouseenter="store.hoveredCard = card"
     @mouseleave="store.hoveredCard = null"
   >
+    <img v-if="art && !artFailed && !compact" class="card-art" :src="art" alt="" loading="lazy" @error="artFailed = true" />
     <span class="card-name">{{ card.name }}</span>
     <span v-if="card.token" class="card-token">jeton</span>
     <span v-if="card.type === 'land' && card.produces?.length" class="mana-sym" :class="landColor ? `m-${landColor}` : 'hybrid'">{{ card.produces.join('') }}</span>
@@ -31,6 +35,5 @@ const playable = computed(() => store.playableCardIds.has(props.card.id))
     <span v-if="!hasType(card, 'land') && card.abilities?.length" class="card-abilities"><span v-for="(a, i) in card.abilities" :key="i" class="ability-chip" :class="{ mana: a.isManaAbility }">{{ a.isManaAbility ? '⚡' : '✦' }}</span></span>
     <span v-if="!hasType(card, 'land')" class="card-type">{{ typeLine(card) }}</span>
     <span v-if="keywords" class="card-keywords">{{ keywords }}</span>
-    <!-- TODO: image Scryfall (cache local) -->
   </div>
 </template>
