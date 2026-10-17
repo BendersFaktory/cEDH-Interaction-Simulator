@@ -14,6 +14,7 @@ const groups = computed(() => {
     { title: 'Bloquer', items: actions.filter((a) => a.type === 'block') },
     { title: 'Répartir les dégâts de combat', items: actions.filter((a) => a.type === 'assign') },
     { title: 'Terminer la déclaration', items: actions.filter((a) => a.type === 'done') },
+    { title: 'Règle des légendes : quelle légende garder ?', items: actions.filter((a) => a.type === 'keepLegend') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },
