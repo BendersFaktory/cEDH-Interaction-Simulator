@@ -10,7 +10,7 @@ use App\Engine\Game\CardInstance;
 use App\Engine\Mana\Color;
 
 /**
- * Decks de démo codés en dur. TODO: DeckLoader branché sur Scryfall (cache en base) + CardDefinition.
+ * Decks de démo codés en dur, construits via `CardDefinition`. TODO: DeckLoader branché sur Scryfall (cache en base).
  */
 final class Decks
 {
@@ -83,7 +83,8 @@ final class Decks
 
         $n = 0;
         $make = static function (string $name, string|array $type, int $cost, ?string $effect = null, int $amount = 0, bool $commander = false, int $power = 0, int $toughness = 0, ?string $manaCost = null, array $produces = [], array $abilities = [], ?string $adds = null, array $triggers = [], array $subtypes = [], array $keywords = []) use ($playerId, &$n): CardInstance {
-            return new CardInstance(sprintf('p%d_c%d', $playerId, $n++), $name, $type, $cost, $effect, $amount, false, $commander, $power, $toughness, 0, 0, $manaCost, $produces, $abilities, $adds, false, $triggers, $subtypes, keywords: $keywords);
+            return (new CardDefinition($name, $type, $cost, $manaCost, $power, $toughness, $effect, $amount, $adds, $produces, $abilities, $triggers, $subtypes, $keywords))
+                ->instantiate(sprintf('p%d_c%d', $playerId, $n++), $commander);
         };
         $land = static fn (string $name, array $produces = [], array $abilities = []): CardInstance => $make($name, CardInstance::LAND, 0, null, 0, false, 0, 0, null, $produces, $abilities);
         $creature = static fn (string $name, int $cost, string $manaCost, int $power, int $toughness, string ...$keywords): CardInstance => $make($name, CardInstance::CREATURE, $cost, null, 0, false, $power, $toughness, $manaCost, keywords: $keywords);
@@ -92,7 +93,8 @@ final class Decks
         $counter = static fn (string $name, int $cost, string $manaCost): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'counter', 0, false, 0, 0, $manaCost);
         $ritual = static fn (string $name, int $cost, string $manaCost, string $adds): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'mana', 0, false, 0, 0, $manaCost, [], [], $adds);
 
-        $commander = new CardInstance(sprintf('p%d_c%d', $playerId, $n++), "Commandant J$playerId", CardInstance::CREATURE, 3, null, 0, false, true, 3, 3, 0, 0, "{1}{{$a}}{{$b}}", supertypes: [CardInstance::LEGENDARY]);
+        $commander = (new CardDefinition("Commandant J$playerId", CardInstance::CREATURE, 3, "{1}{{$a}}{{$b}}", 3, 3, supertypes: [CardInstance::LEGENDARY]))
+            ->instantiate(sprintf('p%d_c%d', $playerId, $n++), true);
 
         // Terrains non-basiques (les basiques complètent le deck à la fin). Dégâts des pain lands, entrée engagée et
         // paiement de PV des shock / check lands non modélisés.
