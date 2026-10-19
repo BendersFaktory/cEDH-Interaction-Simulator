@@ -92,7 +92,7 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger' | 'assign'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger' | 'assign' | 'keep' | 'mulligan' | 'bottom' | 'keepLegend'
   player: number
   cardId?: string
   targets?: string[]
@@ -168,6 +168,8 @@ export interface SimulationView {
   controllers: Record<string, string>
   /** Stops par id de joueur ; clé absente = défaut. */
   stops?: Record<string, StopsConfig | null>
+  /** URL d'images Scryfall par nom de carte (decks chargés seulement ; absent pour les decks de démo). */
+  cardImages?: Record<string, { small: string | null; normal: string | null }>
 }
 
 // --- État reconstruit côté front par le reducer ---

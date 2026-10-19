@@ -23,7 +23,8 @@ use App\Engine\Game\GameState;
  * - sans stops configurés (`GameState::$stops[$playerId]` absent) : dès qu'une action utile existe (hors passer et
  *   capacités de mana, dont l'auto-paiement se charge) ;
  * - avec des stops : voir la sémantique de StopConfig (étapes cochées, sort adverse sur la pile, déclarations de
- *   combat) ; une décision obligatoire (défausse, trigger à poser) arrête toujours.
+ *   combat) ; une décision obligatoire (défausse, trigger à poser, légende à garder, mulligan) arrête toujours. Un mulligan n'est jamais
+ *   tranché tout seul : seul PassPriority est répondu automatiquement.
  */
 final class HumanAgent implements PlayerAgent
 {
@@ -63,7 +64,7 @@ final class HumanAgent implements PlayerAgent
             return $state->combat->declaring === CombatState::BLOCKERS ? $stops->onDeclareBlockers : $stops->onDeclareAttackers;
         }
 
-        // Défausse, trigger à poser : la décision n'est pas optionnelle.
+        // Défausse, trigger à poser, légende à garder, mulligan (garder / mulligan / carte au fond) : la décision n'est pas optionnelle.
         return true;
     }
 

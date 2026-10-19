@@ -8,11 +8,15 @@ use App\Engine\Ability\AbilityManager;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\AssignCombatDamage;
+use App\Engine\Action\BottomCard;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
+use App\Engine\Action\KeepHand;
+use App\Engine\Action\KeepLegend;
+use App\Engine\Action\Mulligan;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
 use App\Engine\Action\PutTrigger;
@@ -38,6 +42,12 @@ final class LegalActionGenerator
     /** @return list<Action> */
     public function for(GameState $s, int $playerId): array
     {
+        if ($s->mulligan !== null) {
+            return $this->mulliganActions($s, $playerId);
+        }
+        if ($s->sbaResume !== null) {
+            return $this->legendActions($s, $playerId);
+        }
         if ($s->triggerResumeHolder !== null) {
             return $this->triggerActions($s, $playerId);
         }
@@ -101,6 +111,19 @@ final class LegalActionGenerator
     }
 
     /**
+     * Règle des légendes (voir StateBasedActions) : une action par permanent du premier groupe de légendaires homonymes.
+     *
+     * @return list<KeepLegend>
+     */
+    private function legendActions(GameState $s, int $playerId): array
+    {
+        return array_map(
+            static fn (CardInstance $c) => new KeepLegend($playerId, $c->id),
+            StateBasedActions::legendGroup($s->player($playerId)) ?? [],
+        );
+    }
+
+    /**
      * Capacités activées des permanents du joueur, à tout moment où il a la priorité (ou seulement en rituel si
      * `sorcerySpeed`, voir AbilityManager::canActivate). Une action par (alternative, cibles, choix de coût), dédoublonnée
      * par noms : quatre Montagnes non engagées = une seule action ; sacrifier l'un ou l'autre de deux jetons Kobold aussi.
@@ -144,6 +167,30 @@ final class LegalActionGenerator
      *
      * @return list<Action>
      */
+    /**
+     * Avant-partie (voir MulliganManager) : garder ou prendre un mulligan (tant que moins de 7 pris), puis, main gardée,
+     * une action par carte de la main à mettre au fond (pas de dédoublonnage par nom : le front propose chaque carte).
+     *
+     * @return list<Action>
+     */
+    private function mulliganActions(GameState $s, int $playerId): array
+    {
+        $m = $s->mulligan[$playerId] ?? null;
+        if ($m === null) {
+            return [];
+        }
+        if (!$m['kept']) {
+            return $m['taken'] < MulliganManager::HAND_SIZE
+                ? [new KeepHand($playerId), new Mulligan($playerId)]
+                : [new KeepHand($playerId)];
+        }
+        if (MulliganManager::toBottom($s, $playerId) === 0) {
+            return [];
+        }
+
+        return array_map(static fn (CardInstance $c) => new BottomCard($playerId, $c->id), $s->player($playerId)->hand);
+    }
+
     private function discardActions(GameState $s, int $playerId): array
     {
         $actions = [];

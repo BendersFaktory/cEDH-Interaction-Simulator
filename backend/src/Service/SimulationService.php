@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Engine\Action\Action;
 use App\Engine\Agent\AgentRegistry;
+use App\Engine\Card\Decks;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
 use App\Engine\Game\GameState;
@@ -14,6 +15,7 @@ use App\Engine\Rules\LegalActionGenerator;
 use App\Entity\GameEventRecord;
 use App\Entity\Simulation;
 use App\Message\RunSimulation;
+use App\Service\Deck\LoadedDeck;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 
@@ -33,14 +35,23 @@ class SimulationService
     ) {
     }
 
-    /** @param array<int, string> $controllers id joueur => clé d'agent */
-    public function create(int $seed, array $controllers): Simulation
+    /**
+     * @param array<int, string> $controllers id joueur => clé d'agent
+     * @param array<int, LoadedDeck> $decks decks chargés par siège (les autres sièges jouent le deck de démo)
+     */
+    public function create(int $seed, array $controllers, array $decks = []): Simulation
     {
         $this->assertControllers($controllers);
 
         $sim = new Simulation($seed);
         $sim->setStatus(Simulation::QUEUED);
         $sim->setControllers($controllers);
+        foreach ($decks as $playerId => $deck) {
+            if (!isset($controllers[$playerId])) {
+                throw new \InvalidArgumentException("Deck fourni pour le joueur $playerId, qui n'existe pas.");
+            }
+        }
+        $sim->setDecks($decks === [] ? null : array_map(static fn (LoadedDeck $d): array => $d->toArray(), $decks));
         $this->em->persist($sim);
         $this->em->flush();
 
@@ -57,7 +68,10 @@ class SimulationService
             $controllers[(int) $id] = (string) $key;
         }
 
-        return $this->run($sim, GameFactory::create($sim->getSeed(), $controllers), null);
+        $decks = array_map(LoadedDeck::fromArray(...), $sim->getDecks() ?? []);
+        $builder = static fn (int $id): array => isset($decks[$id]) ? $decks[$id]->instantiate($id) : Decks::commanderDemo($id);
+
+        return $this->run($sim, GameFactory::create($sim->getSeed(), $controllers, $builder), null);
     }
 
     /** Reprend une branche suspendue avec la décision du joueur humain. */
@@ -148,6 +162,7 @@ class SimulationService
 
         $child = new Simulation($parent->getSeed());
         $child->setParent($parent);
+        $child->setDecks($parent->getDecks());
         $child->setForkEventSeq($state->eventSeq);
         $this->em->persist($child);
 

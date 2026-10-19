@@ -55,3 +55,14 @@ describe('describeEvent — capacités', () => {
     expect(describeEvent(e('CreatureBoosted', { player: 0, card: 'p0_c3', power: 3, toughness: 3 }))).toBe('p0_c3 (J0) passe à 3/3')
   })
 })
+
+describe('describeEvent — mulligan de Londres', () => {
+  const e = (type: string, payload: Record<string, unknown>): GameEvent => ({ seq: 1, type, verbose: false, payload })
+  it('prise de mulligan, garde et mise au fond', () => {
+    expect(describeEvent(e('MulliganTaken', { player: 0, mulligans: 1, hand: 0, library: 96 }))).toBe('J0 prend un mulligan (1)')
+    expect(describeEvent(e('HandKept', { player: 0, mulligans: 1, toBottom: 1 }))).toBe('J0 garde sa main (1 carte au fond)')
+    expect(describeEvent(e('HandKept', { player: 2, mulligans: 2, toBottom: 2 }))).toBe('J2 garde sa main (2 cartes au fond)')
+    expect(describeEvent(e('HandKept', { player: 0, mulligans: 0, toBottom: 0 }))).toBe('J0 garde sa main')
+    expect(describeEvent(e('CardPutOnBottom', { player: 0, card: { name: 'Forest' }, hand: 6, library: 94 }))).toBe('J0 met une carte au fond de sa bibliothèque')
+  })
+})

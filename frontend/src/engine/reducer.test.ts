@@ -253,3 +253,44 @@ describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', ()
     expect(v.priority).toEqual({ holder: null, passed: [] })
   })
 })
+
+describe('reducer — mulligan de Londres', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const card = (id: string): PublicCard => ({ id, name: `Carte ${id}`, type: 'land', cost: 0, effect: null, amount: 0 })
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 93, controller: 'h' }, { id: 1, life: 40, library: 93, controller: 'ai' }] }),
+      ev(2, 'CardDrawn', { player: 0, card: card('a'), library: 92 }),
+      ev(3, 'CardDrawn', { player: 0, card: card('b'), library: 91 }),
+      ev(4, 'CardDrawn', { player: 0, card: card('c'), library: 90 }),
+    ])
+
+  it('MulliganTaken vide la main et remet les cartes dans la bibliothèque', () => {
+    const v = applyEvent(start(), ev(5, 'MulliganTaken', { player: 0, mulligans: 1, hand: 0, library: 96 }))
+    expect(v.players[0].hand).toEqual([])
+    expect(v.players[0].library).toBe(96)
+    expect(v.players[1].library).toBe(93)
+  })
+
+  it('les 7 CardDrawn qui suivent refont la main', () => {
+    const v = start()
+    applyEvent(v, ev(5, 'MulliganTaken', { player: 0, mulligans: 1, hand: 0, library: 96 }))
+    for (let i = 0; i < 7; i++) applyEvent(v, ev(6 + i, 'CardDrawn', { player: 0, card: card(`n${i}`), library: 89 - i }))
+    expect(v.players[0].hand.map((c) => c.id)).toEqual(['n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6'])
+    expect(v.players[0].library).toBe(83)
+  })
+
+  it('CardPutOnBottom retire la carte de la main et met à jour les compteurs', () => {
+    const v = start()
+    applyEvent(v, ev(5, 'CardPutOnBottom', { player: 0, card: card('b'), hand: 2, library: 92 }))
+    expect(v.players[0].hand.map((c) => c.id)).toEqual(['a', 'c'])
+    expect(v.players[0].library).toBe(92)
+  })
+
+  it('HandKept ne modifie pas l\'état affiché', () => {
+    const v = start()
+    const snapshot = JSON.stringify(v.players)
+    applyEvent(v, ev(5, 'HandKept', { player: 0, mulligans: 1, toBottom: 1 }))
+    expect(JSON.stringify(v.players)).toBe(snapshot)
+  })
+})

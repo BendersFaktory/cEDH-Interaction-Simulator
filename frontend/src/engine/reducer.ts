@@ -60,6 +60,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
   switch (e.type) {
     case 'GameStarted':
+      v.activePlayer = (p.firstPlayer as number | undefined) ?? v.activePlayer
       for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[]; pool?: Record<string, number>; restricted?: Record<string, Record<string, number>> }>) {
         v.players[pl.id] = {
           id: pl.id,
@@ -197,6 +198,23 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'MulliganTaken': {
+      // La main retourne dans la bibliothèque ; les 7 CardDrawn suivants la refont.
+      const pl = v.players[p.player]
+      pl.hand = []
+      pl.library = p.library
+      break
+    }
+
+    case 'CardPutOnBottom': {
+      const pl = v.players[p.player]
+      removeCard(pl.hand, p.card.id)
+      pl.library = p.library
+      break
+    }
+
+    // 'HandKept' : aucun effet sur l'état affiché (le nombre de cartes au fond est dans le journal).
+
     case 'AttackerDeclared': {
       const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
       if (c) {
@@ -216,6 +234,14 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       const pl = v.players[p.player]
       removeCard(pl.battlefield, p.card.id)
       zoneOf(pl, p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'CommanderReturned': {
+      // SBA (CR 903.9a) : le commandant quitte le cimetière pour la zone de commandement.
+      const pl = v.players[p.player]
+      removeCard(pl.graveyard, p.card.id)
+      pl.command.push(board(p.card))
       break
     }
 
@@ -252,6 +278,14 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'PlayerLost':
       v.players[p.player].lost = true
       break
+
+    case 'PlayerLeftGame': {
+      // CR 800.4a : permanents et éléments de pile du joueur éliminé quittent la partie.
+      const pl = v.players[p.player]
+      pl.battlefield = pl.battlefield.filter((c) => !p.battlefield.includes(c.id))
+      v.stack = v.stack.filter((i) => !p.stack.includes(i.id))
+      break
+    }
 
     case 'GameOver':
       v.over = true

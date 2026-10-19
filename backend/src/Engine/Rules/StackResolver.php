@@ -41,7 +41,7 @@ final class StackResolver
             return;
         }
 
-        // Permanent -> champ de bataille ; sinon cimetière (ou zone de commandement pour un commandant).
+        // Permanent -> champ de bataille ; sinon cimetière.
         if ($card->isPermanent()) {
             $s->enterBattlefield($item->controller, $card);
             $destination = 'battlefield';
@@ -76,13 +76,11 @@ final class StackResolver
         $s->emit('ManaAdded', ['player' => $player, 'mana' => $cost->colored, 'pool' => $p->pool->toArray()] + $p->pool->restrictedField() + ['source' => $stackId]);
     }
 
-    /** Pioche : une bibliothèque vide élimine le joueur (comme à l'étape de pioche). */
+    /** Pioche : une bibliothèque vide fait perdre le joueur à la prochaine vérification des SBA (CR 704.5b). */
     private function draw(GameState $s, int $player, int $n): void
     {
         for ($i = 0; $i < $n; $i++) {
             if (!$s->drawCard($player)) {
-                (new StateBasedActions())->eliminate($s, $player, 'decked');
-
                 return;
             }
         }
@@ -139,7 +137,7 @@ final class StackResolver
             'card' => $victim->card->toPublic(),
             'controller' => $victim->controller,
             'by' => $byStackId,
-            'destination' => $destination, // 'graveyard' | 'command'
+            'destination' => $destination, // 'graveyard' (un commandant y passe avant les SBA, CR 903.9a)
         ]);
     }
 }

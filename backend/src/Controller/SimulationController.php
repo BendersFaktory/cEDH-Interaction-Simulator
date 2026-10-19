@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Entity\Simulation;
+use App\Service\Deck\DeckLoadException;
+use App\Service\Deck\DeckLoader;
 use App\Service\SimulationService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -17,7 +19,7 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/simulations')]
 final class SimulationController extends AbstractController
 {
-    public function __construct(private readonly SimulationService $simulations)
+    public function __construct(private readonly SimulationService $simulations, private readonly DeckLoader $deckLoader)
     {
     }
 
@@ -34,7 +36,22 @@ final class SimulationController extends AbstractController
             $controllers[(int) $id] = (string) $key;
         }
 
-        return $this->guard(fn () => $this->view($this->simulations->create($seed, $controllers)), 202);
+        // Decks optionnels : {"decks": {"0": "<decklist>" | {"decklist": "...", "commander": "..."}}} ; sièges absents = deck de démo.
+        $decks = [];
+        $problems = [];
+        foreach (($body['decks'] ?? []) as $id => $spec) {
+            $list = is_array($spec) ? (string) ($spec['decklist'] ?? '') : (string) $spec;
+            try {
+                $decks[(int) $id] = $this->deckLoader->load($list, is_array($spec) ? ($spec['commander'] ?? null) : null);
+            } catch (DeckLoadException $e) {
+                $problems["J$id"] = $e->problems;
+            }
+        }
+        if ($problems !== []) {
+            return $this->json(['error' => 'Decklist refusée.', 'problems' => $problems], 422);
+        }
+
+        return $this->guard(fn () => $this->view($this->simulations->create($seed, $controllers, $decks)), 202);
     }
 
     #[Route('/{id}', methods: ['GET'], requirements: ['id' => '\d+'])]
@@ -142,8 +159,20 @@ final class SimulationController extends AbstractController
             'pending' => $s->getPending(),
             'eventCount' => $s->getState()['eventSeq'] ?? 0,
             'controllers' => $s->getState()['controllers'] ?? [],
+            'cardImages' => (object) $this->cardImages($s),
             'stops' => (object) ($s->getState()['stops'] ?? []),
         ];
+    }
+
+    /** @return array<string, array{small: ?string, normal: ?string}> nom de carte => URL d'images (tous les decks chargés) */
+    private function cardImages(Simulation $s): array
+    {
+        $images = [];
+        foreach ($s->getDecks() ?? [] as $deck) {
+            $images += $deck['images'] ?? [];
+        }
+
+        return $images;
     }
 
     private function guard(callable $fn, int $okStatus = 200): JsonResponse

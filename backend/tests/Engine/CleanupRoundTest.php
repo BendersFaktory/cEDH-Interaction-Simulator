@@ -17,12 +17,12 @@ use App\Engine\Game\GameState;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Règle 514.3a en PARTIE RÉELLE (4 IA, pas de scénario construit) : la graine 777 voit un trigger de défausse
+ * Règle 514.3a en PARTIE RÉELLE (4 IA, pas de scénario construit) : la graine 205 (depuis les decks de 100 cartes ; 373 après le mulligan de Londres, 777 avant) voit un trigger de défausse
  * (Cendrier des Regrets) attendre au cleanup, ce qui ouvre une ronde de priorité complète.
  */
 final class CleanupRoundTest extends TestCase
 {
-    private const SEED = 777;
+    private const SEED = 205;
     private const FOUR_AI = [0 => 'ai:heuristic', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic'];
 
     /** @return array{GameState, list<GameEvent>} */

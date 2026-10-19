@@ -8,10 +8,13 @@ const store = useSimulationStore()
 const groups = computed(() => {
   const actions = store.pending?.actions ?? []
   return [
+    { title: 'Main de départ', items: actions.filter((a) => a.type === 'keep' || a.type === 'mulligan') },
+    { title: 'Mettre au fond', items: actions.filter((a) => a.type === 'bottom') },
     { title: 'Attaquer', items: actions.filter((a) => a.type === 'attack') },
     { title: 'Bloquer', items: actions.filter((a) => a.type === 'block') },
     { title: 'Répartir les dégâts de combat', items: actions.filter((a) => a.type === 'assign') },
     { title: 'Terminer la déclaration', items: actions.filter((a) => a.type === 'done') },
+    { title: 'Règle des légendes : quelle légende garder ?', items: actions.filter((a) => a.type === 'keepLegend') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },

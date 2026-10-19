@@ -8,6 +8,9 @@ use App\Engine\Agent\AgentRegistry;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
 use App\Engine\Snapshot\InMemoryCheckpoints;
+use App\Service\Deck\DeckLoader;
+use App\Service\Scryfall\CardCatalog;
+use App\Tests\Service\Deck\ScryfallFixtures;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
@@ -52,6 +55,21 @@ final class SimulationApiTest extends WebTestCase
         return $sim;
     }
 
+    /**
+     * Partie avec J0 humain, mulligan passé : la première décision est l'avant-partie (garder ou mulligan), on garde.
+     *
+     * @return array<string,mixed>
+     */
+    private function createKept(int $seed): array
+    {
+        $sim = $this->createGame($seed);
+        self::assertSame('waiting', $sim['status']);
+        [$status, $sim] = $this->call('POST', self::BASE . "/{$sim['id']}/decisions", ['actionId' => 'keep:0']);
+        self::assertSame(200, $status);
+
+        return $sim;
+    }
+
     /** @return list<array{seq:int,type:string,payload:array,verbose:bool}> */
     private function events(int $id): array
     {
@@ -78,10 +96,14 @@ final class SimulationApiTest extends WebTestCase
 
         self::assertSame('over', $sim['status']);
         self::assertNull($sim['pending']);
-        self::assertSame(4496, $sim['eventCount'], 'Même partie que bin/smoke.php 42');
+        // Même partie que bin/smoke.php 42 : le moteur seul donne le nombre d'événements attendu.
+        $expected = count((new \App\Engine\Game\GameEngine(new \App\Engine\Agent\AgentRegistry()))->advance(
+            \App\Engine\Game\GameFactory::create(42, [0 => 'ai:heuristic', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic']),
+        )->events);
+        self::assertSame($expected, $sim['eventCount']);
 
         $events = $this->events($sim['id']);
-        self::assertCount(4496, $events);
+        self::assertCount($expected, $events);
         self::assertSame('GameOver', end($events)['type']);
         $seqs = array_column($events, 'seq');
         $sorted = $seqs;
@@ -125,7 +147,7 @@ final class SimulationApiTest extends WebTestCase
 
     public function testDecisionsValidesInvalidesEtSurPartieTerminee(): void
     {
-        $sim = $this->createGame(7);
+        $sim = $this->createKept(7);
         $id = $sim['id'];
 
         [$status, $body] = $this->call('POST', self::BASE . "/$id/decisions", ['actionId' => 'nimporte:quoi']);
@@ -140,6 +162,55 @@ final class SimulationApiTest extends WebTestCase
         $over = $this->createGame(42, self::FOUR_AI);
         [$status] = $this->call('POST', self::BASE . "/{$over['id']}/decisions", ['actionId' => 'pass:0']);
         self::assertSame(409, $status);
+    }
+
+    public function testMulliganDeJ0AvantLaPremierePrioriteEtReconstruction(): void
+    {
+        $sim = $this->createGame(7);
+        self::assertSame('waiting', $sim['status']);
+        self::assertSame(['keep:0', 'mulligan:0'], array_column($sim['pending']['actions'], 'id'));
+        self::assertSame(['keep', 'mulligan'], array_column($sim['pending']['actions'], 'type'));
+        $id = $sim['id'];
+
+        // Avant le premier PriorityGranted : aucun checkpoint, donc ni état reconstruit ni fork.
+        self::assertSame([], array_filter($this->events($id), static fn (array $e) => $e['type'] === 'PriorityGranted'));
+        [, $none] = $this->call('GET', self::BASE . "/$id/state?at={$sim['eventCount']}");
+        self::assertSame(['error' => 'Aucun checkpoint'], $none);
+        [$status] = $this->call('POST', self::BASE . "/$id/fork", ['atEvent' => $sim['eventCount']]);
+        self::assertSame(409, $status);
+
+        // Deux mulligans (le premier gratuit), garder, une carte au fond.
+        foreach (['mulligan:0', 'mulligan:0', 'keep:0'] as $actionId) {
+            [$status, $sim] = $this->call('POST', self::BASE . "/$id/decisions", ['actionId' => $actionId]);
+            self::assertSame(200, $status, $actionId);
+        }
+        $bottoms = $sim['pending']['actions'];
+        self::assertCount(7, $bottoms);
+        self::assertSame(array_fill(0, 7, 'bottom'), array_column($bottoms, 'type'));
+        self::assertStringStartsWith('bottom:0:', $bottoms[0]['id']);
+        [$status, $sim] = $this->call('POST', self::BASE . "/$id/decisions", ['actionId' => $bottoms[0]['id']]);
+        self::assertSame(200, $status);
+        self::assertNotContains('bottom', array_column($sim['pending']['actions'] ?? [], 'type'), 'La partie a commencé');
+
+        $events = $this->events($id);
+        $types = array_column($events, 'type');
+        $mulligansOfJ0 = array_filter($events, static fn (array $e) => $e['type'] === 'MulliganTaken' && $e['payload']['player'] === 0);
+        self::assertCount(2, $mulligansOfJ0, 'Les IA peuvent aussi prendre des mulligans');
+        self::assertSame(4, count(array_keys($types, 'HandKept', true)));
+        $put = array_values(array_filter($events, static fn (array $e) => $e['type'] === 'CardPutOnBottom' && $e['payload']['player'] === 0));
+        self::assertCount(1, $put);
+        self::assertSame(6, $put[0]['payload']['hand']);
+
+        // Premier checkpoint reconstruit par rejeu depuis l'ancre de pause (décision de mise au fond).
+        $first = $this->checkpointSeq($events, 0);
+        [$status, $state] = $this->call('GET', self::BASE . "/$id/state?at=$first");
+        self::assertSame(200, $status);
+        self::assertSame($first, $state['eventSeq']);
+        self::assertArrayNotHasKey('mulligan', $state['state']);
+        self::assertCount(6, $state['state']['players'][0]['hand']);
+        [$status, $fork] = $this->call('POST', self::BASE . "/$id/fork", ['atEvent' => $first]);
+        self::assertSame(201, $status);
+        self::assertSame($first, $fork['forkEventSeq']);
     }
 
     public function testUnHumainQuiPasseToujoursMeneLaPartieAuBout(): void
@@ -272,7 +343,7 @@ final class SimulationApiTest extends WebTestCase
 
     public function testStopsChangesAuPointCourantEtExposesDansLaReponse(): void
     {
-        $sim = $this->createGame(7);
+        $sim = $this->createKept(7);
         self::assertSame([], $sim['stops']);
         $seq = $sim['eventCount'];
 
@@ -311,7 +382,7 @@ final class SimulationApiTest extends WebTestCase
 
     public function testStopsDoubleChangementAuMemePointEtReconstruction(): void
     {
-        $sim = $this->createGame(7);
+        $sim = $this->createKept(7);
         $id = $sim['id'];
         $two = ['steps' => ['main2', 'end'], 'onOpponentSpell' => false, 'onDeclareAttackers' => true, 'onDeclareBlockers' => false];
         $one = ['steps' => ['main1'], 'onOpponentSpell' => true, 'onDeclareAttackers' => false, 'onDeclareBlockers' => false];
@@ -356,7 +427,7 @@ final class SimulationApiTest extends WebTestCase
 
     public function testStopsChangeablesALaPauseHorsCheckpoint(): void
     {
-        $sim = $this->createGame(7);
+        $sim = $this->createKept(7);
         $id = $sim['id'];
         $end = ['steps' => ['end'], 'onOpponentSpell' => false, 'onDeclareAttackers' => false, 'onDeclareBlockers' => false];
 
@@ -397,5 +468,48 @@ final class SimulationApiTest extends WebTestCase
             [$status] = $this->call($method, self::BASE . $path, $method === 'GET' ? null : ['actionId' => 'x', 'atEvent' => 1, 'player' => 0, 'stops' => null]);
             self::assertSame(409, $status, "$method $path");
         }
+    }
+
+    private function useFixtureCatalog(): void
+    {
+        $catalog = $this->createStub(CardCatalog::class);
+        $catalog->method('get')->willReturnCallback(static function (array $names): array {
+            $fixtures = ScryfallFixtures::all();
+            $cards = [];
+            $missing = [];
+            foreach ($names as $n) {
+                isset($fixtures[$n])
+                    ? $cards[$n] = ['data' => $fixtures[$n], 'images' => ['small' => "s/$n", 'normal' => "n/$n"], 'fetchedAt' => new \DateTimeImmutable(), 'stale' => false]
+                    : $missing[] = $n;
+            }
+
+            return ['cards' => $cards, 'missing' => $missing, 'degraded' => false];
+        });
+        static::getContainer()->set(DeckLoader::class, new DeckLoader($catalog));
+    }
+
+    public function testCustomDeckIsPlayedAndImagesExposed(): void
+    {
+        $this->useFixtureCatalog();
+        $list = "CMDR: Isamaru, Hound of Konda\n1 Sol Ring\n98 Plains";
+        [$status, $sim] = $this->call('POST', self::BASE, ['seed' => 5, 'controllers' => self::FOUR_AI, 'decks' => ['1' => $list]]);
+        self::assertSame(202, $status);
+        self::assertSame('n/Sol Ring', ((array) $sim['cardImages'])['Sol Ring']['normal']);
+
+        [, $view] = $this->call('GET', self::BASE . '/' . $sim['id']);
+        self::assertSame('over', $view['status']);
+        self::assertSame('n/Plains', $view['cardImages']['Plains']['normal']);
+        [, $events] = $this->call('GET', self::BASE . '/' . $sim['id'] . '/events');
+        $started = array_values(array_filter($events, static fn (array $e) => $e['type'] === 'GameStarted'))[0];
+        self::assertSame('Isamaru, Hound of Konda', $started['payload']['players'][1]['command'][0]['name']);
+        self::assertStringStartsWith('Commandant J0', $started['payload']['players'][0]['command'][0]['name']);
+    }
+
+    public function testRefusedDecklistReturns422WithProblems(): void
+    {
+        $this->useFixtureCatalog();
+        [$status, $body] = $this->call('POST', self::BASE, ['seed' => 5, 'decks' => ['0' => "CMDR: Isamaru, Hound of Konda\n1 Rhystic Study\n1 Inconnue"]]);
+        self::assertSame(422, $status);
+        self::assertCount(2, $body['problems']['J0']);
     }
 }
