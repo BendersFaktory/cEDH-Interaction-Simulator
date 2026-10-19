@@ -2,6 +2,10 @@
 
 export type CardType = 'land' | 'instant' | 'sorcery' | 'creature' | 'artifact' | 'enchantment'
 
+/** Le moteur sérialise `type` en chaîne, ou en liste pour une carte à plusieurs types (artefact-créature). */
+export const typesOf = (card: { type: CardType | CardType[] }): CardType[] => (Array.isArray(card.type) ? card.type : [card.type])
+export const hasType = (card: { type: CardType | CardType[] }, t: CardType): boolean => typesOf(card).includes(t)
+
 /** Capacité activée d'une carte (forme sérialisée par le moteur). */
 export interface AbilityView {
   isManaAbility: boolean
@@ -25,18 +29,27 @@ export interface AbilityView {
 
 /** Trigger d'une carte (forme sérialisée par le moteur). */
 export interface TriggerView {
-  /** `etb` (entrée en jeu), `dies` (mort) ou `upkeep` (début de l'entretien de son contrôleur). */
-  event: 'etb' | 'dies' | 'upkeep'
+  /**
+   * Événement déclencheur : `etb` (entrée en jeu), `dies` (mort), `upkeep` (entretien de son contrôleur),
+   * `attacks` (déclarée attaquante), `end_step` (fin de tour de son contrôleur), `cast` (son contrôleur lance un sort),
+   * `discard` (son contrôleur défausse une carte).
+   */
+  event: TriggerEvent
   effect: string
   amount: number
   /** Jeton créé (`Nom:F/E`). */
   spec?: string
+  /** Seulement pour `cast` : `instant_sorcery` = le sort lancé doit être un éphémère ou un rituel (absent = tout sort). */
+  filter?: TriggerFilter
 }
+
+export type TriggerEvent = 'etb' | 'dies' | 'upkeep' | 'attacks' | 'end_step' | 'cast' | 'discard'
+export type TriggerFilter = 'instant_sorcery'
 
 export interface PublicCard {
   id: string
   name: string
-  type: CardType
+  type: CardType | CardType[]
   cost: number
   effect: string | null
   /** Coût de mana canonique ('{X}{2}{R/G}{U}{U}'), null pour un terrain. */
@@ -48,6 +61,8 @@ export interface PublicCard {
   power?: number
   toughness?: number
   abilities?: AbilityView[]
+  /** Mots-clés (absent si vide) : flying, reach, haste, vigilance, defender, menace, first_strike, double_strike, trample, deathtouch, lifelink. */
+  keywords?: string[]
   /** Mana ajouté par un rituel (effet 'mana'). */
   adds?: string[] | string
   /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
@@ -77,7 +92,7 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger'
+  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger' | 'assign' | 'keep' | 'mulligan' | 'bottom' | 'keepLegend'
   player: number
   cardId?: string
   targets?: string[]
@@ -90,6 +105,10 @@ export interface ActionView {
   mana?: boolean
   /** Action `trigger` : trigger en attente à mettre sur la pile. */
   pendingId?: string
+  /** Action `assign` : répartition des dégâts de l'attaquant (`target` = id de bloqueur ou `player:N`). */
+  assignment?: { target: string; amount: number }[]
+  /** Action `assign` : répartition par défaut (létal dans l'ordre de déclaration). */
+  default?: boolean
 }
 
 export interface StackItemView {
@@ -112,14 +131,28 @@ export interface DecisionRequest {
   turn: number
   phase: string
   activePlayer: number
-  /** Déclaration de combat en cours (attaquants/bloqueurs) : le déclarant occupe `priority.holder`. */
-  declaring: 'attackers' | 'blockers' | null
+  /** Déclaration de combat en cours (attaquants/bloqueurs, répartition des dégâts) : le déclarant occupe `priority.holder`. */
+  declaring: 'attackers' | 'blockers' | 'damage' | null
   priority: { holder: number; passed: number[]; announced: boolean }
   stack: StackItemView[]
   actions: ActionView[]
 }
 
-export type SimulationStatus = 'running' | 'waiting' | 'over'
+export type SimulationStatus = 'queued' | 'running' | 'waiting' | 'over' | 'failed'
+
+/** Étapes où un siège humain peut s'arrêter (valeurs de `PhaseChanged.phase`). */
+export const STOP_STEPS = [
+  'upkeep', 'draw', 'main1', 'begin_combat', 'declare_attackers', 'declare_blockers',
+  'first_strike_damage', 'combat_damage', 'end_combat', 'main2', 'end',
+] as const
+
+/** Stops configurés d'un joueur humain (absent / null = défaut : s'arrêter dès qu'une action est possible). */
+export interface StopsConfig {
+  steps: string[]
+  onOpponentSpell: boolean
+  onDeclareAttackers: boolean
+  onDeclareBlockers: boolean
+}
 
 export interface SimulationView {
   id: number
@@ -127,9 +160,16 @@ export interface SimulationView {
   forkEventSeq: number | null
   seed: number
   status: SimulationStatus
+  /** Tour courant pendant la simulation asynchrone (queued/running). */
+  progress?: number | null
+  error?: string | null
   pending: DecisionRequest | null
   eventCount: number
   controllers: Record<string, string>
+  /** Stops par id de joueur ; clé absente = défaut. */
+  stops?: Record<string, StopsConfig | null>
+  /** URL d'images Scryfall par nom de carte (decks chargés seulement ; absent pour les decks de démo). */
+  cardImages?: Record<string, { small: string | null; normal: string | null }>
 }
 
 // --- État reconstruit côté front par le reducer ---

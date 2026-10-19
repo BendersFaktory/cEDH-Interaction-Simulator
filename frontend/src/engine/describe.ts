@@ -17,7 +17,7 @@ export function describeEvent(e: GameEvent): string {
   const p = e.payload
   switch (e.type) {
     case 'GameStarted':
-      return `Début de partie (seed ${p.seed})`
+      return p.firstPlayer === undefined ? `Début de partie (seed ${p.seed})` : `Début de partie (seed ${p.seed}) — J${p.firstPlayer} commence`
     case 'CardDrawn':
       return `J${p.player} pioche ${p.card.name}`
     case 'PhaseChanged':
@@ -67,8 +67,18 @@ export function describeEvent(e: GameEvent): string {
       return 'Le sort n\'a plus de cible valide'
     case 'DamageDealt':
       return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)${p.commanderDamage ? ` — dégâts de commandant : ${p.commanderDamage.total}/21` : ''}`
+    case 'LifeGained':
+      return `J${p.player} gagne ${p.amount} PV (${p.source}) → ${p.life}`
     case 'CardDiscarded':
       return `J${p.player} défausse ${p.card.name} (main : ${p.hand})`
+    case 'MulliganTaken':
+      return `J${p.player} prend un mulligan (${p.mulligans})`
+    case 'HandKept':
+      return p.toBottom
+        ? `J${p.player} garde sa main (${p.toBottom} carte${p.toBottom > 1 ? 's' : ''} au fond)`
+        : `J${p.player} garde sa main`
+    case 'CardPutOnBottom':
+      return `J${p.player} met une carte au fond de sa bibliothèque`
     case 'AttackerDeclared':
       return `J${p.player} attaque J${p.defender} avec ${p.card}`
     case 'BlockerDeclared':
@@ -77,6 +87,8 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
     case 'CreatureDied':
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'CommanderReturned':
+      return `${p.card.name} (J${p.player}) retourne en zone de commandement`
     case 'CreatureBoosted':
       return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
     case 'TokenCreated':
@@ -87,6 +99,8 @@ export function describeEvent(e: GameEvent): string {
       return 'Fin du combat'
     case 'PlayerLost':
       return `J${p.player} est éliminé (${p.reason})`
+    case 'PlayerLeftGame':
+      return `Les objets de J${p.player} quittent la partie`
     case 'GameOver':
       return p.winner === null ? `Fin de partie (${p.reason})` : `Victoire de J${p.winner}`
     default:

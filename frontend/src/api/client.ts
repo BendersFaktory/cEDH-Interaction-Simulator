@@ -1,4 +1,4 @@
-import type { GameEvent, SimulationView } from '../types/engine'
+import type { GameEvent, SimulationView, StopsConfig } from '../types/engine'
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -31,5 +31,12 @@ export const api = {
     http<SimulationView>(`/simulations/${id}/decisions`, {
       method: 'POST',
       body: JSON.stringify({ actionId }),
+    }),
+
+  /** Configure les stops d'un siège humain (`null` = comportement par défaut). */
+  setStops: (id: number, player: number, stops: StopsConfig | null) =>
+    http<SimulationView>(`/simulations/${id}/stops`, {
+      method: 'PUT',
+      body: JSON.stringify({ player, stops }),
     }),
 }

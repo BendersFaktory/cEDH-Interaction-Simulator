@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Action\Action;
+use App\Engine\Action\AssignCombatDamage;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Agent\AgentRegistry;
+use App\Engine\Game\CardInstance;
 use App\Engine\Game\CombatState;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
@@ -37,8 +40,28 @@ final class CombatManager
         return match ($phase) {
             Phase::DeclareAttackers => $this->legal->attackActions($s, $s->activePlayer) === [],
             Phase::DeclareBlockers, Phase::CombatDamage => $s->combat->attackers === [],
+            Phase::FirstStrikeDamage => !$this->anyFirstStriker($s),
             default => false,
         };
+    }
+
+    /** Une créature au combat (attaquant ou bloqueur) a-t-elle l'initiative ou la double initiative ? (CR 510.4) */
+    private function anyFirstStriker(GameState $s): bool
+    {
+        $inCombat = array_merge(array_keys($s->combat->attackers), ...array_values($s->combat->blockers));
+        if ($inCombat === []) {
+            return false;
+        }
+        foreach ($s->players as $p) {
+            foreach ($p->battlefield as $card) {
+                if (in_array($card->id, $inCombat, true)
+                    && ($card->hasKeyword(CardInstance::FIRST_STRIKE) || $card->hasKeyword(CardInstance::DOUBLE_STRIKE))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** Effets d'entrée dans une étape de combat (appelé par TurnManager::beginStep, après PhaseChanged). */
@@ -52,8 +75,15 @@ final class CombatManager
                 $s->combat->declaring = CombatState::BLOCKERS;
                 $s->combat->queue = $this->defendersInTurnOrder($s);
                 break;
+            case Phase::FirstStrikeDamage:
             case Phase::CombatDamage:
-                $this->resolver->resolve($s);
+                // Un attaquant humain a une répartition à choisir : les dégâts attendent sa décision (runDeclaration).
+                // Sinon (toutes les IA), dégâts immédiats avec la répartition par défaut, comme avant.
+                if ($this->legal->assignmentActions($s, $s->activePlayer) !== []) {
+                    $s->combat->declaring = CombatState::DAMAGE;
+                } else {
+                    $this->resolver->resolve($s, $s->phase === Phase::FirstStrikeDamage);
+                }
                 break;
             case Phase::EndCombat:
                 if ($s->combat->attackers !== []) {
@@ -74,6 +104,11 @@ final class CombatManager
         for ($i = 0; $i < self::MAX_DECLARATIONS; $i++) {
             $c = $s->combat;
             if ($c->declaring === null) {
+                return;
+            }
+            if ($c->declaring === CombatState::DAMAGE) {
+                $this->runAssignment($s, $injected);
+
                 return;
             }
 
@@ -120,6 +155,40 @@ final class CombatManager
         throw new \LogicException('Déclaration de combat sans fin (garde-fou).');
     }
 
+    /**
+     * Répartition des dégâts par le contrôleur humain (CR 510.1c, 702.19b) : un choix par attaquant concerné, dans
+     * l'ordre de déclaration, puis les dégâts de l'étape sont infligés d'un coup (simultanés). Décision hors priorité,
+     * sans ronde ; l'état (`declaring = damage`, choix déjà faits) est dans CombatState, donc la reprise est exacte.
+     */
+    private function runAssignment(GameState $s, ?Action &$injected): void
+    {
+        for ($i = 0; $i < self::MAX_DECLARATIONS; $i++) {
+            $player = $s->activePlayer;
+            $legal = $this->legal->assignmentActions($s, $player);
+            if ($legal === []) {
+                $this->resolver->resolve($s, $s->phase === Phase::FirstStrikeDamage);
+                $s->combat->assignments = [];
+                $this->finish($s);
+
+                return;
+            }
+
+            $s->priority = new PriorityState($player, [], true);
+            if ($injected !== null) {
+                $action = $this->legal->match($injected, $player, $legal);
+                $injected = null;
+            } else {
+                $action = $this->agents->get($s->controllers[$player])->decide($s, $player, $legal);
+            }
+            if (!$action instanceof AssignCombatDamage) {
+                throw new \LogicException('Une répartition des dégâts est obligatoire : ' . $action::class);
+            }
+            $s->combat->assignments[$action->attackerId] = $action->assignment;
+        }
+
+        throw new \LogicException('Répartition des dégâts sans fin (garde-fou).');
+    }
+
     private function currentDeclarer(GameState $s): ?int
     {
         $c = $s->combat;
@@ -144,9 +213,13 @@ final class CombatManager
     private function declareAttacker(GameState $s, DeclareAttacker $a): void
     {
         $card = $this->find($s, $a->player(), $a->cardId);
-        $card->tapped = true;
+        if (!$card->hasKeyword(CardInstance::VIGILANCE)) {
+            $card->tapped = true;
+        }
         $s->combat->attackers[$a->cardId] = $a->defender;
-        $s->emit('AttackerDeclared', ['player' => $a->player(), 'card' => $a->cardId, 'defender' => $a->defender, 'tapped' => true]);
+        $s->emit('AttackerDeclared', ['player' => $a->player(), 'card' => $a->cardId, 'defender' => $a->defender, 'tapped' => $card->tapped]);
+        // « Quand elle attaque » : posé sur la pile à la première priorité de l'étape, donc avant les bloqueurs.
+        $s->queueTriggers($a->player(), $card, TriggeredAbility::ATTACKS);
     }
 
     private function declareBlocker(GameState $s, DeclareBlocker $a): void

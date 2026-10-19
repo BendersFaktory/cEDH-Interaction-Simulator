@@ -24,14 +24,45 @@ final class CardInstance
     public const ARTIFACT = 'artifact';
     public const ENCHANTMENT = 'enchantment';
 
+    // Mots-clés de combat (CR 702).
+    public const FLYING = 'flying';
+    public const REACH = 'reach';
+    public const HASTE = 'haste';
+    public const VIGILANCE = 'vigilance';
+    public const DEFENDER = 'defender';
+    public const MENACE = 'menace';
+    public const FIRST_STRIKE = 'first_strike';
+    public const DOUBLE_STRIKE = 'double_strike';
+    public const TRAMPLE = 'trample';
+    public const DEATHTOUCH = 'deathtouch';
+    public const LIFELINK = 'lifelink';
+
+    // Supertypes (CR 205.4).
+    public const LEGENDARY = 'legendary';
+
+    /** @var list<string> types (artefact-créature : deux) ; sérialisé sous `type`, en chaîne s'il n'y en a qu'un */
+    public readonly array $types;
+
     /** Bonus de force/endurance jusqu'à la fin du tour (`pump`), remis à zéro au cleanup. Voir power()/toughness(). */
     public int $powerBonus = 0;
     public int $toughnessBonus = 0;
 
+    /** Blessée par une source à contact mortel ce tour : détruite par les actions basées sur l'état (CR 704.5h), remis à faux au cleanup. */
+    public bool $deathtouchDamage = false;
+
+    /**
+     * Mémo de `toPublic()` / `toArray()` : un même tableau rendu tant que la carte ne change pas est partagé (copie sur
+     * écriture) entre tous les états sérialisés ; une bibliothèque de 99 cartes ne coûte alors presque rien par checkpoint.
+     * Pur cache d'une fonction de l'objet, jamais sérialisé.
+     */
+    private ?array $publicMemo = null;
+    private ?array $arrayMemo = null;
+    private string $arrayMemoKey = '';
+
     public function __construct(
         public readonly string $id,
         public readonly string $name,
-        public readonly string $type,
+        string|array $type,
         public readonly int $cost = 0,
         public readonly ?string $effect = null, // 'damage' | 'counter' | 'mana' | 'treasure' | null
         public readonly int $amount = 0,
@@ -52,10 +83,23 @@ final class CardInstance
         public readonly array $triggers = [],
         /** @var array<string, list<string>> sous-types rattachés à leur type (règle 205.3), ex. `['creature' => ['Eldrazi']]` */
         public readonly array $subtypes = [],
+        /** @var list<string> mots-clés (constantes FLYING...) */
+        public readonly array $keywords = [],
+        /** @var list<string> supertypes (constante LEGENDARY) */
+        public readonly array $supertypes = [],
     ) {
-        if ($subtypes !== []) {
-            Subtypes::assertValid($type, $subtypes, $name);
+        $this->types = is_array($type) ? array_values($type) : [$type];
+        if ($this->types === []) {
+            throw new \InvalidArgumentException("$name : une carte a au moins un type");
         }
+        if ($subtypes !== []) {
+            Subtypes::assertValid($this->types, $subtypes, $name);
+        }
+    }
+
+    public function hasType(string $type): bool
+    {
+        return in_array($type, $this->types, true);
     }
 
     /** Sous-type porté par la carte, sous le type `$type` s'il est donné (sinon sous n'importe lequel de ses types). */
@@ -70,12 +114,65 @@ final class CardInstance
         return false;
     }
 
+    /** Légendaire : soumis à la règle des légendes (CR 704.5j). */
+    public function isLegendary(): bool
+    {
+        return in_array(self::LEGENDARY, $this->supertypes, true);
+    }
+
+    public function hasKeyword(string $keyword): bool
+    {
+        return in_array($keyword, $this->keywords, true);
+    }
+
     /** Incolore : aucun symbole coloré ni hybride dans le coût de mana (`{C}` est incolore). */
     public function isColorless(): bool
     {
         $cost = $this->manaCost();
 
         return $cost->hybrid === [] && array_diff(array_keys($cost->colored), ['C']) === [];
+    }
+
+    /**
+     * Identité de couleurs (CR 903.4) : couleurs des symboles du coût de mana (hybride `{U/R}` = U et R ; `{C}` et générique
+     * n'ajoutent rien) et de ceux des capacités activées (coût et mana produit, dont `produces` d'un terrain). Calculée à la
+     * demande, jamais sérialisée.
+     *
+     * @return list<Color> triée dans l'ordre WUBRG, sans doublon
+     */
+    public function colorIdentity(): array
+    {
+        $found = [];
+        $addCost = static function (ManaCost $cost) use (&$found): void {
+            foreach (array_keys($cost->colored) as $symbol) {
+                $found[$symbol] = true;
+            }
+            foreach ($cost->hybrid as [$a, $b]) {
+                $found[$a->symbol()] = true;
+                $found[$b->symbol()] = true;
+            }
+        };
+        if (!$this->isLand()) {
+            $addCost($this->manaCost());
+        }
+        foreach ($this->abilities() as $ability) {
+            if ($ability->manaCost !== null) {
+                $addCost($ability->manaCost);
+            }
+            foreach ($ability->options as $option) {
+                foreach ($option as $color) {
+                    $found[$color->symbol()] = true;
+                }
+            }
+        }
+        if ($this->adds !== null) {
+            $addCost(ManaCost::parse($this->adds));
+        }
+
+        return array_values(array_filter(
+            Color::cases(),
+            static fn (Color $c) => $c !== Color::Colorless && isset($found[$c->symbol()]),
+        ));
     }
 
     /** Coût de mana structuré (les terrains n'ont pas de coût). */
@@ -127,31 +224,32 @@ final class CardInstance
     /** Permanent : va sur le champ de bataille en se résolvant (créature, artefact) ou en étant joué (terrain). */
     public function isPermanent(): bool
     {
-        return $this->type !== self::INSTANT && $this->type !== self::SORCERY;
+        return !$this->hasType(self::INSTANT) && !$this->hasType(self::SORCERY);
     }
 
     public function isLand(): bool
     {
-        return $this->type === self::LAND;
+        return $this->hasType(self::LAND);
     }
 
     public function isCreature(): bool
     {
-        return $this->type === self::CREATURE;
+        return $this->hasType(self::CREATURE);
     }
 
     public function isInstantSpeed(): bool
     {
-        return $this->type === self::INSTANT;
+        return $this->hasType(self::INSTANT);
     }
 
     /** Représentation exposée dans les événements (tout est public dans ce simulateur). */
     public function toPublic(): array
     {
-        return [
+        // Ne lit que des propriétés readonly : calculé une fois.
+        return $this->publicMemo ??= [
             'id' => $this->id,
             'name' => $this->name,
-            'type' => $this->type,
+            'type' => count($this->types) === 1 ? $this->types[0] : $this->types,
             'cost' => $this->cost,
             'manaCost' => $this->isLand() ? null : (string) $this->manaCost(),
             'produces' => $this->produces,
@@ -164,14 +262,23 @@ final class CardInstance
             'toughness' => $this->toughness,
         ] + ($this->token ? ['token' => true] : []) // omis si faux : au-delà de 16 clés, PHP double la table (+75 % de mémoire par état)
             + ($this->triggers === [] ? [] : ['triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers)]) // idem
-            + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]); // idem
+            + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]) // idem
+            + ($this->keywords === [] ? [] : ['keywords' => $this->keywords]) // idem
+            + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]); // idem
     }
 
     public function toArray(): array
     {
+        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus";
+        if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
+            return $this->arrayMemo;
+        }
+        $this->arrayMemoKey = $key;
+
         // `boost` omis sans bonus : au-delà de 16 clés, PHP double la table (voir toPublic).
-        return $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
-            + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : []);
+        return $this->arrayMemo = $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
+            + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : [])
+            + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : []);
     }
 
     public static function fromArray(array $d): self
@@ -196,8 +303,11 @@ final class CardInstance
             (bool) ($d['token'] ?? false),
             array_map([TriggeredAbility::class, 'fromArray'], $d['triggers'] ?? []),
             $d['subtypes'] ?? [],
+            $d['keywords'] ?? [],
+            $d['supertypes'] ?? [],
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
+        $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);
 
         return $card;
     }

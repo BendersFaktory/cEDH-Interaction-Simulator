@@ -7,6 +7,7 @@ const phaseLabels: Record<string, string> = {
   begin_combat: 'Début de combat',
   declare_attackers: 'Attaquants',
   declare_blockers: 'Bloqueurs',
+  first_strike_damage: 'Dégâts (initiative)',
   combat_damage: 'Dégâts de combat',
   end_combat: 'Fin de combat',
   main2: 'Principale 2',

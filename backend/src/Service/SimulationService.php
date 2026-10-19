@@ -6,13 +6,18 @@ namespace App\Service;
 
 use App\Engine\Action\Action;
 use App\Engine\Agent\AgentRegistry;
+use App\Engine\Card\Decks;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
 use App\Engine\Game\GameState;
+use App\Engine\Game\StopConfig;
 use App\Engine\Rules\LegalActionGenerator;
 use App\Entity\GameEventRecord;
 use App\Entity\Simulation;
+use App\Message\RunSimulation;
+use App\Service\Deck\LoadedDeck;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * Colle entre le moteur (PHP pur) et la persistance (Doctrine).
@@ -24,20 +29,49 @@ class SimulationService
         private readonly EntityManagerInterface $em,
         private readonly BulkInserter $bulk,
         private readonly StateReconstructor $reconstructor,
+        private readonly MessageBusInterface $bus,
         /** Ancre complète tous les N tours ; le reste se reconstruit par rejeu (voir SparseCheckpoints). */
         private readonly int $checkpointEveryNTurns = 1,
     ) {
     }
 
-    /** @param array<int, string> $controllers id joueur => clé d'agent */
-    public function create(int $seed, array $controllers): Simulation
+    /**
+     * @param array<int, string> $controllers id joueur => clé d'agent
+     * @param array<int, LoadedDeck> $decks decks chargés par siège (les autres sièges jouent le deck de démo)
+     */
+    public function create(int $seed, array $controllers, array $decks = []): Simulation
     {
         $this->assertControllers($controllers);
 
         $sim = new Simulation($seed);
+        $sim->setStatus(Simulation::QUEUED);
+        $sim->setControllers($controllers);
+        foreach ($decks as $playerId => $deck) {
+            if (!isset($controllers[$playerId])) {
+                throw new \InvalidArgumentException("Deck fourni pour le joueur $playerId, qui n'existe pas.");
+            }
+        }
+        $sim->setDecks($decks === [] ? null : array_map(static fn (LoadedDeck $d): array => $d->toArray(), $decks));
         $this->em->persist($sim);
+        $this->em->flush();
 
-        return $this->run($sim, GameFactory::create($seed, $controllers), null);
+        $this->bus->dispatch(new RunSimulation((int) $sim->getId()));
+
+        return $sim;
+    }
+
+    /** Joue une simulation QUEUED (appelé par le handler Messenger). */
+    public function start(Simulation $sim): Simulation
+    {
+        $controllers = [];
+        foreach ($sim->getControllers() ?? [] as $id => $key) {
+            $controllers[(int) $id] = (string) $key;
+        }
+
+        $decks = array_map(LoadedDeck::fromArray(...), $sim->getDecks() ?? []);
+        $builder = static fn (int $id): array => isset($decks[$id]) ? $decks[$id]->instantiate($id) : Decks::commanderDemo($id);
+
+        return $this->run($sim, GameFactory::create($sim->getSeed(), $controllers, $builder), null);
     }
 
     /** Reprend une branche suspendue avec la décision du joueur humain. */
@@ -61,6 +95,53 @@ class SimulationService
     }
 
     /**
+     * Change les stops d'un joueur humain au point courant de la branche (sans la forker).
+     *
+     * Le point courant est la pause : on l'ancre avec les stops (jamais d'ancre passée réécrite), puis on reprend
+     * le moteur, qui redemande sa décision à l'agent avec la nouvelle config (il peut donc passer tout seul).
+     *
+     * @param array|null $stops JSON de StopConfig, ou null pour revenir au comportement par défaut
+     * @throws \ValueError si une étape est inconnue
+     */
+    public function setStops(Simulation $sim, int $playerId, ?array $stops): Simulation
+    {
+        if ($sim->getStatus() === Simulation::OVER) {
+            throw new \DomainException('La partie est terminée.');
+        }
+        $state = GameState::fromArray($sim->getState());
+        if (!isset($state->players[$playerId])) {
+            throw new \InvalidArgumentException("Joueur inconnu : $playerId");
+        }
+        if (!str_starts_with($state->controllers[$playerId] ?? '', 'human')) {
+            throw new \InvalidArgumentException("Le joueur $playerId n'est pas contrôlé par un humain.");
+        }
+        $config = $stops === null ? null : StopConfig::fromArray($stops);
+
+        // Le point courant doit être une pause humaine (déjà point d'ancre, complétée ensuite par anchorDecision)
+        // ou un checkpoint (règle 6) : on l'ancre avec les nouveaux stops.
+        if ($sim->getStatus() !== Simulation::WAITING && !$this->isCheckpoint($sim, $state->eventSeq)) {
+            throw new \DomainException('Les stops se changent à une pause ou à une priorité de checkpoint.');
+        }
+
+        $state->setStops($playerId, $config);
+
+        return $this->run($sim, $state, null, anchorBefore: [$state->eventSeq, $state->toArray(), null]);
+    }
+
+    private function isCheckpoint(Simulation $sim, int $seq): bool
+    {
+        $row = $this->em->createQueryBuilder()
+            ->select('e')->from(GameEventRecord::class, 'e')
+            ->where('e.simulation = :s AND e.seq = :seq')
+            ->setParameter('s', $sim)->setParameter('seq', $seq)
+            ->getQuery()->getOneOrNullResult();
+
+        $e = $row?->toArray();
+
+        return $e !== null && $e['type'] === 'PriorityGranted' && ($e['payload']['checkpoint'] ?? false) === true;
+    }
+
+    /**
      * Crée une nouvelle branche à partir du checkpoint le plus proche (<= $atEvent) de $parent.
      *
      * @param array<int, string> $controllerOverrides ex: [1 => 'human:auto'] = « je prends le joueur 1 »
@@ -81,6 +162,7 @@ class SimulationService
 
         $child = new Simulation($parent->getSeed());
         $child->setParent($parent);
+        $child->setDecks($parent->getDecks());
         $child->setForkEventSeq($state->eventSeq);
         $this->em->persist($child);
 
@@ -132,7 +214,11 @@ class SimulationService
      */
     private function run(Simulation $sim, GameState $state, ?Action $decision, ?array $anchorBefore = null): Simulation
     {
-        $checkpoints = new SparseCheckpoints($this->checkpointEveryNTurns, $anchorBefore !== null ? $state->turn : null);
+        $checkpoints = new SparseCheckpoints(
+            $this->checkpointEveryNTurns,
+            $anchorBefore !== null ? $state->turn : null,
+            $sim->getStatus() === Simulation::QUEUED ? fn (int $turn) => $this->writeProgress($sim, $turn) : null,
+        );
         $result = (new GameEngine(new AgentRegistry(), $checkpoints))->advance($state, $decision);
 
         // Une seule transaction (tout ou rien). Les événements et checkpoints sont écrits en masse, hors
@@ -145,7 +231,7 @@ class SimulationService
             if ($anchorBefore !== null) {
                 [$seq, $anchorState, $actionId] = $anchorBefore;
                 $actionId === null
-                    ? $this->bulk->insertCheckpoints((int) $sim->getId(), [$seq => $anchorState])
+                    ? $this->bulk->upsertCheckpoint((int) $sim->getId(), $seq, $anchorState)
                     : $this->bulk->anchorDecision((int) $sim->getId(), $seq, $anchorState, $actionId);
             }
             $this->bulk->insertCheckpoints((int) $sim->getId(), $checkpoints->states);
@@ -157,6 +243,12 @@ class SimulationService
         });
 
         return $sim;
+    }
+
+    /** UPDATE direct, hors UnitOfWork et hors transaction principale : visible tout de suite par le polling. */
+    private function writeProgress(Simulation $sim, int $turn): void
+    {
+        $this->em->getConnection()->executeStatement('UPDATE simulation SET progress = ? WHERE id = ?', [$turn, $sim->getId()]);
     }
 
     /** @param array<int, string> $controllers */

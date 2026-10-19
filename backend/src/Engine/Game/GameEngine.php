@@ -10,6 +10,7 @@ use App\Engine\Decision\DecisionRequired;
 use App\Engine\Rules\CombatManager;
 use App\Engine\Rules\HandSizeManager;
 use App\Engine\Rules\LegalActionGenerator;
+use App\Engine\Rules\MulliganManager;
 use App\Engine\Rules\PriorityManager;
 use App\Engine\Rules\StackResolver;
 use App\Engine\Rules\StateBasedActions;
@@ -30,17 +31,20 @@ final class GameEngine
     private readonly PriorityManager $priority;
     private readonly CombatManager $combat;
     private readonly HandSizeManager $handSize;
+    private readonly MulliganManager $mulligans;
+    private readonly StateBasedActions $sba;
 
     public function __construct(
         AgentRegistry $agents,
         ?CheckpointListener $listener = null,
         ?LegalActionGenerator $legal = null,
     ) {
-        $sba = new StateBasedActions();
         $legal ??= new LegalActionGenerator();
+        $sba = $this->sba = new StateBasedActions($agents, $legal);
         $this->combat = new CombatManager($agents, $legal);
         $this->handSize = new HandSizeManager($agents, $legal);
-        $this->turns = new TurnManager($sba, $this->combat);
+        $this->mulligans = new MulliganManager($agents, $legal);
+        $this->turns = new TurnManager($this->combat);
         $this->priority = new PriorityManager(
             $agents,
             $legal,
@@ -60,6 +64,10 @@ final class GameEngine
                 if ($step > self::MAX_STEPS) {
                     throw new \LogicException('Garde-fou : trop d\'étapes dans advance().');
                 }
+                // Avant-partie : mulligans, avant la première étape (aucune priorité, donc aucun checkpoint).
+                if ($s->mulligan !== null) {
+                    $this->mulligans->run($s, $injected);
+                }
                 if (!$s->stepStarted) {
                     $this->turns->beginStep($s);
                 }
@@ -72,8 +80,8 @@ final class GameEngine
                         $this->priority->runRound($s, $injected);
                     }
                 }
-                if ($s->phase === Phase::Cleanup) {
-                    $this->handSize->run($s, $injected);
+                if ($s->phase === Phase::Cleanup && $this->cleanup($s, $injected)) {
+                    continue; // nouvelle étape de cleanup (règle 514.3a)
                 }
                 if ($s->over) {
                     break;
@@ -85,5 +93,36 @@ final class GameEngine
         }
 
         return new AdvanceResult($s->drainEvents(), null, true);
+    }
+
+    /**
+     * Cleanup : défausse à 7, puis règle 514.3a — si des SBA agissent ou si des triggers attendent, une ronde de priorité
+     * complète s'ouvre (octrois journalisés, checkpoints), puis une nouvelle étape de cleanup commence. `cleanupRound`
+     * marque cette ronde : à la reprise après une décision, la défausse n'est pas rejouée. Peut lever DecisionRequired.
+     *
+     * @return bool true si une nouvelle étape de cleanup doit commencer
+     */
+    private function cleanup(GameState $s, ?Action &$injected): bool
+    {
+        if (!$s->cleanupRound) {
+            $this->handSize->run($s, $injected);
+            $seq = $s->eventSeq;
+            $this->sba->check($s, $injected);
+            if ($s->over || ($s->eventSeq === $seq && $s->pendingTriggers === [])) {
+                return false;
+            }
+            $s->cleanupRound = true;
+            $first = $s->player($s->activePlayer)->lost ? $s->nextAlive($s->activePlayer) : $s->activePlayer;
+            $s->priority = new PriorityState($first);
+        }
+
+        $this->priority->runRound($s, $injected);
+        $s->cleanupRound = false;
+        if ($s->over) {
+            return false;
+        }
+        $s->stepStarted = false;
+
+        return true;
     }
 }

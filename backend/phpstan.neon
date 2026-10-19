@@ -1,0 +1,5 @@
+parameters:
+    level: 2
+    paths:
+        - src
+    # Le moteur doit rester du PHP pur : voir CLAUDE.md (règle d'or 1).

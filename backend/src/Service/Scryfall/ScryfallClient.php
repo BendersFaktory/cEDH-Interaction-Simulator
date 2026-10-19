@@ -1,0 +1,63 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Service\Scryfall;
+
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+
+/**
+ * Client minimal de l'API Scryfall (POST /cards/collection), par lots de 75 noms max.
+ * Respecte la politique de Scryfall : User-Agent + Accept explicites, 100 ms entre deux requêtes.
+ * Les erreurs réseau / HTTP lèvent une exception (TransportExceptionInterface, HttpExceptionInterface) :
+ * c'est CardCatalog qui décide du mode dégradé.
+ */
+class ScryfallClient
+{
+    public const BATCH_SIZE = 75;
+    private const URL = 'https://api.scryfall.com/cards/collection';
+
+    public function __construct(
+        private readonly HttpClientInterface $httpClient,
+        /** Pause entre deux requêtes, en microsecondes (100 ms ; 0 dans les tests). */
+        private readonly int $delayMicroseconds = 100_000,
+    ) {
+    }
+
+    /**
+     * @param list<string> $names
+     * @return array{cards: list<array<string, mixed>>, not_found: list<string>}
+     */
+    public function fetchCollection(array $names): array
+    {
+        $names = array_values(array_unique($names));
+        $cards = [];
+        $notFound = [];
+
+        foreach (array_chunk($names, self::BATCH_SIZE) as $i => $batch) {
+            if ($i > 0 && $this->delayMicroseconds > 0) {
+                usleep($this->delayMicroseconds);
+            }
+
+            $response = $this->httpClient->request('POST', self::URL, [
+                'headers' => [
+                    'User-Agent' => 'cEDH-Interaction-Simulator/0.1',
+                    'Accept' => 'application/json',
+                ],
+                'json' => ['identifiers' => array_map(static fn (string $n): array => ['name' => $n], $batch)],
+            ]);
+            $payload = $response->toArray();
+
+            foreach ($payload['data'] ?? [] as $card) {
+                $cards[] = $card;
+            }
+            foreach ($payload['not_found'] ?? [] as $identifier) {
+                if (isset($identifier['name']) && is_string($identifier['name'])) {
+                    $notFound[] = $identifier['name'];
+                }
+            }
+        }
+
+        return ['cards' => $cards, 'not_found' => $notFound];
+    }
+}

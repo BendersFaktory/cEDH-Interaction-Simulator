@@ -1,0 +1,133 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Engine\Rules;
+
+use App\Engine\Action\Action;
+use App\Engine\Action\BottomCard;
+use App\Engine\Action\KeepHand;
+use App\Engine\Action\Mulligan;
+use App\Engine\Agent\AgentRegistry;
+use App\Engine\Game\GameState;
+use App\Engine\Game\PriorityState;
+
+/**
+ * Avant-partie : mulligan de Londres (CR 103.5), premier mulligan gratuit en multijoueur (CR 103.5c).
+ *
+ * Chaque joueur, dans l'ordre du tour à partir du premier joueur, garde sa main ou prend un mulligan (main remise dans
+ * la bibliothèque, mélange, 7 nouvelles cartes) ; une fois la main gardée, il met au fond de sa bibliothèque une carte
+ * par mulligan au delà du premier, une action par carte. Comme la défausse du cleanup, ce n'est PAS une priorité : le
+ * joueur qui décide occupe `priority->holder` (le serveur et le rejeu retrouvent l'action via LegalActionGenerator::for)
+ * et aucun PriorityGranted n'est émis (donc aucun checkpoint : on ne forke pas avant la première priorité).
+ *
+ * Les décisions sont séquentielles et non simultanées comme le prévoit CR 103.5 : c'est sans effet sur des agents qui ne
+ * regardent que leur propre main. L'état tient dans `GameState::$mulligan` ; le nombre de cartes à mettre au fond se
+ * recalcule (voir `toBottom`), ce qui rend la reprise après DecisionRequired triviale.
+ */
+final class MulliganManager
+{
+    public const HAND_SIZE = 7;
+    private const MAX_DECISIONS = 500;
+
+    public function __construct(
+        private readonly AgentRegistry $agents,
+        private readonly LegalActionGenerator $legal,
+    ) {
+    }
+
+    /** Cartes qu'il reste à mettre au fond pour ce joueur (0 tant que sa main n'est pas gardée). */
+    public static function toBottom(GameState $s, int $playerId): int
+    {
+        $m = $s->mulligan[$playerId] ?? null;
+        if ($m === null || !$m['kept']) {
+            return 0;
+        }
+
+        return max(0, count($s->player($playerId)->hand) - (self::HAND_SIZE - max(0, $m['taken'] - 1)));
+    }
+
+    /** Peut lever DecisionRequired (état intact, repris via $injected). */
+    public function run(GameState $s, ?Action &$injected): void
+    {
+        for ($i = 0; $i < self::MAX_DECISIONS; $i++) {
+            $playerId = $this->nextUndecided($s);
+            if ($playerId === null) {
+                $s->mulligan = null;
+                $s->priority = new PriorityState($s->activePlayer);
+
+                return;
+            }
+
+            $s->priority = new PriorityState($playerId, [], true);
+            $legal = $this->legal->for($s, $playerId);
+
+            if ($injected !== null) {
+                $action = $this->legal->match($injected, $playerId, $legal);
+                $injected = null;
+            } else {
+                $action = $this->agents->get($s->controllers[$playerId])->decide($s, $playerId, $legal);
+            }
+
+            match (true) {
+                $action instanceof Mulligan => $this->mulligan($s, $playerId),
+                $action instanceof KeepHand => $this->keep($s, $playerId),
+                $action instanceof BottomCard => $this->bottom($s, $playerId, $action->cardId),
+                default => throw new \LogicException('Décision de mulligan attendue : ' . $action::class),
+            };
+        }
+
+        throw new \LogicException('Mulligan sans fin (garde-fou).');
+    }
+
+    /** Premier joueur, dans l'ordre du tour depuis le joueur actif, qui n'a pas fini (main non gardée ou cartes au fond). */
+    private function nextUndecided(GameState $s): ?int
+    {
+        $ids = $s->alivePlayerIds();
+        $start = (int) array_search($s->activePlayer, $ids, true);
+        $ordered = [...array_slice($ids, $start), ...array_slice($ids, 0, $start)];
+        foreach ($ordered as $id) {
+            if (!($s->mulligan[$id]['kept'] ?? true) || self::toBottom($s, $id) > 0) {
+                return $id;
+            }
+        }
+
+        return null;
+    }
+
+    private function mulligan(GameState $s, int $playerId): void
+    {
+        $p = $s->player($playerId);
+        $taken = $s->mulligan[$playerId]['taken'] + 1;
+        $s->mulligan[$playerId]['taken'] = $taken;
+        $p->library = $s->rng->shuffle([...$p->hand, ...$p->library]);
+        $p->hand = [];
+        $s->emit('MulliganTaken', ['player' => $playerId, 'mulligans' => $taken, 'hand' => 0, 'library' => count($p->library)]);
+        for ($i = 0; $i < self::HAND_SIZE; $i++) {
+            $s->drawCard($playerId);
+        }
+    }
+
+    private function keep(GameState $s, int $playerId): void
+    {
+        $s->mulligan[$playerId]['kept'] = true;
+        $s->emit('HandKept', [
+            'player' => $playerId,
+            'mulligans' => $s->mulligan[$playerId]['taken'],
+            'toBottom' => self::toBottom($s, $playerId),
+        ]);
+    }
+
+    private function bottom(GameState $s, int $playerId, string $cardId): void
+    {
+        $p = $s->player($playerId);
+        $card = $p->takeFromHand($cardId) ?? throw new \DomainException("Carte à mettre au fond absente de la main : $cardId");
+        $p->library[] = $card;
+        $s->emit('CardPutOnBottom', [
+            'player' => $playerId,
+            'card' => $card->toPublic(),
+            'hand' => count($p->hand),
+            'library' => count($p->library),
+        ]);
+    }
+}

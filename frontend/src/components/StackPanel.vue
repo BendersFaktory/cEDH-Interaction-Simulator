@@ -32,17 +32,16 @@ const target = (t: string): string => (t.startsWith('player:') ? `J${t.slice(7)}
 </template>
 
 <style>
-.board > .stack {
+.table > .stack {
   position: sticky;
   top: 0;
   z-index: 5;
   width: 100%;
-  max-width: 720px;
-  align-self: center;
+  align-self: start;
   box-shadow: 0 4px 12px rgba(0, 0, 0, .35);
 }
 .stack h3 { display: flex; align-items: center; gap: 8px; margin: 0; }
-.board > .stack.stack-empty { position: static; padding-top: 6px; padding-bottom: 6px; box-shadow: none; }
+.table > .stack.stack-empty { position: static; padding-top: 6px; padding-bottom: 6px; box-shadow: none; }
 .stack-empty-label { font-weight: 400; font-size: 13px; }
 .stack ol { margin-top: 6px; max-height: 40vh; overflow: auto; }
 .stack li { padding: 2px 6px; border-radius: 4px; }

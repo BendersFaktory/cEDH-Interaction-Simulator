@@ -29,8 +29,10 @@ describe('reducer — test de contrat avec le moteur PHP', () => {
     }
   })
 
-  it('termine avec une pile vide', () => {
-    expect(view.stack).toEqual([])
+  it('la pile finale ne contient que les éléments jamais résolus (partie terminée en pleine pile)', () => {
+    const resolved = new Set(events.filter((e) => e.type === 'AbilityResolved' || e.type === 'SpellResolved' || e.type === 'SpellCountered').map((e) => e.payload.stackId))
+    const pushed = events.filter((e) => ['SpellCast', 'AbilityActivated', 'AbilityTriggered'].includes(e.type)).map((e) => e.payload.stackId as string)
+    expect(view.stack.map((i) => i.id)).toEqual(pushed.filter((id) => !resolved.has(id)))
   })
 
   it('peut s\'arrêter à n\'importe quel événement (replay partiel)', () => {
@@ -64,7 +66,7 @@ describe('reducer — combat', () => {
   })
 
   it('une créature morte est dans un cimetière ou en zone de commandement, jamais sur le champ de bataille', () => {
-    const died = events.find((e) => e.type === 'CreatureDied')!
+    const died = events.find((e) => e.type === 'CreatureDied' && e.payload.destination !== 'none')!
     const view = replay(events, died.seq)
     const pl = view.players[died.payload.player]
     expect(pl.battlefield.some((c) => c.id === died.payload.card.id)).toBe(false)
@@ -204,5 +206,91 @@ describe('reducer — capacités et réserve de mana', () => {
     expect([v.players[0].battlefield[2].power, v.players[0].battlefield[2].toughness]).toEqual([3, 3])
     applyEvent(v, ev(5, 'CreatureBoosted', { player: 0, card: 'c1', power: 2, toughness: 2 }))
     expect(v.players[0].battlefield[2].power).toBe(2)
+  })
+})
+
+describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const bear: PublicCard = { id: 'b1', name: 'Grizzly Bears', type: 'creature', cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h' }, { id: 1, life: 40, library: 0, controller: 'ai' }] }),
+      ev(2, 'LandPlayed', { player: 0, card: bear }),
+    ])
+
+  it('un trigger cast avec filtre est posé et résolu comme les autres (le filtre est au moteur, pas au front)', () => {
+    const v = start()
+    const trigger = { event: 'cast' as const, effect: 'draw', amount: 1, filter: 'instant_sorcery' as const }
+    applyEvent(v, ev(3, 'AbilityTriggered', { player: 0, stackId: 's1', card: bear, triggerIndex: 0, trigger, label: 'Quand vous lancez un éphémère ou un rituel : piocher 1', targets: [] }))
+    expect(v.stack.map((i) => i.id)).toEqual(['s1'])
+    expect(v.stack[0].trigger).toEqual(trigger)
+    applyEvent(v, ev(4, 'AbilityResolved', { stackId: 's1', controller: 0, card: bear, abilityIndex: 0, trigger: true }))
+    expect(v.stack).toEqual([])
+  })
+
+  it('un trigger attacks et un trigger end_step se posent sur la pile sans toucher la priorité autrement', () => {
+    const v = start()
+    v.priority = { holder: 1, passed: [0] }
+    applyEvent(v, ev(3, 'AbilityTriggered', { player: 0, stackId: 's2', card: bear, triggerIndex: 0, trigger: { event: 'attacks', effect: 'damage', amount: 1 }, label: 'Quand elle attaque : 1 dégât', targets: ['player:1'] }))
+    applyEvent(v, ev(4, 'AbilityTriggered', { player: 0, stackId: 's3', card: bear, triggerIndex: 1, trigger: { event: 'end_step', effect: 'draw', amount: 1 }, label: 'Au début de votre fin de tour : piocher 1', targets: [] }))
+    expect(v.stack.map((i) => i.label)).toEqual(['Quand elle attaque : 1 dégât', 'Au début de votre fin de tour : piocher 1'])
+    expect(v.priority.passed).toEqual([])
+  })
+
+  it('une seconde étape cleanup (ronde de priorité) réinitialise la priorité ; la ronde s\'affiche comme un checkpoint', () => {
+    const v = start()
+    applyEvent(v, ev(3, 'PhaseChanged', { turn: 1, phase: 'cleanup', activePlayer: 0 }))
+    expect(v.phase).toBe('cleanup')
+    applyEvent(v, ev(4, 'PriorityGranted', { holder: 0, passed: [], stackSize: 0, checkpoint: true }))
+    applyEvent(v, ev(5, 'PriorityPassed', { player: 0 }))
+    expect(v.priority).toEqual({ holder: 0, passed: [0] })
+    applyEvent(v, ev(6, 'PriorityGranted', { holder: 1, passed: [0], stackSize: 0, checkpoint: true }))
+    applyEvent(v, ev(7, 'PriorityPassed', { player: 1 }))
+    expect(v.priority.passed).toEqual([0, 1])
+    // Fin de la ronde : nouvelle étape cleanup, la priorité repart à zéro.
+    applyEvent(v, ev(8, 'PhaseChanged', { turn: 1, phase: 'cleanup', activePlayer: 0 }))
+    expect(v.phase).toBe('cleanup')
+    expect(v.priority).toEqual({ holder: null, passed: [] })
+  })
+})
+
+describe('reducer — mulligan de Londres', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const card = (id: string): PublicCard => ({ id, name: `Carte ${id}`, type: 'land', cost: 0, effect: null, amount: 0 })
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 93, controller: 'h' }, { id: 1, life: 40, library: 93, controller: 'ai' }] }),
+      ev(2, 'CardDrawn', { player: 0, card: card('a'), library: 92 }),
+      ev(3, 'CardDrawn', { player: 0, card: card('b'), library: 91 }),
+      ev(4, 'CardDrawn', { player: 0, card: card('c'), library: 90 }),
+    ])
+
+  it('MulliganTaken vide la main et remet les cartes dans la bibliothèque', () => {
+    const v = applyEvent(start(), ev(5, 'MulliganTaken', { player: 0, mulligans: 1, hand: 0, library: 96 }))
+    expect(v.players[0].hand).toEqual([])
+    expect(v.players[0].library).toBe(96)
+    expect(v.players[1].library).toBe(93)
+  })
+
+  it('les 7 CardDrawn qui suivent refont la main', () => {
+    const v = start()
+    applyEvent(v, ev(5, 'MulliganTaken', { player: 0, mulligans: 1, hand: 0, library: 96 }))
+    for (let i = 0; i < 7; i++) applyEvent(v, ev(6 + i, 'CardDrawn', { player: 0, card: card(`n${i}`), library: 89 - i }))
+    expect(v.players[0].hand.map((c) => c.id)).toEqual(['n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6'])
+    expect(v.players[0].library).toBe(83)
+  })
+
+  it('CardPutOnBottom retire la carte de la main et met à jour les compteurs', () => {
+    const v = start()
+    applyEvent(v, ev(5, 'CardPutOnBottom', { player: 0, card: card('b'), hand: 2, library: 92 }))
+    expect(v.players[0].hand.map((c) => c.id)).toEqual(['a', 'c'])
+    expect(v.players[0].library).toBe(92)
+  })
+
+  it('HandKept ne modifie pas l\'état affiché', () => {
+    const v = start()
+    const snapshot = JSON.stringify(v.players)
+    applyEvent(v, ev(5, 'HandKept', { player: 0, mulligans: 1, toBottom: 1 }))
+    expect(JSON.stringify(v.players)).toBe(snapshot)
   })
 })
