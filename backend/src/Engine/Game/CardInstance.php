@@ -6,6 +6,7 @@ namespace App\Engine\Game;
 
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Card\Subtypes;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
@@ -55,6 +56,9 @@ final class CardInstance
      * écriture) entre tous les états sérialisés ; une bibliothèque de 99 cartes ne coûte alors presque rien par checkpoint.
      * Pur cache d'une fonction de l'objet, jamais sérialisé.
      */
+    /** @var list<SpellEffect> effets d'un sort à sa résolution, dans l'ordre (vide : aucun effet de sort) */
+    public readonly array $effects;
+
     private ?array $publicMemo = null;
     private ?array $arrayMemo = null;
     private string $arrayMemoKey = '';
@@ -64,8 +68,8 @@ final class CardInstance
         public readonly string $name,
         string|array $type,
         public readonly int $cost = 0,
-        public readonly ?string $effect = null, // 'damage' | 'counter' | 'mana' | 'treasure' | null
-        public readonly int $amount = 0,
+        ?string $effect = null, // raccourci pour un sort à un seul effet ('damage' | 'counter' | 'mana' | 'treasure' | 'draw')
+        int $amount = 0,
         public bool $tapped = false,
         public readonly bool $commander = false,
         public readonly int $power = 0,
@@ -77,7 +81,7 @@ final class CardInstance
         public readonly array $produces = [],
         /** @var list<ActivatedAbility> capacités activées déclarées (un terrain a d'abord celles de `produces`, voir abilities()) */
         public readonly array $abilities = [],
-        public readonly ?string $adds = null, // mana ajouté à la résolution d'un sort `effect 'mana'` (rituel), ex. `{R}{R}`
+        ?string $adds = null, // raccourci : mana ajouté par l'effet `mana` (rituel), ex. `{R}{R}`
         public readonly bool $token = false, // jeton : cesse d'exister en quittant le champ de bataille
         /** @var list<TriggeredAbility> triggers (l'index fait partie de l'id d'action PutTrigger) */
         public readonly array $triggers = [],
@@ -87,7 +91,10 @@ final class CardInstance
         public readonly array $keywords = [],
         /** @var list<string> supertypes (constante LEGENDARY) */
         public readonly array $supertypes = [],
+        /** @var list<SpellEffect> effets du sort dans l'ordre (remplace `effect` / `amount` / `adds` s'il est non vide) */
+        array $effects = [],
     ) {
+        $this->effects = SpellEffect::assertList($effects !== [] ? $effects : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]), $name);
         $this->types = is_array($type) ? array_values($type) : [$type];
         if ($this->types === []) {
             throw new \InvalidArgumentException("$name : une carte a au moins un type");
@@ -100,6 +107,35 @@ final class CardInstance
     public function hasType(string $type): bool
     {
         return in_array($type, $this->types, true);
+    }
+
+    /** Premier effet de sort du genre `$effect` (`damage`, `counter`, `mana`, `treasure`, `draw`), ou null. */
+    public function effect(string $effect): ?SpellEffect
+    {
+        foreach ($this->effects as $e) {
+            if ($e->effect === $effect) {
+                return $e;
+            }
+        }
+
+        return null;
+    }
+
+    public function hasEffect(string $effect): bool
+    {
+        return $this->effect($effect) !== null;
+    }
+
+    /** L'effet ciblé du sort (au plus un, voir `SpellEffect`), ou null. */
+    public function targetedEffect(): ?SpellEffect
+    {
+        foreach ($this->effects as $e) {
+            if ($e->isTargeted()) {
+                return $e;
+            }
+        }
+
+        return null;
     }
 
     /** Sous-type porté par la carte, sous le type `$type` s'il est donné (sinon sous n'importe lequel de ses types). */
@@ -181,8 +217,10 @@ final class CardInstance
                 }
             }
         }
-        if ($this->adds !== null) {
-            $addCost(ManaCost::parse($this->adds));
+        foreach ($this->effects as $e) {
+            if ($e->adds !== null) {
+                $addCost(ManaCost::parse($e->adds));
+            }
         }
 
         return array_values(array_filter(
@@ -270,9 +308,10 @@ final class CardInstance
             'manaCost' => $this->isLand() ? null : (string) $this->manaCost(),
             'produces' => $this->produces,
             'abilities' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->abilities),
-            'adds' => $this->adds,
-            'effect' => $this->effect,
-            'amount' => $this->amount,
+            // Premier effet sous les clés historiques (format inchangé pour un sort à un effet) ; `effects` seulement à partir de deux.
+            'adds' => $this->effects[0]->adds ?? null,
+            'effect' => $this->effects[0]->effect ?? null,
+            'amount' => $this->effects[0]->amount ?? 0,
             'commander' => $this->commander,
             'power' => $this->power,
             'toughness' => $this->toughness,
@@ -280,7 +319,8 @@ final class CardInstance
             + ($this->triggers === [] ? [] : ['triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers)]) // idem
             + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]) // idem
             + ($this->keywords === [] ? [] : ['keywords' => $this->keywords]) // idem
-            + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]); // idem
+            + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]) // idem
+            + (count($this->effects) > 1 ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []); // idem
     }
 
     public function toArray(): array
@@ -321,6 +361,7 @@ final class CardInstance
             $d['subtypes'] ?? [],
             $d['keywords'] ?? [],
             $d['supertypes'] ?? [],
+            array_map([SpellEffect::class, 'fromArray'], $d['effects'] ?? []),
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);

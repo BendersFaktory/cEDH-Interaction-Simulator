@@ -7,12 +7,13 @@ namespace App\Service\Deck;
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Card\CardDefinition;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
 
 /**
  * Carte Scryfall -> `CardDefinition`. Pas d'interprétation libre du texte Oracle : seuls des motifs connus sont reconnus
  * (mots-clés du combat, mana `{T} : Add …`, Signets `{1}, {T}: Add …`, pioche activée (`[coût], [{T}], [Sacrifice ~]: Draw …`),
- * dégâts / contresort / rituel simples, triggers « entre / meurt / entretien : piocher » et « meurt : N dégâts »). Tout texte restant
+ * dégâts / contresort / rituel / pioche simples (un effet par ligne, plusieurs lignes = plusieurs effets), triggers « entre / meurt / entretien : piocher » et « meurt : N dégâts »). Tout texte restant
  * fait refuser la carte (`UnsupportedCard`) plutôt que de la jouer avec des effets silencieusement absents.
  */
 final class CardMapper
@@ -71,9 +72,7 @@ final class CardMapper
             $keywords[] = self::KEYWORDS[$key];
         }
 
-        $effect = null;
-        $amount = 0;
-        $adds = null;
+        $effects = [];
         $produces = [];
         $abilities = [];
         $triggers = [];
@@ -88,11 +87,13 @@ final class CardMapper
                 if ($m[1] === 'X' && !$hasX) {
                     throw $fail('dégâts X sans {X} dans le coût');
                 }
-                [$effect, $amount] = ['damage', $m[1] === 'X' ? 0 : (int) $m[1]];
+                $effects[] = new SpellEffect('damage', $m[1] === 'X' ? 0 : (int) $m[1]);
             } elseif ($isSpell && $line === 'Counter target spell.') {
-                $effect = 'counter';
+                $effects[] = new SpellEffect('counter');
             } elseif ($isSpell && preg_match('/^Add ((?:\{[WUBRG]\})+)\.$/', $line, $m)) {
-                [$effect, $adds] = ['mana', $m[1]];
+                $effects[] = new SpellEffect('mana', 0, $m[1]);
+            } elseif ($isSpell && preg_match('/^Draw (a card|one card|two cards|three cards|four cards)\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('draw', self::DRAW_COUNT[$m[1]]);
             } elseif (!$isSpell && preg_match('/^\{T\}: Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\.$/', $line, $m)) {
                 $options = explode(' or ', $m[1]);
                 if ($isLand && count(array_filter($options, static fn (string $o) => strlen($o) > 3)) === 0) {
@@ -109,7 +110,7 @@ final class CardMapper
             }
         }
 
-        if ($isSpell && $effect === null) {
+        if ($isSpell && $effects === []) {
             throw $fail('sort sans effet modélisé');
         }
         if ($isLand && $produces === [] && $abilities === []) {
@@ -123,8 +124,8 @@ final class CardMapper
 
         return new CardDefinition(
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
-            $effect, $amount, $adds, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
-            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [],
+            null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
+            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail),
         );
     }
 
@@ -211,6 +212,20 @@ final class CardMapper
         }
 
         return null;
+    }
+
+    /**
+     * @param list<SpellEffect> $effects
+     * @return list<SpellEffect>
+     * @throws UnsupportedCard plus d'un effet ciblé (une seule cible par sort aujourd'hui)
+     */
+    private function effectList(array $effects, callable $fail): array
+    {
+        if (count(array_filter($effects, static fn (SpellEffect $e) => $e->isTargeted())) > 1) {
+            throw $fail('plusieurs effets ciblés (une seule cible par sort modélisée)');
+        }
+
+        return $effects;
     }
 
     private const ANY_COLOR = '{W} or {U} or {B} or {R} or {G}';

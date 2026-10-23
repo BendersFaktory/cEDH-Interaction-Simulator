@@ -65,6 +65,8 @@ export interface PublicCard {
   keywords?: string[]
   /** Mana ajouté par un rituel (effet 'mana'). */
   adds?: string[] | string
+  /** Tous les effets du sort, dans l'ordre ; présent seulement à partir de deux (sinon `effect` / `amount` / `adds`). */
+  effects?: { effect: string; amount?: number; adds?: string }[]
   /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
   token?: boolean
   /** Triggers (absent = aucun). */

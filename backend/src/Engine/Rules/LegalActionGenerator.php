@@ -410,7 +410,7 @@ final class LegalActionGenerator
     /** @return list<list<string>> */
     private function targetSets(GameState $s, CardInstance $card): array
     {
-        return match ($card->effect) {
+        return match ($card->targetedEffect()?->effect) {
             'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
             // Un contresort ne cible que des sorts, pas des capacités activées.
             'counter' => array_map(static fn ($item) => ['stack:' . $item->id], array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility()))),

@@ -41,6 +41,10 @@ final class ScryfallFixtures
             'Command Tower' => $c('Command Tower', 'Land', '', 0, "{T}: Add one mana of any color in your commander's color identity."),
             'Birds of Paradise' => $c('Birds of Paradise', 'Creature — Bird', '{G}', 1, "Flying\n{T}: Add one mana of any color.", ['power' => '0', 'toughness' => '1', 'keywords' => ['Flying']]),
             'Lotus Petal' => $c('Lotus Petal', 'Artifact', '{0}', 0, '{T}, Sacrifice Lotus Petal: Add one mana of any color.'),
+            'Divination' => $c('Divination', 'Sorcery', '{2}{U}', 3, 'Draw two cards.'),
+            // Cartes factices (aucune carte réelle n'a exactement ces deux lignes) : plusieurs effets par sort.
+            'Shock and Draw' => $c('Shock and Draw', 'Instant', '{1}{R}', 2, "Shock and Draw deals 2 damage to any target.\nDraw a card."),
+            'Bolt and Counter' => $c('Bolt and Counter', 'Instant', '{U}{R}', 2, "Bolt and Counter deals 3 damage to any target.\nCounter target spell."),
             'Tarmogoyf' => $c('Tarmogoyf', 'Creature — Lhurgoyf', '{1}{G}', 2, "Tarmogoyf's power is equal to the number of card types among cards in all graveyards.", ['power' => '*', 'toughness' => '1+*']),
         ];
     }

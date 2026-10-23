@@ -64,10 +64,12 @@ final class DeckLoaderTest extends TestCase
         self::assertSame(['C' => 2], $ring->abilities[0]->produced());
 
         $bolt = self::map('Lightning Bolt');
-        self::assertSame(['damage', 3], [$bolt->effect, $bolt->amount]);
-        self::assertSame(['damage', 0], [self::map('Blaze')->effect, self::map('Blaze')->amount]);
-        self::assertSame('counter', self::map('Counterspell')->effect);
-        self::assertSame('{B}{B}{B}', self::map('Dark Ritual')->adds);
+        self::assertSame([['effect' => 'damage', 'amount' => 3]], array_map(static fn ($e) => $e->toArray(), $bolt->effects));
+        self::assertSame([['effect' => 'damage']], array_map(static fn ($e) => $e->toArray(), self::map('Blaze')->effects));
+        self::assertSame('counter', self::map('Counterspell')->effects[0]->effect);
+        self::assertSame('{B}{B}{B}', self::map('Dark Ritual')->effects[0]->adds);
+        self::assertSame([['effect' => 'draw', 'amount' => 2]], array_map(static fn ($e) => $e->toArray(), self::map('Divination')->effects));
+        self::assertSame(['damage', 'draw'], array_map(static fn ($e) => $e->effect, self::map('Shock and Draw')->effects));
 
         $elves = self::map('Llanowar Elves');
         self::assertSame([CardInstance::CREATURE => ['Elf', 'Druid']], $elves->subtypes);
@@ -138,6 +140,7 @@ final class DeckLoaderTest extends TestCase
             'force variable' => ['Tarmogoyf', 'force / endurance variable'],
             'texte restant sur un artefact-créature' => ['Juggernaut', 'texte non modélisé'],
             'trigger d\'entretien à double effet' => ['Phyrexian Arena', 'texte non modélisé'],
+            'deux effets ciblés' => ['Bolt and Counter', 'plusieurs effets ciblés'],
         ];
     }
 
