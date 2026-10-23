@@ -12,13 +12,15 @@ use App\Engine\Game\CardInstance;
  * Définition immuable d'une carte (données, sans état de partie) : ce que fournit un deck de démo ou un `DeckLoader`.
  * `instantiate()` en fait une `CardInstance` ; le format sérialisé d'une partie ne change pas.
  *
- * Effet d'un sort : `spell` = `['effect' => 'damage|counter|mana|treasure', 'amount' => int, 'adds' => '{R}{R}']`
- * (clés omises à leur défaut). Les capacités activées et les triggers gardent leur propre format (`toArray()`).
+ * Effets d'un sort : liste de `SpellEffect` (résolus dans l'ordre). Forme JSON : `spell` = `['effect' => …, 'amount' => int,
+ * 'adds' => '{R}{R}']` pour un seul effet (clés omises à leur défaut, format historique), `effects` = liste de ces objets à
+ * partir de deux. Les capacités activées et les triggers gardent leur propre format (`toArray()`).
  * Pas d'interprétation du texte Oracle : une carte non modélisée est simplement refusée par le chargeur.
  */
 final class CardDefinition
 {
-    private const SPELL_EFFECTS = ['damage', 'counter', 'mana', 'treasure'];
+    /** @var list<SpellEffect> */
+    public readonly array $effects;
 
     /**
      * @param string|list<string> $type
@@ -28,6 +30,7 @@ final class CardDefinition
      * @param array<string, list<string>> $subtypes
      * @param list<string> $keywords
      * @param list<string> $supertypes
+     * @param list<SpellEffect> $effects effets du sort ; vide : `effect` / `amount` / `adds` (raccourci pour un seul effet)
      */
     public function __construct(
         public readonly string $name,
@@ -36,27 +39,30 @@ final class CardDefinition
         public readonly ?string $manaCost = null,
         public readonly int $power = 0,
         public readonly int $toughness = 0,
-        public readonly ?string $effect = null,
-        public readonly int $amount = 0,
-        public readonly ?string $adds = null,
+        ?string $effect = null,
+        int $amount = 0,
+        ?string $adds = null,
         public readonly array $produces = [],
         public readonly array $abilities = [],
         public readonly array $triggers = [],
         public readonly array $subtypes = [],
         public readonly array $keywords = [],
         public readonly array $supertypes = [],
+        array $effects = [],
     ) {
-        if ($effect !== null && !in_array($effect, self::SPELL_EFFECTS, true)) {
-            throw new \InvalidArgumentException("$name : effet de sort inconnu « $effect »");
+        try {
+            $this->effects = SpellEffect::assertList($effects !== [] ? $effects : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]), $name);
+        } catch (\InvalidArgumentException $e) {
+            throw new \InvalidArgumentException("$name : " . $e->getMessage(), 0, $e);
         }
     }
 
     public function instantiate(string $id, bool $commander = false): CardInstance
     {
         return new CardInstance(
-            $id, $this->name, $this->type, $this->cost, $this->effect, $this->amount, false, $commander,
-            $this->power, $this->toughness, 0, 0, $this->manaCost, $this->produces, $this->abilities, $this->adds, false,
-            $this->triggers, $this->subtypes, $this->keywords, $this->supertypes,
+            $id, $this->name, $this->type, $this->cost, null, 0, false, $commander,
+            $this->power, $this->toughness, 0, 0, $this->manaCost, $this->produces, $this->abilities, null, false,
+            $this->triggers, $this->subtypes, $this->keywords, $this->supertypes, $this->effects,
         );
     }
 
@@ -67,20 +73,21 @@ final class CardDefinition
             'abilities' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->abilities),
             'triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers),
             'subtypes' => $this->subtypes, 'keywords' => $this->keywords, 'supertypes' => $this->supertypes,
-            'spell' => array_filter(['effect' => $this->effect, 'amount' => $this->amount ?: null, 'adds' => $this->adds], static fn ($v) => $v !== null),
-        ];
+        ] + (count($this->effects) > 1
+            ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)]
+            : ['spell' => isset($this->effects[0]) ? $this->effects[0]->toArray() : []]);
     }
 
     public static function fromArray(array $d): self
     {
-        $spell = $d['spell'] ?? [];
+        $effects = array_map([SpellEffect::class, 'fromArray'], $d['effects'] ?? (isset($d['spell']['effect']) ? [$d['spell']] : []));
 
         return new self(
             $d['name'], $d['type'], (int) ($d['cost'] ?? 0), $d['manaCost'] ?? null, (int) ($d['power'] ?? 0), (int) ($d['toughness'] ?? 0),
-            $spell['effect'] ?? null, (int) ($spell['amount'] ?? 0), $spell['adds'] ?? null, $d['produces'] ?? [],
+            null, 0, null, $d['produces'] ?? [],
             array_map([ActivatedAbility::class, 'fromArray'], $d['abilities'] ?? []),
             array_map([TriggeredAbility::class, 'fromArray'], $d['triggers'] ?? []),
-            $d['subtypes'] ?? [], $d['keywords'] ?? [], $d['supertypes'] ?? [],
+            $d['subtypes'] ?? [], $d['keywords'] ?? [], $d['supertypes'] ?? [], $effects,
         );
     }
 }

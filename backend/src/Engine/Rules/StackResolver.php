@@ -56,13 +56,16 @@ final class StackResolver
             'destination' => $destination,
         ]);
 
-        match ($card->effect) {
-            'damage' => $this->damage($s, $item->targets[0] ?? '', $card->manaCost()->hasX() ? $item->x : $card->amount, $card->name),
-            'counter' => $this->counter($s, $item->targets[0] ?? '', $item->id),
-            'mana' => $this->addMana($s, $item->controller, $card->adds ?? '', $item->id),
-            'treasure' => $s->createTreasure($item->controller),
-            default => null,
-        };
+        // Effets dans l'ordre du texte (CR 608.2c) ; la cible unique sert l'effet ciblé.
+        foreach ($card->effects as $effect) {
+            match ($effect->effect) {
+                'damage' => $this->damage($s, $item->targets[0] ?? '', $card->manaCost()->hasX() ? $item->x : $effect->amount, $card->name),
+                'counter' => $this->counter($s, $item->targets[0] ?? '', $item->id),
+                'mana' => $this->addMana($s, $item->controller, $effect->adds ?? '', $item->id),
+                'treasure' => $s->createTreasure($item->controller),
+                'draw' => $this->draw($s, $item->controller, $effect->amount),
+            };
+        }
     }
 
     /** Rituel : le mana arrive dans la réserve du contrôleur (il disparaît à la fin de l'étape). */

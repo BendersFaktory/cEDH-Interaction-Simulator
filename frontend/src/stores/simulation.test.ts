@@ -108,3 +108,31 @@ describe('création asynchrone', () => {
     expect(store.error).toBe('boum')
   })
 })
+
+describe('decklists', () => {
+  const fetchMock = vi.fn()
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('envoie les decks par siège dans le POST', async () => {
+    const store = useSimulationStore()
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 422, statusText: '', json: async () => ({ error: 'Decklist refusée.' }) })
+    await store.create(1, true, [], { 0: 'CMDR: X\n99 Plains', 1: { decklist: '99 Plains', commander: 'Y' } })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.decks).toEqual({ 0: 'CMDR: X\n99 Plains', 1: { decklist: '99 Plains', commander: 'Y' } })
+  })
+
+  it("n'envoie pas `decks` sans decklist, et expose les problèmes d'un 422", async () => {
+    const store = useSimulationStore()
+    const problems = { J0: ['Rhystic Study : texte non modélisé'] }
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 422, statusText: '', json: async () => ({ error: 'Decklist refusée.', problems }) })
+    await store.create(1, true)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('decks')
+    expect(store.error).toBe('Decklist refusée.')
+    expect(store.deckProblems).toEqual(problems)
+  })
+})

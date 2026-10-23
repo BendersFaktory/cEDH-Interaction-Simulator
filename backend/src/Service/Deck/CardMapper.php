@@ -7,11 +7,13 @@ namespace App\Service\Deck;
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Card\CardDefinition;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
 
 /**
  * Carte Scryfall -> `CardDefinition`. Pas d'interprétation libre du texte Oracle : seuls des motifs connus sont reconnus
- * (mots-clés du combat, mana `{T} : Add …`, dégâts / contresort / rituel simples, « entre : piocher »). Tout texte restant
+ * (mots-clés du combat, mana `{T} : Add …`, Signets `{1}, {T}: Add …`, pioche activée (`[coût], [{T}], [Sacrifice ~]: Draw …`),
+ * dégâts / contresort / rituel / pioche simples (un effet par ligne, plusieurs lignes = plusieurs effets), triggers « entre / meurt / entretien : piocher » et « meurt : N dégâts »). Tout texte restant
  * fait refuser la carte (`UnsupportedCard`) plutôt que de la jouer avec des effets silencieusement absents.
  */
 final class CardMapper
@@ -70,15 +72,14 @@ final class CardMapper
             $keywords[] = self::KEYWORDS[$key];
         }
 
-        $effect = null;
-        $amount = 0;
-        $adds = null;
+        $effects = [];
         $produces = [];
         $abilities = [];
         $triggers = [];
         $hasX = str_contains($manaCost, '{X}');
 
         foreach ($this->oracleLines((string) ($card['oracle_text'] ?? ''), $name) as $line) {
+            $line = $this->anyColor($line);
             if ($this->isKeywordLine($line)) {
                 continue;
             }
@@ -86,11 +87,13 @@ final class CardMapper
                 if ($m[1] === 'X' && !$hasX) {
                     throw $fail('dégâts X sans {X} dans le coût');
                 }
-                [$effect, $amount] = ['damage', $m[1] === 'X' ? 0 : (int) $m[1]];
+                $effects[] = new SpellEffect('damage', $m[1] === 'X' ? 0 : (int) $m[1]);
             } elseif ($isSpell && $line === 'Counter target spell.') {
-                $effect = 'counter';
+                $effects[] = new SpellEffect('counter');
             } elseif ($isSpell && preg_match('/^Add ((?:\{[WUBRG]\})+)\.$/', $line, $m)) {
-                [$effect, $adds] = ['mana', $m[1]];
+                $effects[] = new SpellEffect('mana', 0, $m[1]);
+            } elseif ($isSpell && preg_match('/^Draw (a card|one card|two cards|three cards|four cards)\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('draw', self::DRAW_COUNT[$m[1]]);
             } elseif (!$isSpell && preg_match('/^\{T\}: Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\.$/', $line, $m)) {
                 $options = explode(' or ', $m[1]);
                 if ($isLand && count(array_filter($options, static fn (string $o) => strlen($o) > 3)) === 0) {
@@ -98,28 +101,31 @@ final class CardMapper
                 } else {
                     $abilities[] = ActivatedAbility::mana(implode('|', $options));
                 }
-            } elseif (!$isSpell && !$isLand && $line === 'When ~ enters, draw a card.') {
-                $triggers[] = new TriggeredAbility(TriggeredAbility::ETB, 'draw', 1);
+            } elseif (!$isSpell && ($ability = $this->activated($line)) !== null) {
+                $abilities[] = $ability;
+            } elseif (!$isSpell && !$isLand && ($trigger = $this->trigger($line, $isCreature)) !== null) {
+                $triggers[] = $trigger;
             } else {
                 throw $fail('texte non modélisé : « ' . $line . ' »');
             }
         }
 
-        if ($isSpell && $effect === null) {
+        if ($isSpell && $effects === []) {
             throw $fail('sort sans effet modélisé');
         }
         if ($isLand && $produces === [] && $abilities === []) {
+            // Types de terrain de base (CR 305.6) : `{T}: Add` implicite par type, basique ou non (Underground Sea : Island Swamp).
             $basic = array_values(array_intersect(array_keys(self::BASIC_LAND_COLOR), $subtypeNames));
-            if (!in_array('Basic', $supertypes, true) || $basic === []) {
+            if ($basic === []) {
                 throw $fail('terrain sans production de mana modélisée');
             }
-            $produces = [self::BASIC_LAND_COLOR[$basic[0]]];
+            $produces = array_map(static fn (string $t): string => self::BASIC_LAND_COLOR[$t], $basic);
         }
 
         return new CardDefinition(
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
-            $effect, $amount, $adds, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
-            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [],
+            null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
+            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail),
         );
     }
 
@@ -167,6 +173,91 @@ final class CardMapper
         }
 
         return $lines;
+    }
+
+    private const DRAW_COUNT = ['a card' => 1, 'one card' => 1, 'two cards' => 2, 'three cards' => 3, 'four cards' => 4];
+
+    /**
+     * Capacité activée à coût (hors `{T}: Add …` seul, traité avant) : coûts séparés par des virgules parmi mana générique /
+     * coloré, `{T}` et `Sacrifice ~` ; effets « Draw … » ou « Add … » (Signet : mana + `{T}`, sans sacrifice). Sinon `null`.
+     */
+    private function activated(string $line): ?ActivatedAbility
+    {
+        if (!preg_match('/^((?:\{[^}]+\}|Sacrifice ~)(?:, (?:\{[^}]+\}|Sacrifice ~))*): (.+)$/', $line, $m)) {
+            return null;
+        }
+        $tap = false;
+        $sacrifice = false;
+        $cost = '';
+        foreach (explode(', ', $m[1]) as $part) {
+            if ($part === '{T}') {
+                $tap = true;
+            } elseif ($part === 'Sacrifice ~') {
+                $sacrifice = true;
+            } elseif (preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $part)) {
+                $cost .= $part;
+            } else {
+                return null;
+            }
+        }
+        $cost = $cost === '' ? null : $cost;
+        if (preg_match('/^Draw (a card|one card|two cards|three cards|four cards)\.$/', $m[2], $d)) {
+            return ActivatedAbility::draw(self::DRAW_COUNT[$d[1]], $cost, $tap, $sacrifice);
+        }
+        if ($tap && $sacrifice && $cost === null && $m[2] === 'Add ' . self::ANY_COLOR . '.') {
+            return ActivatedAbility::treasure(); // Lotus Petal : {T}, sacrifier : un mana de la couleur de son choix
+        }
+        if ($tap && !$sacrifice && $cost !== null && preg_match('/^Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\.$/', $m[2], $a)) {
+            return ActivatedAbility::mana(implode('|', explode(' or ', $a[1])), $cost);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<SpellEffect> $effects
+     * @return list<SpellEffect>
+     * @throws UnsupportedCard plus d'un effet ciblé (une seule cible par sort aujourd'hui)
+     */
+    private function effectList(array $effects, callable $fail): array
+    {
+        if (count(array_filter($effects, static fn (SpellEffect $e) => $e->isTargeted())) > 1) {
+            throw $fail('plusieurs effets ciblés (une seule cible par sort modélisée)');
+        }
+
+        return $effects;
+    }
+
+    private const ANY_COLOR = '{W} or {U} or {B} or {R} or {G}';
+
+    /**
+     * « one mana of any color » → les cinq couleurs en alternatives. « … in your commander's color identity » (Command Tower,
+     * Arcane Signet) est traité pareil : `Decks::validate()` garantit que toutes les cartes du deck sont dans l'identité, et
+     * aucune carte ne permet de lancer celles d'un adversaire, donc une couleur hors identité ne paie jamais rien de plus.
+     */
+    private function anyColor(string $line): string
+    {
+        return (string) preg_replace("/\\bone mana of any color(?: in your commander's color identity)?(?=\\.)/", self::ANY_COLOR, $line);
+    }
+
+    /** Triggers reconnus : entrée / mort / entretien → piocher ; mort → N dégâts à n'importe quelle cible. Sinon `null`. */
+    private function trigger(string $line, bool $isCreature): ?TriggeredAbility
+    {
+        $draw = '(?:, )?draw (a card|one card|two cards|three cards|four cards)\.$/';
+        if (preg_match('/^When ~ enters' . $draw, $line, $m)) {
+            return new TriggeredAbility(TriggeredAbility::ETB, 'draw', self::DRAW_COUNT[$m[1]]);
+        }
+        if (preg_match('/^At the beginning of your upkeep' . $draw, $line, $m)) {
+            return new TriggeredAbility(TriggeredAbility::UPKEEP, 'draw', self::DRAW_COUNT[$m[1]]);
+        }
+        if ($isCreature && preg_match('/^When ~ dies' . $draw, $line, $m)) {
+            return new TriggeredAbility(TriggeredAbility::DIES, 'draw', self::DRAW_COUNT[$m[1]]);
+        }
+        if ($isCreature && preg_match('/^When ~ dies, (?:it|~) deals (\d+) damage to any target\.$/', $line, $m)) {
+            return new TriggeredAbility(TriggeredAbility::DIES, 'damage', (int) $m[1]);
+        }
+
+        return null;
     }
 
     /** « Flying, haste » : ligne composée uniquement de mots-clés connus (déjà pris en compte via `keywords`). */

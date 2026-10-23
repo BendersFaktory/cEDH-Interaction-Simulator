@@ -64,10 +64,12 @@ final class DeckLoaderTest extends TestCase
         self::assertSame(['C' => 2], $ring->abilities[0]->produced());
 
         $bolt = self::map('Lightning Bolt');
-        self::assertSame(['damage', 3], [$bolt->effect, $bolt->amount]);
-        self::assertSame(['damage', 0], [self::map('Blaze')->effect, self::map('Blaze')->amount]);
-        self::assertSame('counter', self::map('Counterspell')->effect);
-        self::assertSame('{B}{B}{B}', self::map('Dark Ritual')->adds);
+        self::assertSame([['effect' => 'damage', 'amount' => 3]], array_map(static fn ($e) => $e->toArray(), $bolt->effects));
+        self::assertSame([['effect' => 'damage']], array_map(static fn ($e) => $e->toArray(), self::map('Blaze')->effects));
+        self::assertSame('counter', self::map('Counterspell')->effects[0]->effect);
+        self::assertSame('{B}{B}{B}', self::map('Dark Ritual')->effects[0]->adds);
+        self::assertSame([['effect' => 'draw', 'amount' => 2]], array_map(static fn ($e) => $e->toArray(), self::map('Divination')->effects));
+        self::assertSame(['damage', 'draw'], array_map(static fn ($e) => $e->effect, self::map('Shock and Draw')->effects));
 
         $elves = self::map('Llanowar Elves');
         self::assertSame([CardInstance::CREATURE => ['Elf', 'Druid']], $elves->subtypes);
@@ -76,6 +78,45 @@ final class DeckLoaderTest extends TestCase
         self::assertSame(TriggeredAbility::ETB, self::map('Elvish Visionary')->triggers[0]->event);
         self::assertSame([CardInstance::FLYING], self::map('Wind Drake')->keywords);
         self::assertSame([CardInstance::LEGENDARY], self::map('Isamaru, Hound of Konda')->supertypes);
+    }
+
+    public function testMapsActivatedAbilitiesAndTriggers(): void
+    {
+        $stone = self::map('Mind Stone')->abilities;
+        self::assertTrue($stone[0]->isManaAbility);
+        self::assertSame(['draw', 1, true, true], [$stone[1]->effect, $stone[1]->amount, $stone[1]->tap, $stone[1]->sacrifice]);
+        self::assertSame(1, $stone[1]->manaCost?->manaValue());
+
+        $signet = self::map('Izzet Signet')->abilities[0];
+        self::assertTrue($signet->isManaAbility);
+        self::assertSame(['U' => 1, 'R' => 1], $signet->produced());
+        self::assertSame(1, $signet->manaCost?->manaValue());
+
+        $omens = self::map('Wall of Omens');
+        self::assertSame([CardInstance::DEFENDER], $omens->keywords);
+        self::assertSame([TriggeredAbility::ETB, 'draw', 1], [$omens->triggers[0]->event, $omens->triggers[0]->effect, $omens->triggers[0]->amount]);
+
+        $myr = self::map('Perilous Myr')->triggers[0];
+        self::assertSame([TriggeredAbility::DIES, 'damage', 2], [$myr->event, $myr->effect, $myr->amount]);
+    }
+
+    public function testMapsDualLandsAndAnyColorMana(): void
+    {
+        self::assertSame(['U', 'B'], self::map('Underground Sea')->produces);
+        self::assertSame(['W', 'U', 'B', 'R', 'G'], self::map('Command Tower')->produces);
+        $birds = self::map('Birds of Paradise')->abilities[0];
+        self::assertTrue($birds->isManaAbility);
+        self::assertCount(5, $birds->options);
+        $petal = self::map('Lotus Petal')->abilities[0];
+        self::assertTrue($petal->isManaAbility && $petal->sacrifice && $petal->tap);
+        self::assertCount(5, $petal->options);
+    }
+
+    public function testDeckWithCommonCreatureTypesLoads(): void
+    {
+        $deck = $this->loader()->load("CMDR: Isamaru, Hound of Konda\n1 Serra Angel\n1 Wall of Omens\n1 Mind Stone\n1 Perilous Myr\n95 Plains");
+        self::assertCount(99, $deck->library);
+        self::assertSame([CardInstance::CREATURE => ['Angel']], $deck->instantiate(0)['library'][0]->subtypes);
     }
 
     /** @dataProvider unsupported */
@@ -98,6 +139,8 @@ final class DeckLoaderTest extends TestCase
             'deux faces' => ['Delver of Secrets // Insectile Aberration', 'plusieurs faces'],
             'force variable' => ['Tarmogoyf', 'force / endurance variable'],
             'texte restant sur un artefact-créature' => ['Juggernaut', 'texte non modélisé'],
+            'trigger d\'entretien à double effet' => ['Phyrexian Arena', 'texte non modélisé'],
+            'deux effets ciblés' => ['Bolt and Counter', 'plusieurs effets ciblés'],
         ];
     }
 

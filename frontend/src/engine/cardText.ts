@@ -75,7 +75,9 @@ export function triggerText(t: TriggerView): string {
 
 /** Effet d'un sort (dégâts, contre, pioche...), tel que le moteur le décrit. */
 export function spellText(card: PublicCard): string | null {
-  if (!card.effect) return null
-  if (card.effect === 'mana') return `ajoute ${Array.isArray(card.adds) ? card.adds.join('') : (card.adds ?? '')}`
-  return effectText(card.effect, card.amount)
+  const effects = card.effects ?? (card.effect ? [{ effect: card.effect, amount: card.amount, adds: card.adds }] : [])
+  if (!effects.length) return null
+  return effects
+    .map((e) => (e.effect === 'mana' ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}` : effectText(e.effect, e.amount)))
+    .join(', puis ')
 }

@@ -211,7 +211,7 @@ final class HeuristicAgent implements PlayerAgent
             return 10;
         }
         $card = $item->card;
-        if ($card->effect === 'counter') {
+        if ($card->hasEffect('counter')) {
             // Un contresort adverse qui vise un de mes sorts : le contrer protège mon sort.
             foreach ($item->targets as $t) {
                 if (str_starts_with($t, 'stack:')) {
@@ -225,7 +225,7 @@ final class HeuristicAgent implements PlayerAgent
 
             return 0;
         }
-        if ($card->effect === 'mana' || $card->effect === 'treasure') {
+        if ($card->hasEffect('mana') || $card->hasEffect('treasure')) {
             return 0;
         }
 
@@ -253,7 +253,7 @@ final class HeuristicAgent implements PlayerAgent
         }
         $score = [];
         foreach ($cards as $id => $card) {
-            if ($card === null || $card->effect === 'mana') {
+            if ($card === null || $card->hasEffect('mana')) {
                 $score[$id] = 0;
                 continue;
             }
@@ -264,7 +264,7 @@ final class HeuristicAgent implements PlayerAgent
             }
             $best = $copy->pool->total();
             foreach ($cards as $id2 => $card2) {
-                if ($id2 === $id || $card2 === null || $card2->effect === 'mana') {
+                if ($id2 === $id || $card2 === null || $card2->hasEffect('mana')) {
                     continue;
                 }
                 $second = $this->afterCast($state, $copy, $card2);
@@ -324,7 +324,7 @@ final class HeuristicAgent implements PlayerAgent
         $waste = [];
         foreach ($casts as $c) {
             $card = $p->findCastable($c->cardId);
-            if ($card === null || $card->effect === 'mana' || $this->isLethalBurn($state, $card, $c) || $this->isGameChanging($card, $c)) {
+            if ($card === null || $card->hasEffect('mana') || $this->isLethalBurn($state, $card, $c) || $this->isGameChanging($card, $c)) {
                 $kept[] = $c;
                 $waste[] = 0;
                 continue;
@@ -349,13 +349,13 @@ final class HeuristicAgent implements PlayerAgent
     /** Sort qui change la partie : sa valeur (comme `threat()`) atteint `hugeThreat` ; on le lance même sans garder le contresort. */
     private function isGameChanging(CardInstance $card, CastSpell $cast): bool
     {
-        return in_array($card->effect, [null, 'damage'], true) && $this->cardValue($card, $cast->x) >= $this->hugeThreat;
+        return ($card->effects === [] || $card->hasEffect('damage')) && $this->cardValue($card, $cast->x) >= $this->hugeThreat;
     }
 
     /** Valeur d'un sort : valeur de mana (+ X, + dégâts), +1 pour une créature, +1 pour une créature de force >= 3. */
     private function cardValue(CardInstance $card, int $x): int
     {
-        return $card->cost + $x + ($card->effect === 'damage' ? $card->amount : 0) + ($card->isCreature() ? 1 : 0) + ($card->isCreature() && $card->power >= 3 ? 1 : 0);
+        return $card->cost + $x + ($card->effect('damage')?->amount ?? 0) + ($card->isCreature() ? 1 : 0) + ($card->isCreature() && $card->power >= 3 ? 1 : 0);
     }
 
     /** Mana qui serait perdu en payant `$counter` avec l'état `$after` (production d'un Signet en trop) ; null si impayable. */
@@ -386,7 +386,7 @@ final class HeuristicAgent implements PlayerAgent
         $p = $state->player($playerId);
         $card = $p->findCastable($cast->cardId);
         $counter = $this->reservedCounter($state, $playerId);
-        if ($card === null || $counter === null || $card->effect === 'mana') {
+        if ($card === null || $counter === null || $card->hasEffect('mana')) {
             return null;
         }
         $after = $this->afterCast($state, $p, $card, $cast->x);
@@ -455,7 +455,7 @@ final class HeuristicAgent implements PlayerAgent
         $p = $state->player($playerId);
         $best = null;
         foreach ($p->hand as $card) {
-            if ($card->effect === 'counter' && ($best === null || $card->cost < $best->cost)) {
+            if ($card->hasEffect('counter') && ($best === null || $card->cost < $best->cost)) {
                 $best = $card;
             }
         }
@@ -474,11 +474,11 @@ final class HeuristicAgent implements PlayerAgent
     /** Dégâts qui tuent un joueur vivant (X compris) : on les lance même en vidant le mana du contresort. */
     private function isLethalBurn(GameState $state, CardInstance $card, CastSpell $cast): bool
     {
-        if ($card->effect !== 'damage') {
+        if (!$card->hasEffect('damage')) {
             return false;
         }
         foreach ($cast->targets as $t) {
-            if (str_starts_with($t, 'player:') && $state->player((int) substr($t, 7))->life <= $card->amount + $cast->x) {
+            if (str_starts_with($t, 'player:') && $state->player((int) substr($t, 7))->life <= ($card->effect('damage')?->amount ?? 0) + $cast->x) {
                 return true;
             }
         }
@@ -487,14 +487,14 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
-     * Un rituel (effect 'mana') n'est lancé que s'il rend payable un sort non-rituel de la main (ou du commandement)
+     * Un rituel (effet `mana`) n'est lancé que s'il rend payable un sort non-rituel de la main (ou du commandement)
      * qui ne l'était pas. Simulation sur une copie de l'état du joueur : le rituel est payé, puis son mana ajouté.
      */
     private function worthCasting(GameState $state, int $playerId, CastSpell $cast): bool
     {
         $p = $state->player($playerId);
         $ritual = $p->findCastable($cast->cardId);
-        if ($ritual === null || $ritual->effect !== 'mana') {
+        if ($ritual === null || !$ritual->hasEffect('mana')) {
             return true;
         }
         $copy = PlayerState::fromArray($p->toArray());
@@ -504,13 +504,13 @@ final class HeuristicAgent implements PlayerAgent
             return false;
         }
         $copy->payWithPlan($plan);
-        foreach (ManaCost::parse($ritual->adds ?? '')->colored as $symbol => $n) {
+        foreach (ManaCost::parse($ritual->effect('mana')?->adds ?? '')->colored as $symbol => $n) {
             $copy->pool->add(\App\Engine\Mana\Color::fromSymbol($symbol), $n);
         }
         // Avant : sans le rituel (état d'origine) ; après : réserve augmentée.
         $before = PlayerState::fromArray($p->toArray());
         foreach ([...$p->hand, ...$p->command] as $card) {
-            if ($card->isLand() || $card->effect === 'mana' || $card->id === $ritual->id) {
+            if ($card->isLand() || $card->hasEffect('mana') || $card->id === $ritual->id) {
                 continue;
             }
             $cost = $p->castCost($card);
@@ -630,7 +630,7 @@ final class HeuristicAgent implements PlayerAgent
                 if ($impossible || $cost->generic + array_sum($cost->colored) + count($cost->hybrid) > max($potential, 4) + 3) {
                     $score = 800;
                 } else {
-                    $score = $card->effect === 'counter' ? -500 : $card->cost;
+                    $score = $card->hasEffect('counter') ? -500 : $card->cost;
                 }
             }
             if ($best === null || $score > $best[1] || ($score === $best[1] && $card->id < $best[0]->cardId)) {
@@ -1044,6 +1044,6 @@ final class HeuristicAgent implements PlayerAgent
 
     private function isCounter(GameState $state, CastSpell $action): bool
     {
-        return $state->player($action->player())->findCastable($action->cardId)?->effect === 'counter';
+        return $state->player($action->player())->findCastable($action->cardId)?->hasEffect('counter') === true;
     }
 }

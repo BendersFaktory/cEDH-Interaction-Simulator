@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref } from 'vue'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { replay } from '../engine/reducer'
-import type { GameEvent, PublicCard, SimulationView, StopsConfig } from '../types/engine'
+import type { DeckInput, GameEvent, PublicCard, SimulationView, StopsConfig } from '../types/engine'
 
 /**
  * Store central : journal d'événements + curseur.
@@ -18,6 +18,8 @@ export const useSimulationStore = defineStore('simulation', () => {
   const showVerbose = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** Problèmes d'une decklist refusée (422), par siège (« J0 » → messages). */
+  const deckProblems = ref<Record<string, string[]> | null>(null)
   /** Tour courant de la simulation en cours côté serveur (null hors attente). */
   const progress = ref<number | null>(null)
   const waiting = ref(false)
@@ -48,9 +50,11 @@ export const useSimulationStore = defineStore('simulation', () => {
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
     loading.value = true
     error.value = null
+    deckProblems.value = null
     try {
       return await fn()
     } catch (e) {
+      deckProblems.value = e instanceof ApiError ? (e.problems ?? null) : null
       error.value = e instanceof Error ? e.message : String(e)
       return undefined
     } finally {
@@ -72,13 +76,14 @@ export const useSimulationStore = defineStore('simulation', () => {
    * sinon les 4 sièges sont des IA et tu regardes, quitte à bifurquer ensuite.
    * `ai` : profil d'IA par siège (`ai:heuristic`, `ai:aggro`, `ai:control`), `ai:heuristic` par défaut.
    */
-  async function create(seed?: number, playAsJ0 = true, ai: string[] = []): Promise<void> {
+  async function create(seed?: number, playAsJ0 = true, ai: string[] = [], decks: Record<number, DeckInput> = {}): Promise<void> {
     pause()
     await run(async () => {
       const seat = (i: number) => ai[i] ?? 'ai:heuristic'
       const sim = await api.create({
         seed,
         controllers: { 0: playAsJ0 ? 'human:auto' : seat(0), 1: seat(1), 2: seat(2), 3: seat(3) },
+        ...(Object.keys(decks).length ? { decks } : {}),
       })
       const done = await waitUntilPlayed(sim)
       // Si la partie t'attend déjà, on se place à la fin du journal pour voir tes actions possibles.
@@ -213,7 +218,7 @@ export const useSimulationStore = defineStore('simulation', () => {
   onScopeDispose(pause)
 
   return {
-    simulation, events, cursor, playing, speedMs, showVerbose, loading, error, progress, waiting,
+    simulation, events, cursor, playing, speedMs, showVerbose, loading, error, deckProblems, progress, waiting,
     lastSeq, atEnd, view, visibleEvents, checkpointSeqs, forkPoint, pending,
     humanSeats, cardImage, stopsOf, setStops, playableCardIds, hoveredCard,
     load, create, step, stepBack, seek, play, pause, setSpeed, forkHere, decide,
