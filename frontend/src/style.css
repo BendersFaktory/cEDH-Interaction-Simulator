@@ -178,3 +178,11 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .card-preview .preview-text { margin: 0; padding-left: 16px; }
 .card-preview .preview-text li { margin: 2px 0; }
 .card-preview .preview-pt { margin-top: 6px; text-align: right; font-weight: 700; font-size: 15px; }
+
+.decks { padding: 6px 16px; border-bottom: 1px solid var(--border, #2a2f3a); }
+.decks summary { cursor: pointer; }
+.deck-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+.deck-seat { display: flex; flex-direction: column; gap: 4px; }
+.deck-seat textarea, .deck-seat input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; }
+.deck-problems { padding: 6px 16px; color: #e5736a; font-size: 13px; }
+.deck-problems ul { margin: 2px 0 6px; padding-left: 20px; }

@@ -1,4 +1,11 @@
-import type { GameEvent, SimulationView, StopsConfig } from '../types/engine'
+import type { DeckInput, GameEvent, SimulationView, StopsConfig } from '../types/engine'
+
+/** Erreur d'API ; `problems` = problèmes d'une decklist refusée (422), par siège. */
+export class ApiError extends Error {
+  constructor(message: string, readonly problems?: Record<string, string[]>) {
+    super(message)
+  }
+}
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -7,13 +14,13 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    throw new Error(body.error ?? `${response.status} ${response.statusText}`)
+    throw new ApiError(body.error ?? `${response.status} ${response.statusText}`, body.problems)
   }
   return response.json() as Promise<T>
 }
 
 export const api = {
-  create: (body: { seed?: number; controllers?: Record<number, string> } = {}) =>
+  create: (body: { seed?: number; controllers?: Record<number, string>; decks?: Record<number, DeckInput> } = {}) =>
     http<SimulationView>('/simulations', { method: 'POST', body: JSON.stringify(body) }),
 
   get: (id: number) => http<SimulationView>(`/simulations/${id}`),

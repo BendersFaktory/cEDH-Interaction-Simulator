@@ -203,3 +203,6 @@ export interface GameView {
   winner: number | null
   lastSeq: number
 }
+
+/** Decklist d'un siège (texte Moxfield / Archidekt / MTGO) ; `commander` surcharge la ligne « CMDR: ». */
+export type DeckInput = string | { decklist: string; commander?: string }

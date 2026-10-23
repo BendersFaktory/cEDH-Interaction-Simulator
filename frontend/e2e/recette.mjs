@@ -152,6 +152,7 @@ async function run() {
     ['17', (b) => scenario(b, '17', s17)],
     ['18', (b) => scenario(b, '18', s18)],
     ['19', (b) => scenario(b, '19', s19)],
+    ['20', (b) => scenario(b, '20', s20)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -163,8 +164,8 @@ async function run() {
   }
   console.log(`recette : ${tasks.length} tâches, ${JOBS} en parallèle`)
   await Promise.all(Array.from({ length: Math.min(JOBS, tasks.length) }, worker))
-  // Seul le 404 volontaire (id 99999) est toléré, avec le message console que Chrome en tire.
-  const unexpected = results.filter((p) => !/404/.test(p))
+  // Seuls le 404 volontaire (id 99999) et le 422 simulé du scénario 20 sont tolérés, avec le message console que Chrome en tire.
+  const unexpected = results.filter((p) => !/404/.test(p) && !/^\[20\].*422/.test(p))
   console.log('\nPROBLÈMES inattendus:', unexpected.length ? '\n' + unexpected.join('\n') : 'aucun')
   console.log(`durée totale : ${((Date.now() - T0) / 1000).toFixed(1)} s`)
   await browser.close()
@@ -716,4 +717,33 @@ async function s16({ page, log, shot, info, problem }) {
   log('16 main de J0 après la mise au fond (premier checkpoint', cp?.seq, ') :', stateHand, '|', await info())
   if (stateHand !== 6) problem(`recette mulligan : la main de J0 compte ${stateHand} cartes au lieu de 6`)
   if (await page.locator('text=/garde sa main/').count() === 0) problem('recette mulligan : journal sans « garde sa main »')
+}
+
+// 20 : formulaire de decklists. Le POST est intercepté (pas de Scryfall en recette : déterministe) : on vérifie le corps envoyé
+// (decks par siège, commandant en surcharge) et l'affichage des problèmes d'une decklist refusée (422).
+async function s20({ page, log, shot, problem }) {
+  let body = null
+  await page.route('**/api/simulations', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    body = route.request().postDataJSON()
+    await route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Decklist refusée.', problems: { J0: ['« Rhystic Study » : texte non modélisé', 'Inconnue : carte introuvable'] } }),
+    })
+  })
+  await page.fill('input[placeholder="aléatoire"]', '5')
+  await page.click('summary:has-text("Decklists")')
+  await page.fill('[data-testid="deck-list-0"]', 'CMDR: Isamaru, Hound of Konda\n1 Rhystic Study\n1 Inconnue')
+  await page.fill('[data-testid="deck-commander-1"]', 'Isamaru, Hound of Konda')
+  await page.fill('[data-testid="deck-list-1"]', '1 Sol Ring\n98 Plains')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForSelector('[data-testid="deck-problems"]', { timeout: TIMEOUT })
+  const text = await page.locator('[data-testid="deck-problems"]').innerText()
+  log('20 problèmes affichés :', text.replace(/\n/g, ' | '))
+  await shot('20-decklist-refusee')
+  if (!/J0/.test(text) || !/Rhystic Study/.test(text) || !/Inconnue/.test(text)) problem(`recette decklists : problèmes mal affichés : ${text}`)
+  if (!body?.decks?.['0'] || typeof body.decks['0'] !== 'string') problem('recette decklists : decklist de J0 absente du POST')
+  if (body?.decks?.['1']?.commander !== 'Isamaru, Hound of Konda') problem('recette decklists : commandant de J1 absent du POST')
+  if (body?.decks?.['2'] !== undefined) problem('recette decklists : un siège vide ne doit pas envoyer de deck')
 }
