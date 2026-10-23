@@ -133,6 +133,16 @@ final class CardInstance
         return $cost->hybrid === [] && array_diff(array_keys($cost->colored), ['C']) === [];
     }
 
+
+    /** @param list<list<Color>> $options vrai si ce sont exactement les cinq couleurs, une par alternative */
+    private static function isAnyColor(array $options): bool
+    {
+        $symbols = array_map(static fn (array $o): string => count($o) === 1 ? $o[0]->symbol() : '', $options);
+        sort($symbols);
+
+        return $symbols === ['B', 'G', 'R', 'U', 'W'];
+    }
+
     /**
      * Identité de couleurs (CR 903.4) : couleurs des symboles du coût de mana (hybride `{U/R}` = U et R ; `{C}` et générique
      * n'ajoutent rien) et de ceux des capacités activées (coût et mana produit, dont `produces` d'un terrain). Calculée à la
@@ -155,9 +165,15 @@ final class CardInstance
         if (!$this->isLand()) {
             $addCost($this->manaCost());
         }
-        foreach ($this->abilities() as $ability) {
+        // « Add one mana of any color » (Treasure, Lotus Petal, Birds of Paradise, Command Tower) n'a aucun symbole de mana :
+        // sans identité (CR 903.4). Ses cinq alternatives à une couleur ne comptent donc pas (terrain : `produces`).
+        $anyColorLand = $this->isLand() && self::isAnyColor(array_map(static fn (string $s) => [Color::fromSymbol($s)], $this->produces));
+        foreach ($anyColorLand ? $this->abilities : $this->abilities() as $ability) {
             if ($ability->manaCost !== null) {
                 $addCost($ability->manaCost);
+            }
+            if (self::isAnyColor($ability->options)) {
+                continue;
             }
             foreach ($ability->options as $option) {
                 foreach ($option as $color) {

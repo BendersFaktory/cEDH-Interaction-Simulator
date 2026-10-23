@@ -31,6 +31,16 @@ final class ScryfallFixtures
             'Rhystic Study' => $c('Rhystic Study', 'Enchantment', '{2}{U}', 3, 'Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.'),
             'Jace, the Mind Sculptor' => $c('Jace, the Mind Sculptor', 'Legendary Planeswalker — Jace', '{2}{U}{U}', 4, '+2: Look at the top card.', ['loyalty' => '3']),
             'Delver of Secrets // Insectile Aberration' => ['name' => 'Delver of Secrets // Insectile Aberration', 'layout' => 'transform', 'type_line' => 'Creature — Human Wizard // Creature — Human Insect'],
+            'Mind Stone' => $c('Mind Stone', 'Artifact', '{2}', 2, "{T}: Add {C}.\n{1}, {T}, Sacrifice this artifact: Draw a card."),
+            'Izzet Signet' => $c('Izzet Signet', 'Artifact', '{2}', 2, '{1}, {T}: Add {U}{R}.'),
+            'Serra Angel' => $c('Serra Angel', 'Creature — Angel', '{3}{W}{W}', 5, 'Flying, vigilance', ['power' => '4', 'toughness' => '4', 'keywords' => ['Flying', 'Vigilance']]),
+            'Wall of Omens' => $c('Wall of Omens', 'Creature — Wall', '{1}{W}', 2, "Defender\nWhen this creature enters, draw a card.", ['power' => '0', 'toughness' => '4', 'keywords' => ['Defender']]),
+            'Perilous Myr' => $c('Perilous Myr', 'Artifact Creature — Myr', '{2}', 2, 'When this creature dies, it deals 2 damage to any target.', ['power' => '1', 'toughness' => '1']),
+            'Phyrexian Arena' => $c('Phyrexian Arena', 'Enchantment', '{1}{B}{B}', 3, 'At the beginning of your upkeep, you draw a card and you lose 1 life.'),
+            'Underground Sea' => $c('Underground Sea', 'Land — Island Swamp', '', 0, '({T}: Add {U} or {B}.)'),
+            'Command Tower' => $c('Command Tower', 'Land', '', 0, "{T}: Add one mana of any color in your commander's color identity."),
+            'Birds of Paradise' => $c('Birds of Paradise', 'Creature — Bird', '{G}', 1, "Flying\n{T}: Add one mana of any color.", ['power' => '0', 'toughness' => '1', 'keywords' => ['Flying']]),
+            'Lotus Petal' => $c('Lotus Petal', 'Artifact', '{0}', 0, '{T}, Sacrifice Lotus Petal: Add one mana of any color.'),
             'Tarmogoyf' => $c('Tarmogoyf', 'Creature — Lhurgoyf', '{1}{G}', 2, "Tarmogoyf's power is equal to the number of card types among cards in all graveyards.", ['power' => '*', 'toughness' => '1+*']),
         ];
     }
