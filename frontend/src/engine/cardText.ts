@@ -2,8 +2,17 @@
 import { hasType, typesOf, type AbilityView, type CardType, type PublicCard, type TriggerView } from '../types/engine'
 
 export const keywordLabels: Record<string, string> = {
-  flying: 'vol', reach: 'portée', haste: 'célérité', vigilance: 'vigilance', defender: 'défenseur', menace: 'menace',
-  first_strike: 'initiative', double_strike: 'double initiative', trample: 'piétinement', deathtouch: 'contact mortel', lifelink: 'lien de vie',
+  flying: 'vol',
+  reach: 'portée',
+  haste: 'célérité',
+  vigilance: 'vigilance',
+  defender: 'défenseur',
+  menace: 'menace',
+  first_strike: 'initiative',
+  double_strike: 'double initiative',
+  trample: 'piétinement',
+  deathtouch: 'contact mortel',
+  lifelink: 'lien de vie',
 }
 
 export const keywordsText = (card: PublicCard): string => (card.keywords ?? []).map((k) => keywordLabels[k] ?? k).join(', ')
@@ -25,7 +34,12 @@ export function frameOf(card: PublicCard): string {
 }
 
 const typeLabels: Record<CardType, string> = {
-  land: 'Terrain', instant: 'Éphémère', sorcery: 'Rituel', creature: 'Créature', artifact: 'Artefact', enchantment: 'Enchantement',
+  land: 'Terrain',
+  instant: 'Éphémère',
+  sorcery: 'Rituel',
+  creature: 'Créature',
+  artifact: 'Artefact',
+  enchantment: 'Enchantement',
 }
 
 /** Ligne de type : 'Artefact Créature — Eldrazi'. */
@@ -39,33 +53,39 @@ export function typeLine(card: PublicCard): string {
 function effectText(effect: string, amount: number | undefined, spec?: string): string {
   const n = amount ? String(amount) : 'X'
   switch (effect) {
-    case 'damage': return `inflige ${n} dégâts`
-    case 'counter': return 'contrecarre le sort ciblé'
-    case 'draw': return `pioche ${n}`
-    case 'token': return `crée ${amount ?? 1} jeton ${(spec ?? '').replace(':', ' ')}`
-    case 'treasure': return `crée ${amount ?? 1} Trésor`
-    case 'pump': return spec ?? 'bonus'
-    default: return `${effect}${amount ? ` ${amount}` : ''}`
+    case 'damage':
+      return `inflige ${n} dégâts`
+    case 'counter':
+      return 'contrecarre le sort ciblé'
+    case 'draw':
+      return `pioche ${n}`
+    case 'token':
+      return `crée ${amount ?? 1} jeton ${(spec ?? '').replace(':', ' ')}`
+    case 'treasure':
+      return `crée ${amount ?? 1} Trésor`
+    case 'pump':
+      return spec ?? 'bonus'
+    default:
+      return `${effect}${amount ? ` ${amount}` : ''}`
   }
 }
 
 export function abilityText(a: AbilityView): string {
-  const cost = [
-    a.manaCost,
-    a.tap ? '{T}' : '',
-    a.sacrifice ? 'sacrifier' : '',
-    a.sacrificeCreature ? 'sacrifier une créature' : '',
-    a.discard ? `défausser ${a.discard}` : '',
-  ].filter(Boolean).join(', ')
-  const what = a.isManaAbility
-    ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ')
-    : effectText(a.effect, a.amount, a.spec)
+  const cost = [a.manaCost, a.tap ? '{T}' : '', a.sacrifice ? 'sacrifier' : '', a.sacrificeCreature ? 'sacrifier une créature' : '', a.discard ? `défausser ${a.discard}` : '']
+    .filter(Boolean)
+    .join(', ')
+  const what = a.isManaAbility ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ') : effectText(a.effect, a.amount, a.spec)
   return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}`
 }
 
 const triggerEvents: Record<string, string> = {
-  etb: 'Quand elle arrive en jeu', dies: 'Quand elle meurt', upkeep: 'Au début de ton entretien', attacks: 'Quand elle attaque',
-  end_step: 'Au début de ta fin de tour', cast: 'Quand tu lances un sort', discard: 'Quand tu défausses une carte',
+  etb: 'Quand elle arrive en jeu',
+  dies: 'Quand elle meurt',
+  upkeep: 'Au début de ton entretien',
+  attacks: 'Quand elle attaque',
+  end_step: 'Au début de ta fin de tour',
+  cast: 'Quand tu lances un sort',
+  discard: 'Quand tu défausses une carte',
 }
 
 export function triggerText(t: TriggerView): string {
@@ -77,7 +97,5 @@ export function triggerText(t: TriggerView): string {
 export function spellText(card: PublicCard): string | null {
   const effects = card.effects ?? (card.effect ? [{ effect: card.effect, amount: card.amount, adds: card.adds }] : [])
   if (!effects.length) return null
-  return effects
-    .map((e) => (e.effect === 'mana' ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}` : effectText(e.effect, e.amount)))
-    .join(', puis ')
+  return effects.map((e) => (e.effect === 'mana' ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}` : effectText(e.effect, e.amount))).join(', puis ')
 }

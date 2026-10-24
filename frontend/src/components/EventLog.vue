@@ -18,16 +18,9 @@ watch(
 <template>
   <section class="log">
     <h3>Journal</h3>
-    <label class="inline">
-      <input v-model="store.showVerbose" type="checkbox" /> afficher les passes de priorité
-    </label>
+    <label class="inline"> <input v-model="store.showVerbose" type="checkbox" /> afficher les passes de priorité </label>
     <ol>
-      <li
-        v-for="e in store.visibleEvents"
-        :key="e.seq"
-        :class="{ current: e.seq === store.cursor, future: e.seq > store.cursor, verbose: e.verbose }"
-        @click="store.seek(e.seq)"
-      >
+      <li v-for="e in store.visibleEvents" :key="e.seq" :class="{ current: e.seq === store.cursor, future: e.seq > store.cursor, verbose: e.verbose }" @click="store.seek(e.seq)">
         <small>#{{ e.seq }}</small> {{ describeEvent(e) }}
       </li>
     </ol>

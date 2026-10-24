@@ -8,7 +8,7 @@ const events = fixture.events as GameEvent[]
 describe('reducer — test de contrat avec le moteur PHP', () => {
   const view = replay(events)
 
-  it('retrouve l\'état final calculé par le moteur', () => {
+  it("retrouve l'état final calculé par le moteur", () => {
     expect(view.over).toBe(fixture.final.over)
     expect(view.winner).toBe(fixture.final.winner)
     expect(view.turn).toBe(fixture.final.turn)
@@ -35,7 +35,7 @@ describe('reducer — test de contrat avec le moteur PHP', () => {
     expect(view.stack.map((i) => i.id)).toEqual(pushed.filter((id) => !resolved.has(id)))
   })
 
-  it('peut s\'arrêter à n\'importe quel événement (replay partiel)', () => {
+  it("peut s'arrêter à n'importe quel événement (replay partiel)", () => {
     const mid = events[Math.floor(events.length / 2)].seq
     const partial = replay(events, mid)
     expect(partial.lastSeq).toBe(mid)
@@ -51,7 +51,7 @@ describe('reducer — test de contrat avec le moteur PHP', () => {
 })
 
 describe('reducer — combat', () => {
-  it('les créatures mortes quittent le champ de bataille, l\'attaque est effacée en fin de combat', () => {
+  it("les créatures mortes quittent le champ de bataille, l'attaque est effacée en fin de combat", () => {
     const attacker = events.find((e) => e.type === 'AttackerDeclared')!
     const after = replay(events, attacker.seq)
     const card = after.players[attacker.payload.player].battlefield.find((c) => c.id === attacker.payload.card)!
@@ -100,7 +100,13 @@ describe('reducer — capacités et réserve de mana', () => {
   const pinger: PublicCard = { id: 'a1', name: 'Pinger', type: 'artifact', cost: 2, effect: null, amount: 0 }
   const start = () =>
     replay([
-      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h' }, { id: 1, life: 40, library: 0, controller: 'ai' }] }),
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 0, controller: 'h' },
+          { id: 1, life: 40, library: 0, controller: 'ai' },
+        ],
+      }),
       ev(2, 'LandPlayed', { player: 0, card: land }),
       ev(3, 'LandPlayed', { player: 0, card: pinger }),
     ])
@@ -118,7 +124,7 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.stack).toEqual([])
   })
 
-  it('AbilityActivated pose l\'élément de pile, AbilityResolved le retire sans bouger la carte', () => {
+  it("AbilityActivated pose l'élément de pile, AbilityResolved le retire sans bouger la carte", () => {
     const v = start()
     v.priority.passed = [1]
     const ability = { isManaAbility: false, effect: 'damage', tap: true, amount: 1 }
@@ -159,7 +165,7 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].pool).toEqual({ R: 1 })
   })
 
-  it('mana restreint : recopié depuis le snapshot et les payloads, vidé en fin d\'étape', () => {
+  it("mana restreint : recopié depuis le snapshot et les payloads, vidé en fin d'étape", () => {
     const r = replay([ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h', restricted: { eldrazi: { C: 2 } } }] })])
     expect(r.players[0].restricted).toEqual({ eldrazi: { C: 2 } })
     expect(start().players[0].restricted).toEqual({})
@@ -198,7 +204,7 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
   })
 
-  it('CreatureBoosted fixe la force et l\'endurance (valeurs absolues)', () => {
+  it("CreatureBoosted fixe la force et l'endurance (valeurs absolues)", () => {
     const v = start()
     const bear = { id: 'c1', name: 'Wild Mongrel', type: 'creature' as const, cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
     v.players[0].battlefield.push({ ...bear, tapped: false })
@@ -214,7 +220,13 @@ describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', ()
   const bear: PublicCard = { id: 'b1', name: 'Grizzly Bears', type: 'creature', cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
   const start = () =>
     replay([
-      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h' }, { id: 1, life: 40, library: 0, controller: 'ai' }] }),
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 0, controller: 'h' },
+          { id: 1, life: 40, library: 0, controller: 'ai' },
+        ],
+      }),
       ev(2, 'LandPlayed', { player: 0, card: bear }),
     ])
 
@@ -231,13 +243,35 @@ describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', ()
   it('un trigger attacks et un trigger end_step se posent sur la pile sans toucher la priorité autrement', () => {
     const v = start()
     v.priority = { holder: 1, passed: [0] }
-    applyEvent(v, ev(3, 'AbilityTriggered', { player: 0, stackId: 's2', card: bear, triggerIndex: 0, trigger: { event: 'attacks', effect: 'damage', amount: 1 }, label: 'Quand elle attaque : 1 dégât', targets: ['player:1'] }))
-    applyEvent(v, ev(4, 'AbilityTriggered', { player: 0, stackId: 's3', card: bear, triggerIndex: 1, trigger: { event: 'end_step', effect: 'draw', amount: 1 }, label: 'Au début de votre fin de tour : piocher 1', targets: [] }))
+    applyEvent(
+      v,
+      ev(3, 'AbilityTriggered', {
+        player: 0,
+        stackId: 's2',
+        card: bear,
+        triggerIndex: 0,
+        trigger: { event: 'attacks', effect: 'damage', amount: 1 },
+        label: 'Quand elle attaque : 1 dégât',
+        targets: ['player:1'],
+      }),
+    )
+    applyEvent(
+      v,
+      ev(4, 'AbilityTriggered', {
+        player: 0,
+        stackId: 's3',
+        card: bear,
+        triggerIndex: 1,
+        trigger: { event: 'end_step', effect: 'draw', amount: 1 },
+        label: 'Au début de votre fin de tour : piocher 1',
+        targets: [],
+      }),
+    )
     expect(v.stack.map((i) => i.label)).toEqual(['Quand elle attaque : 1 dégât', 'Au début de votre fin de tour : piocher 1'])
     expect(v.priority.passed).toEqual([])
   })
 
-  it('une seconde étape cleanup (ronde de priorité) réinitialise la priorité ; la ronde s\'affiche comme un checkpoint', () => {
+  it("une seconde étape cleanup (ronde de priorité) réinitialise la priorité ; la ronde s'affiche comme un checkpoint", () => {
     const v = start()
     applyEvent(v, ev(3, 'PhaseChanged', { turn: 1, phase: 'cleanup', activePlayer: 0 }))
     expect(v.phase).toBe('cleanup')
@@ -259,7 +293,13 @@ describe('reducer — mulligan de Londres', () => {
   const card = (id: string): PublicCard => ({ id, name: `Carte ${id}`, type: 'land', cost: 0, effect: null, amount: 0 })
   const start = () =>
     replay([
-      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 93, controller: 'h' }, { id: 1, life: 40, library: 93, controller: 'ai' }] }),
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 93, controller: 'h' },
+          { id: 1, life: 40, library: 93, controller: 'ai' },
+        ],
+      }),
       ev(2, 'CardDrawn', { player: 0, card: card('a'), library: 92 }),
       ev(3, 'CardDrawn', { player: 0, card: card('b'), library: 91 }),
       ev(4, 'CardDrawn', { player: 0, card: card('c'), library: 90 }),
@@ -287,7 +327,7 @@ describe('reducer — mulligan de Londres', () => {
     expect(v.players[0].library).toBe(92)
   })
 
-  it('HandKept ne modifie pas l\'état affiché', () => {
+  it("HandKept ne modifie pas l'état affiché", () => {
     const v = start()
     const snapshot = JSON.stringify(v.players)
     applyEvent(v, ev(5, 'HandKept', { player: 0, mulligans: 1, toBottom: 1 }))
@@ -299,7 +339,7 @@ describe('reducer — shocklands, fetchlands et PV payés', () => {
   const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
   const card = (id: string, name: string): PublicCard => ({ id, name, type: 'land', cost: 0, effect: null, amount: 0 })
 
-  it('terrain engagé à l\'arrivée, terrain cherché, mélange et PV payés en valeurs absolues', () => {
+  it("terrain engagé à l'arrivée, terrain cherché, mélange et PV payés en valeurs absolues", () => {
     const start = events.find((e) => e.type === 'GameStarted')!
     let v = replay(events, start.seq)
     const pl = v.players[0]

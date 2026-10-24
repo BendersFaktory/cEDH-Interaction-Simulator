@@ -21,7 +21,18 @@ describe('cardText', () => {
   it('textes : sort, capacité, trigger', () => {
     expect(spellText(card({ effect: 'damage', amount: 3 }))).toBe('inflige 3 dégâts')
     expect(spellText(card({ effect: 'damage', amount: 0 }))).toBe('inflige X dégâts')
-    expect(spellText(card({ effect: 'damage', amount: 2, effects: [{ effect: 'damage', amount: 2 }, { effect: 'draw', amount: 1 }] }))).toBe('inflige 2 dégâts, puis pioche 1')
+    expect(
+      spellText(
+        card({
+          effect: 'damage',
+          amount: 2,
+          effects: [
+            { effect: 'damage', amount: 2 },
+            { effect: 'draw', amount: 1 },
+          ],
+        }),
+      ),
+    ).toBe('inflige 2 dégâts, puis pioche 1')
     expect(abilityText({ isManaAbility: false, effect: 'draw', tap: true, manaCost: '{2}', amount: 1 })).toBe('{2}, {T} : pioche 1')
     expect(triggerText({ event: 'etb', effect: 'damage', amount: 2 })).toBe('Quand elle arrive en jeu : inflige 2 dégâts')
   })

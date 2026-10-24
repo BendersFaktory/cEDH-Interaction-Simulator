@@ -19,7 +19,20 @@ const playable = computed(() => store.playableCardIds.has(props.card.id))
 <template>
   <div
     class="card"
-    :class="[typesOf(card), `frame-${frameOf(card)}`, { tapped: card.tapped, [`land-${landColor}`]: landColor, compact, commander: card.commander, token: card.token, attacking: card.attacking !== undefined, blocking: card.blocking !== undefined, playable }]"
+    :class="[
+      typesOf(card),
+      `frame-${frameOf(card)}`,
+      {
+        tapped: card.tapped,
+        [`land-${landColor}`]: landColor,
+        compact,
+        commander: card.commander,
+        token: card.token,
+        attacking: card.attacking !== undefined,
+        blocking: card.blocking !== undefined,
+        playable,
+      },
+    ]"
     @mouseenter="store.hoveredCard = card"
     @mouseleave="store.hoveredCard = null"
   >
@@ -27,12 +40,16 @@ const playable = computed(() => store.playableCardIds.has(props.card.id))
     <span class="card-name">{{ card.name }}</span>
     <span v-if="card.token" class="card-token">jeton</span>
     <span v-if="card.type === 'land' && card.produces?.length" class="mana-sym" :class="landColor ? `m-${landColor}` : 'hybrid'">{{ card.produces.join('') }}</span>
-    <span v-if="symbols.length" class="card-mana"><span v-for="(s, i) in symbols" :key="i" class="mana-sym" :class="symbolClass(s)">{{ s }}</span></span>
+    <span v-if="symbols.length" class="card-mana"
+      ><span v-for="(s, i) in symbols" :key="i" class="mana-sym" :class="symbolClass(s)">{{ s }}</span></span
+    >
     <span v-else-if="card.cost > 0" class="card-cost">{{ card.cost }}</span>
     <span v-if="hasType(card, 'creature')" class="card-pt">{{ card.power }}/{{ card.toughness }}</span>
     <span v-if="card.attacking !== undefined" class="card-combat">⚔ J{{ card.attacking }}</span>
     <span v-else-if="card.blocking !== undefined" class="card-combat">🛡 {{ card.blocking }}</span>
-    <span v-if="!hasType(card, 'land') && card.abilities?.length" class="card-abilities"><span v-for="(a, i) in card.abilities" :key="i" class="ability-chip" :class="{ mana: a.isManaAbility }">{{ a.isManaAbility ? '⚡' : '✦' }}</span></span>
+    <span v-if="!hasType(card, 'land') && card.abilities?.length" class="card-abilities"
+      ><span v-for="(a, i) in card.abilities" :key="i" class="ability-chip" :class="{ mana: a.isManaAbility }">{{ a.isManaAbility ? '⚡' : '✦' }}</span></span
+    >
     <span v-if="!hasType(card, 'land')" class="card-type">{{ typeLine(card) }}</span>
     <span v-if="keywords" class="card-keywords">{{ keywords }}</span>
   </div>

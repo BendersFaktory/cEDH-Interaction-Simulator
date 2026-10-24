@@ -8,16 +8,29 @@
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
-    "recette": "node e2e/recette.mjs"
+    "recette": "node e2e/recette.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "pinia": "^2.2.0",
     "vue": "^3.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@vitejs/plugin-vue": "^5.1.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vue/test-utils": "^2.5.1",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^17.13.0",
+    "happy-dom": "^21.0.4",
     "playwright": "^1.64.0",
+    "prettier": "^3.9.10",
     "typescript": "^5.5.0",
+    "typescript-eslint": "^8.72.0",
     "vite": "^5.4.0",
     "vitest": "^2.1.0",
     "vue-tsc": "^2.1.0"

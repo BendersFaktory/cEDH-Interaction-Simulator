@@ -5,7 +5,13 @@ import type { SimulationView, StopsConfig } from '../types/engine'
 
 const stops: StopsConfig = { steps: ['upkeep', 'main1'], onOpponentSpell: true, onDeclareAttackers: false, onDeclareBlockers: true }
 const base: SimulationView = {
-  id: 7, parentId: null, forkEventSeq: null, seed: 1, status: 'waiting', pending: null, eventCount: 0,
+  id: 7,
+  parentId: null,
+  forkEventSeq: null,
+  seed: 1,
+  status: 'waiting',
+  pending: null,
+  eventCount: 0,
   controllers: { 0: 'human:auto', 1: 'ai:heuristic' },
 }
 
@@ -62,7 +68,7 @@ describe('création asynchrone', () => {
 
   const ok = (body: unknown) => ({ ok: true, json: async () => body })
 
-  it('sonde GET /simulations/{id} toutes les 200 ms jusqu\'à la fin puis charge le journal', async () => {
+  it("sonde GET /simulations/{id} toutes les 200 ms jusqu'à la fin puis charge le journal", async () => {
     const store = useSimulationStore()
     fetchMock
       .mockResolvedValueOnce(ok({ ...base, status: 'queued', progress: null })) // POST
@@ -85,7 +91,7 @@ describe('création asynchrone', () => {
     expect(store.error).toBeNull()
   })
 
-  it('envoie le profil d\'IA choisi pour chaque siège', async () => {
+  it("envoie le profil d'IA choisi pour chaque siège", async () => {
     const store = useSimulationStore()
     fetchMock
       .mockResolvedValueOnce(ok({ ...base, status: 'over' })) // POST
@@ -99,9 +105,7 @@ describe('création asynchrone', () => {
 
   it('affiche une erreur quand la simulation échoue', async () => {
     const store = useSimulationStore()
-    fetchMock
-      .mockResolvedValueOnce(ok({ ...base, status: 'queued' }))
-      .mockResolvedValueOnce(ok({ ...base, status: 'failed', error: 'boum' }))
+    fetchMock.mockResolvedValueOnce(ok({ ...base, status: 'queued' })).mockResolvedValueOnce(ok({ ...base, status: 'failed', error: 'boum' }))
     const done = store.create(1, false)
     await vi.advanceTimersByTimeAsync(200)
     await done

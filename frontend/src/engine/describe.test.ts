@@ -28,16 +28,21 @@ describe('describeEvent — capacités', () => {
     expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Mountain' }, tapped: ['x'], mana: { R: 1 } }))).toBe('J0 engage Mountain : {R}')
     expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Sol Ring' }, tapped: ['x'], mana: { C: 2 } }))).toBe('J0 engage Sol Ring : {C}{C}')
     expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Sol Ring' }, tapped: [], mana: { C: 2 } }))).toBe('J0 active Sol Ring : {C}{C}')
-    expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Eldrazi Temple' }, tapped: ['x'], mana: { C: 2 }, ability: { options: ['{C}{C}@eldrazi'] }, option: 0 })))
-      .toBe('J0 engage Eldrazi Temple : {C}{C} (mana restreint : seulement pour un sort ou une capacité d\'Eldrazi incolore)')
+    expect(describeEvent(e('ManaAbilityActivated', { player: 0, card: { name: 'Eldrazi Temple' }, tapped: ['x'], mana: { C: 2 }, ability: { options: ['{C}{C}@eldrazi'] }, option: 0 }))).toBe(
+      "J0 engage Eldrazi Temple : {C}{C} (mana restreint : seulement pour un sort ou une capacité d'Eldrazi incolore)",
+    )
     expect(describeEvent(e('ManaAdded', { player: 0, mana: { R: 2 } }))).toBe('J0 gagne {R}{R}')
     expect(describeEvent(e('ManaPoolEmptied', { player: 0, lost: { R: 1 } }))).toBe('J0 perd son mana flottant {R}')
   })
   it('capacité non-mana', () => {
     expect(describeEvent(e('AbilityActivated', { player: 0, card: { name: 'Pinger' }, ability: { effect: 'damage', amount: 1 }, targets: ['player:1'] }))).toBe('J0 active Pinger (1 dégât) → J1')
     expect(describeEvent(e('AbilityResolved', { card: { name: 'Pinger' } }))).toBe('Capacité de Pinger résolue')
-    expect(describeEvent(e('AbilityTriggered', { player: 2, card: { name: 'Perilous Myr' }, label: 'Quand elle meurt : 2 dégâts', targets: ['player:1'] }))).toBe('Trigger de Perilous Myr (J2) : Quand elle meurt : 2 dégâts → J1')
-    expect(describeEvent(e('AbilityTriggered', { player: 0, card: { name: 'Elvish Visionary' }, label: 'Quand elle entre : piocher 1', targets: [] }))).toBe('Trigger de Elvish Visionary (J0) : Quand elle entre : piocher 1')
+    expect(describeEvent(e('AbilityTriggered', { player: 2, card: { name: 'Perilous Myr' }, label: 'Quand elle meurt : 2 dégâts', targets: ['player:1'] }))).toBe(
+      'Trigger de Perilous Myr (J2) : Quand elle meurt : 2 dégâts → J1',
+    )
+    expect(describeEvent(e('AbilityTriggered', { player: 0, card: { name: 'Elvish Visionary' }, label: 'Quand elle entre : piocher 1', targets: [] }))).toBe(
+      'Trigger de Elvish Visionary (J0) : Quand elle entre : piocher 1',
+    )
     expect(describeEvent(e('AbilityResolved', { card: { name: 'Perilous Myr' }, trigger: true }))).toBe('Trigger de Perilous Myr résolu')
   })
   it('jetons et sacrifices', () => {

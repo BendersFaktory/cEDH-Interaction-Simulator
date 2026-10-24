@@ -22,13 +22,9 @@ const forkEvent = computed(() => store.events.find((e) => e.seq === store.forkPo
       </p>
       <div class="inline">
         Je prends :
-        <label v-for="id in playerIds" :key="id" class="inline">
-          <input v-model="takeOver" type="checkbox" :value="id" /> J{{ id }}
-        </label>
+        <label v-for="id in playerIds" :key="id" class="inline"> <input v-model="takeOver" type="checkbox" :value="id" /> J{{ id }} </label>
       </div>
-      <button :disabled="!takeOver.length || store.loading" @click="store.forkHere(takeOver)">
-        Reprendre la main ici
-      </button>
+      <button :disabled="!takeOver.length || store.loading" @click="store.forkHere(takeOver)">Reprendre la main ici</button>
     </template>
   </section>
 </template>

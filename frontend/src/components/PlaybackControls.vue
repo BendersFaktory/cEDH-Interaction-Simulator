@@ -15,14 +15,7 @@ const store = useSimulationStore()
       <button title="Fin" @click="store.seek(store.lastSeq)">⏭</button>
     </div>
 
-    <input
-      class="slider"
-      type="range"
-      min="0"
-      :max="store.lastSeq"
-      :value="store.cursor"
-      @input="store.seek(Number(($event.target as HTMLInputElement).value))"
-    />
+    <input class="slider" type="range" min="0" :max="store.lastSeq" :value="store.cursor" @input="store.seek(Number(($event.target as HTMLInputElement).value))" />
 
     <label class="inline">
       Vitesse

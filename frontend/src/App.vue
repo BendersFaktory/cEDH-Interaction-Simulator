@@ -54,7 +54,9 @@ const aiProfiles = ref(['ai:heuristic', 'ai:heuristic', 'ai:heuristic', 'ai:heur
       <template v-if="store.simulation.parentId">(fork de #{{ store.simulation.parentId }} @ {{ store.simulation.forkEventSeq }})</template>
       — {{ store.simulation.status }}
     </span>
-    <span v-if="store.waiting" class="muted">Simulation en cours…<template v-if="store.progress"> tour {{ store.progress }}</template></span>
+    <span v-if="store.waiting" class="muted"
+      >Simulation en cours…<template v-if="store.progress"> tour {{ store.progress }}</template></span
+    >
     <span v-if="store.error" class="error">{{ store.error }}</span>
   </header>
 
@@ -71,7 +73,9 @@ const aiProfiles = ref(['ai:heuristic', 'ai:heuristic', 'ai:heuristic', 'ai:heur
   <div v-if="store.deckProblems" class="deck-problems" data-testid="deck-problems">
     <template v-for="(list, seat) in store.deckProblems" :key="seat">
       <strong>{{ seat }}</strong>
-      <ul><li v-for="(problem, k) in list" :key="k">{{ problem }}</li></ul>
+      <ul>
+        <li v-for="(problem, k) in list" :key="k">{{ problem }}</li>
+      </ul>
     </template>
   </div>
 

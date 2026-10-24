@@ -12,12 +12,7 @@ const failed = ref<string | null>(null)
 const lines = computed(() => {
   const c = card.value
   if (!c) return []
-  return [
-    keywordsText(c),
-    hasType(c, 'land') ? '' : (spellText(c) ?? ''),
-    ...(c.abilities ?? []).map(abilityText),
-    ...(c.triggers ?? []).map(triggerText),
-  ].filter(Boolean)
+  return [keywordsText(c), hasType(c, 'land') ? '' : (spellText(c) ?? ''), ...(c.abilities ?? []).map(abilityText), ...(c.triggers ?? []).map(triggerText)].filter(Boolean)
 })
 </script>
 
@@ -26,7 +21,9 @@ const lines = computed(() => {
     <img v-if="art && failed !== art" class="preview-art" :src="art" :alt="card.name" loading="lazy" @error="failed = art" />
     <header>
       <strong>{{ card.name }}</strong>
-      <span class="card-mana"><span v-for="(s, i) in manaSymbols(card.manaCost)" :key="i" class="mana-sym" :class="symbolClass(s)">{{ s }}</span></span>
+      <span class="card-mana"
+        ><span v-for="(s, i) in manaSymbols(card.manaCost)" :key="i" class="mana-sym" :class="symbolClass(s)">{{ s }}</span></span
+      >
     </header>
     <div class="preview-type">{{ typeLine(card) }}{{ card.token ? ' (jeton)' : '' }}</div>
     <ul class="preview-text">

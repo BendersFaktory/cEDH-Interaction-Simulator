@@ -143,10 +143,7 @@ export interface DecisionRequest {
 export type SimulationStatus = 'queued' | 'running' | 'waiting' | 'over' | 'failed'
 
 /** Étapes où un siège humain peut s'arrêter (valeurs de `PhaseChanged.phase`). */
-export const STOP_STEPS = [
-  'upkeep', 'draw', 'main1', 'begin_combat', 'declare_attackers', 'declare_blockers',
-  'first_strike_damage', 'combat_damage', 'end_combat', 'main2', 'end',
-] as const
+export const STOP_STEPS = ['upkeep', 'draw', 'main1', 'begin_combat', 'declare_attackers', 'declare_blockers', 'first_strike_damage', 'combat_damage', 'end_combat', 'main2', 'end'] as const
 
 /** Stops configurés d'un joueur humain (absent / null = défaut : s'arrêter dès qu'une action est possible). */
 export interface StopsConfig {

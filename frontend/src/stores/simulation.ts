@@ -36,9 +36,7 @@ export const useSimulationStore = defineStore('simulation', () => {
    * Points de bifurcation valides : les PriorityGranted marqués `checkpoint` par le moteur
    * (début de ronde, ou pile non vide). Les autres octrois n'ont pas de snapshot.
    */
-  const checkpointSeqs = computed(() =>
-    events.value.filter((e) => e.type === 'PriorityGranted' && e.payload.checkpoint).map((e) => e.seq),
-  )
+  const checkpointSeqs = computed(() => events.value.filter((e) => e.type === 'PriorityGranted' && e.payload.checkpoint).map((e) => e.seq))
   const forkPoint = computed(() => {
     const before = checkpointSeqs.value.filter((s) => s <= cursor.value)
     return before.length ? before[before.length - 1] : null
@@ -218,9 +216,39 @@ export const useSimulationStore = defineStore('simulation', () => {
   onScopeDispose(pause)
 
   return {
-    simulation, events, cursor, playing, speedMs, showVerbose, loading, error, deckProblems, progress, waiting,
-    lastSeq, atEnd, view, visibleEvents, checkpointSeqs, forkPoint, pending,
-    humanSeats, cardImage, stopsOf, setStops, playableCardIds, hoveredCard,
-    load, create, step, stepBack, seek, play, pause, setSpeed, forkHere, decide,
+    simulation,
+    events,
+    cursor,
+    playing,
+    speedMs,
+    showVerbose,
+    loading,
+    error,
+    deckProblems,
+    progress,
+    waiting,
+    lastSeq,
+    atEnd,
+    view,
+    visibleEvents,
+    checkpointSeqs,
+    forkPoint,
+    pending,
+    humanSeats,
+    cardImage,
+    stopsOf,
+    setStops,
+    playableCardIds,
+    hoveredCard,
+    load,
+    create,
+    step,
+    stepBack,
+    seek,
+    play,
+    pause,
+    setSpeed,
+    forkHere,
+    decide,
   }
 })

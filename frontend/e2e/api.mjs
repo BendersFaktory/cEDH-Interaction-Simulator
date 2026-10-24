@@ -32,7 +32,7 @@ export const createHuman = (seed) => create(seed, { 0: 'human:auto', 1: 'ai:heur
 /** J0 humain avec une decklist (texte) : demande l'API démarrée avec SCRYFALL_FIXTURES=1 (Scryfall figé, voir recette.mjs). */
 export const createHumanWithDeck = async (seed, decklist) =>
   keepHands(await waitReady(await post(API, { seed, controllers: { 0: 'human:auto', 1: 'ai:heuristic', 2: 'ai:heuristic', 3: 'ai:heuristic' }, decks: { 0: decklist } })))
-export const get =(id) => json(`${API}/${id}`)
+export const get = (id) => json(`${API}/${id}`)
 export const pending = (id) => json(`${API}/${id}/pending`)
 export const events = (id) => json(`${API}/${id}/events`)
 export const state = async (id, seq) => (await json(`${API}/${id}/state${seq === undefined ? '' : `?at=${seq}`}`)).state

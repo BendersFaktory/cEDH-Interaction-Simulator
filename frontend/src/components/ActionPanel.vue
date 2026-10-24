@@ -29,12 +29,28 @@ const groups = computed(() => {
   <section v-if="store.pending" class="actions">
     <h3>À toi de jouer — J{{ store.pending.player }}</h3>
     <p class="muted">
-      Tour {{ store.pending.turn }}, {{ phaseLabel(store.pending.phase) }}{{ store.pending.declaring === 'attackers' ? ' — déclaration des attaquants' : store.pending.declaring === 'blockers' ? ' — déclaration des bloqueurs' : store.pending.declaring === 'damage' ? ' — répartition des dégâts' : '' }} · pile : {{ store.pending.stack.length }}
+      Tour {{ store.pending.turn }}, {{ phaseLabel(store.pending.phase)
+      }}{{
+        store.pending.declaring === 'attackers'
+          ? ' — déclaration des attaquants'
+          : store.pending.declaring === 'blockers'
+            ? ' — déclaration des bloqueurs'
+            : store.pending.declaring === 'damage'
+              ? ' — répartition des dégâts'
+              : ''
+      }}
+      · pile : {{ store.pending.stack.length }}
     </p>
     <div v-for="g in groups" :key="g.title">
       <h4>{{ g.title }}</h4>
       <!-- TODO: TargetPicker — choisir la cible en cliquant sur le plateau au lieu d'une action par cible -->
-      <button v-for="a in g.items" :key="a.id" :class="{ 'ability-btn': a.type === 'ability', 'mana-ability': a.type === 'ability' && a.mana === true }" :disabled="store.loading" @click="store.decide(a.id)">
+      <button
+        v-for="a in g.items"
+        :key="a.id"
+        :class="{ 'ability-btn': a.type === 'ability', 'mana-ability': a.type === 'ability' && a.mana === true }"
+        :disabled="store.loading"
+        @click="store.decide(a.id)"
+      >
         {{ a.label }}
       </button>
     </div>

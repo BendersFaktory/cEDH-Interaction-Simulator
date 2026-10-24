@@ -61,7 +61,15 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
   switch (e.type) {
     case 'GameStarted':
       v.activePlayer = (p.firstPlayer as number | undefined) ?? v.activePlayer
-      for (const pl of p.players as Array<{ id: number; life: number; library: number; controller: string; command?: PublicCard[]; pool?: Record<string, number>; restricted?: Record<string, Record<string, number>> }>) {
+      for (const pl of p.players as Array<{
+        id: number
+        life: number
+        library: number
+        controller: string
+        command?: PublicCard[]
+        pool?: Record<string, number>
+        restricted?: Record<string, Record<string, number>>
+      }>) {
         v.players[pl.id] = {
           id: pl.id,
           life: pl.life,

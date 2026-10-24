@@ -2,7 +2,10 @@ import type { DeckInput, GameEvent, SimulationView, StopsConfig } from '../types
 
 /** Erreur d'API ; `problems` = problèmes d'une decklist refusée (422), par siège. */
 export class ApiError extends Error {
-  constructor(message: string, readonly problems?: Record<string, string[]>) {
+  constructor(
+    message: string,
+    readonly problems?: Record<string, string[]>,
+  ) {
     super(message)
   }
 }

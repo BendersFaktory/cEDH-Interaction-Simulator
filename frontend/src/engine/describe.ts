@@ -2,15 +2,15 @@ import type { GameEvent } from '../types/engine'
 
 import { phaseLabel } from './phases'
 
-const target = (t: string): string =>
-  t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`
+const target = (t: string): string => (t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`)
 
 const manaStr = (m: Record<string, number> | undefined): string =>
-  Object.entries(m ?? {}).map(([s, n]) => `{${s}}`.repeat(n)).join('')
+  Object.entries(m ?? {})
+    .map(([s, n]) => `{${s}}`.repeat(n))
+    .join('')
 
 /** Libellé d'une restriction de mana (`kind` du moteur). */
-export const restrictionLabel = (kind: string): string =>
-  kind === 'eldrazi' ? 'seulement pour un sort ou une capacité d\'Eldrazi incolore' : kind
+export const restrictionLabel = (kind: string): string => (kind === 'eldrazi' ? "seulement pour un sort ou une capacité d'Eldrazi incolore" : kind)
 
 /** Phrase lisible pour le journal. Les événements verbeux restent concis. */
 export function describeEvent(e: GameEvent): string {
@@ -39,9 +39,7 @@ export function describeEvent(e: GameEvent): string {
     case 'SpellCast': {
       const t = (p.targets as string[]).map(target).join(', ')
       const from = p.fromCommand ? ' depuis la zone de commandement' : ''
-      const paid = p.manaCost
-        ? ` (coût ${p.manaCost}${p.x !== undefined && p.manaCost.includes('{X}') ? `, X=${p.x}` : ''})`
-        : p.fromCommand ? ` (coût ${p.cost})` : ''
+      const paid = p.manaCost ? ` (coût ${p.manaCost}${p.x !== undefined && p.manaCost.includes('{X}') ? `, X=${p.x}` : ''})` : p.fromCommand ? ` (coût ${p.cost})` : ''
       return `J${p.player} lance ${p.card.name}${from}${paid}${t ? ` → ${t}` : ''}`
     }
     case 'ManaAbilityActivated': {
@@ -70,7 +68,7 @@ export function describeEvent(e: GameEvent): string {
     case 'SpellCountered':
       return `${p.card.name} (J${p.controller}) est contré${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
     case 'SpellFizzled':
-      return 'Le sort n\'a plus de cible valide'
+      return "Le sort n'a plus de cible valide"
     case 'DamageDealt':
       return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)${p.commanderDamage ? ` — dégâts de commandant : ${p.commanderDamage.total}/21` : ''}`
     case 'LifeGained':
@@ -80,9 +78,7 @@ export function describeEvent(e: GameEvent): string {
     case 'MulliganTaken':
       return `J${p.player} prend un mulligan (${p.mulligans})`
     case 'HandKept':
-      return p.toBottom
-        ? `J${p.player} garde sa main (${p.toBottom} carte${p.toBottom > 1 ? 's' : ''} au fond)`
-        : `J${p.player} garde sa main`
+      return p.toBottom ? `J${p.player} garde sa main (${p.toBottom} carte${p.toBottom > 1 ? 's' : ''} au fond)` : `J${p.player} garde sa main`
     case 'CardPutOnBottom':
       return `J${p.player} met une carte au fond de sa bibliothèque`
     case 'AttackerDeclared':
