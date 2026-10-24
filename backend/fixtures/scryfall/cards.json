@@ -1,0 +1,408 @@
+[
+    {
+        "name": "Plains",
+        "layout": "normal",
+        "type_line": "Basic Land — Plains",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {W}.)",
+        "keywords": []
+    },
+    {
+        "name": "Forest",
+        "layout": "normal",
+        "type_line": "Basic Land — Forest",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {G}.)",
+        "keywords": []
+    },
+    {
+        "name": "Sol Ring",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{1}",
+        "cmc": 1,
+        "oracle_text": "{T}: Add {C}{C}.",
+        "keywords": []
+    },
+    {
+        "name": "Lightning Bolt",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{R}",
+        "cmc": 1,
+        "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Blaze",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{X}{R}",
+        "cmc": 1,
+        "oracle_text": "Blaze deals X damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Counterspell",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}{U}",
+        "cmc": 2,
+        "oracle_text": "Counter target spell.",
+        "keywords": []
+    },
+    {
+        "name": "Dark Ritual",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{B}",
+        "cmc": 1,
+        "oracle_text": "Add {B}{B}{B}.",
+        "keywords": []
+    },
+    {
+        "power": "1",
+        "toughness": "1",
+        "name": "Llanowar Elves",
+        "layout": "normal",
+        "type_line": "Creature — Elf Druid",
+        "mana_cost": "{G}",
+        "cmc": 1,
+        "oracle_text": "{T}: Add {G}.",
+        "keywords": []
+    },
+    {
+        "power": "1",
+        "toughness": "1",
+        "name": "Elvish Visionary",
+        "layout": "normal",
+        "type_line": "Creature — Elf Shaman",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "oracle_text": "When this creature enters, draw a card.",
+        "keywords": []
+    },
+    {
+        "power": "2",
+        "toughness": "2",
+        "keywords": [
+            "Flying"
+        ],
+        "name": "Wind Drake",
+        "layout": "normal",
+        "type_line": "Creature — Drake",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "Flying"
+    },
+    {
+        "power": "2",
+        "toughness": "2",
+        "name": "Isamaru, Hound of Konda",
+        "layout": "normal",
+        "type_line": "Legendary Creature — Dog",
+        "mana_cost": "{W}",
+        "cmc": 1,
+        "oracle_text": "",
+        "keywords": []
+    },
+    {
+        "power": "5",
+        "toughness": "3",
+        "name": "Juggernaut",
+        "layout": "normal",
+        "type_line": "Artifact Creature — Juggernaut",
+        "mana_cost": "{4}",
+        "cmc": 4,
+        "oracle_text": "Juggernaut attacks each combat if able.\nJuggernaut can't be blocked by Walls.",
+        "keywords": []
+    },
+    {
+        "name": "Rhystic Study",
+        "layout": "normal",
+        "type_line": "Enchantment",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.",
+        "keywords": []
+    },
+    {
+        "loyalty": "3",
+        "name": "Jace, the Mind Sculptor",
+        "layout": "normal",
+        "type_line": "Legendary Planeswalker — Jace",
+        "mana_cost": "{2}{U}{U}",
+        "cmc": 4,
+        "oracle_text": "+2: Look at the top card.",
+        "keywords": []
+    },
+    {
+        "name": "Delver of Secrets // Insectile Aberration",
+        "layout": "transform",
+        "type_line": "Creature — Human Wizard // Creature — Human Insect"
+    },
+    {
+        "name": "Mind Stone",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "{T}: Add {C}.\n{1}, {T}, Sacrifice this artifact: Draw a card.",
+        "keywords": []
+    },
+    {
+        "name": "Izzet Signet",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "{1}, {T}: Add {U}{R}.",
+        "keywords": []
+    },
+    {
+        "power": "4",
+        "toughness": "4",
+        "keywords": [
+            "Flying",
+            "Vigilance"
+        ],
+        "name": "Serra Angel",
+        "layout": "normal",
+        "type_line": "Creature — Angel",
+        "mana_cost": "{3}{W}{W}",
+        "cmc": 5,
+        "oracle_text": "Flying, vigilance"
+    },
+    {
+        "power": "0",
+        "toughness": "4",
+        "keywords": [
+            "Defender"
+        ],
+        "name": "Wall of Omens",
+        "layout": "normal",
+        "type_line": "Creature — Wall",
+        "mana_cost": "{1}{W}",
+        "cmc": 2,
+        "oracle_text": "Defender\nWhen this creature enters, draw a card."
+    },
+    {
+        "power": "1",
+        "toughness": "1",
+        "name": "Perilous Myr",
+        "layout": "normal",
+        "type_line": "Artifact Creature — Myr",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "When this creature dies, it deals 2 damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Phyrexian Arena",
+        "layout": "normal",
+        "type_line": "Enchantment",
+        "mana_cost": "{1}{B}{B}",
+        "cmc": 3,
+        "oracle_text": "At the beginning of your upkeep, you draw a card and you lose 1 life.",
+        "keywords": []
+    },
+    {
+        "name": "Underground Sea",
+        "layout": "normal",
+        "type_line": "Land — Island Swamp",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {U} or {B}.)",
+        "keywords": []
+    },
+    {
+        "name": "Command Tower",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add one mana of any color in your commander's color identity.",
+        "keywords": []
+    },
+    {
+        "power": "0",
+        "toughness": "1",
+        "keywords": [
+            "Flying"
+        ],
+        "name": "Birds of Paradise",
+        "layout": "normal",
+        "type_line": "Creature — Bird",
+        "mana_cost": "{G}",
+        "cmc": 1,
+        "oracle_text": "Flying\n{T}: Add one mana of any color."
+    },
+    {
+        "name": "Lotus Petal",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{0}",
+        "cmc": 0,
+        "oracle_text": "{T}, Sacrifice Lotus Petal: Add one mana of any color.",
+        "keywords": []
+    },
+    {
+        "name": "Divination",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "Draw two cards.",
+        "keywords": []
+    },
+    {
+        "name": "Shock and Draw",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{1}{R}",
+        "cmc": 2,
+        "oracle_text": "Shock and Draw deals 2 damage to any target.\nDraw a card.",
+        "keywords": []
+    },
+    {
+        "name": "Bolt and Counter",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}{R}",
+        "cmc": 2,
+        "oracle_text": "Bolt and Counter deals 3 damage to any target.\nCounter target spell.",
+        "keywords": []
+    },
+    {
+        "name": "Ancient Tomb",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add {C}{C}. Ancient Tomb deals 2 damage to you.",
+        "keywords": []
+    },
+    {
+        "name": "Talisman of Dominance",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "{T}: Add {C}.\n{T}: Add {U} or {B}. Talisman of Dominance deals 1 damage to you.",
+        "keywords": []
+    },
+    {
+        "name": "Underground River",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add {C}.\n{T}: Add {U} or {B}. Underground River deals 1 damage to you.",
+        "keywords": []
+    },
+    {
+        "name": "Mana Confluence",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Pay 1 life: Add one mana of any color.",
+        "keywords": []
+    },
+    {
+        "name": "Polluted Delta",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Pay 1 life, Sacrifice Polluted Delta: Search your library for an Island or Swamp card, put it onto the battlefield, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Prismatic Vista",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add {C}.\n{T}, Pay 1 life, Sacrifice Prismatic Vista: Search your library for a basic land card, put it onto the battlefield, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Evolving Wilds",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Sacrifice Evolving Wilds: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Watery Grave",
+        "layout": "normal",
+        "type_line": "Land — Island Swamp",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {U} or {B}.)\nAs Watery Grave enters, you may pay 2 life. If you don't, it enters tapped.",
+        "keywords": []
+    },
+    {
+        "name": "Island",
+        "layout": "normal",
+        "type_line": "Basic Land — Island",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {U}.)",
+        "keywords": []
+    },
+    {
+        "name": "Swamp",
+        "layout": "normal",
+        "type_line": "Basic Land — Swamp",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {B}.)",
+        "keywords": []
+    },
+    {
+        "power": "*",
+        "toughness": "1+*",
+        "name": "Tarmogoyf",
+        "layout": "normal",
+        "type_line": "Creature — Lhurgoyf",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "oracle_text": "Tarmogoyf's power is equal to the number of card types among cards in all graveyards.",
+        "keywords": []
+    },
+    {
+        "name": "Hallowed Fountain",
+        "layout": "normal",
+        "type_line": "Land — Plains Island",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {W} or {U}.)\nAs Hallowed Fountain enters, you may pay 2 life. If you don't, it enters tapped.",
+        "keywords": []
+    },
+    {
+        "name": "Flooded Strand",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.",
+        "keywords": []
+    },
+    {
+        "power": "2",
+        "toughness": "2",
+        "name": "Recette, Azorius Envoy",
+        "layout": "normal",
+        "type_line": "Legendary Creature — Human Advisor",
+        "mana_cost": "{W}{U}",
+        "cmc": 2,
+        "oracle_text": "",
+        "keywords": []
+    }
+]

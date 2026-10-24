@@ -21,6 +21,8 @@ class ScryfallClient
         private readonly HttpClientInterface $httpClient,
         /** Pause entre deux requêtes, en microsecondes (100 ms ; 0 dans les tests). */
         private readonly int $delayMicroseconds = 100_000,
+        /** Recette UI : répond depuis `FixtureCards` au lieu du réseau (variable d'environnement `SCRYFALL_FIXTURES`). */
+        private readonly bool $useFixtures = false,
     ) {
     }
 
@@ -31,6 +33,9 @@ class ScryfallClient
     public function fetchCollection(array $names): array
     {
         $names = array_values(array_unique($names));
+        if ($this->useFixtures) {
+            return $this->fromFixtures($names);
+        }
         $cards = [];
         $notFound = [];
 
@@ -56,6 +61,30 @@ class ScryfallClient
                     $notFound[] = $identifier['name'];
                 }
             }
+        }
+
+        return ['cards' => $cards, 'not_found' => $notFound];
+    }
+
+    /**
+     * @param list<string> $names
+     * @return array{cards: list<array<string, mixed>>, not_found: list<string>}
+     */
+    private function fromFixtures(array $names): array
+    {
+        $byName = [];
+        foreach (FixtureCards::all() as $name => $card) {
+            $full = mb_strtolower($name);
+            $byName[$full] = $card;
+            if (str_contains($full, ' // ')) {
+                $byName[explode(' // ', $full)[0]] ??= $card;
+            }
+        }
+        $cards = [];
+        $notFound = [];
+        foreach ($names as $name) {
+            $card = $byName[mb_strtolower(trim($name))] ?? null;
+            $card === null ? $notFound[] = $name : $cards[] = $card;
         }
 
         return ['cards' => $cards, 'not_found' => $notFound];

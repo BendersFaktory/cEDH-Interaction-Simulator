@@ -38,13 +38,30 @@ const stopAll = () => started.forEach((p) => { try { process.kill(-p.pid) } catc
 const CHEAP_CREATURES = /Elves|Mystic|Druid|Goblin Guide|Raging Goblin|Swiftspear|Bear|Tusker|Recluse|Mongrel|Visionary|Mimic|Myr|Pyromancer|Merfolk|Soldiers|Crow|Sprite/
 const FLYER = /Storm Crow|Cloud Sprite|Wind Drake|Snapping Drake|Phantom Monster|Furnace Whelp/
 const TWO_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
+// Scénario 21 : decklist chargée depuis backend/fixtures/scryfall/cards.json au lieu du vrai Scryfall (API et workers démarrés par la recette).
+const FIXTURES_ENV = { SCRYFALL_FIXTURES: '1' }
+// Decklist du scénario 21 (déclarée ici : run() démarre avant la fin du module). 99 cartes + commandant W/U.
+const DECK_21 = `CMDR: Recette, Azorius Envoy
+1 Hallowed Fountain
+1 Flooded Strand
+1 Mana Confluence
+1 Sol Ring
+1 Mind Stone
+1 Serra Angel
+1 Wind Drake
+1 Wall of Omens
+1 Counterspell
+1 Divination
+1 Perilous Myr
+44 Plains
+44 Island`
 const T0 = Date.now()
 try {
-  await start('API', 'http://127.0.0.1:8000/api/simulations/0', 'php', ['-d', 'memory_limit=512M', '-d', 'variables_order=EGPCS', '-S', '127.0.0.1:8000', '-t', 'public'], BACK, { PHP_CLI_SERVER_WORKERS: '4' })
+  await start('API', 'http://127.0.0.1:8000/api/simulations/0', 'php', ['-d', 'memory_limit=512M', '-d', 'variables_order=EGPCS', '-S', '127.0.0.1:8000', '-t', 'public'], BACK, { PHP_CLI_SERVER_WORKERS: '4', ...FIXTURES_ENV })
   // Workers Messenger : POST /simulations ne joue plus la partie, il la met en file (statut queued).
   // Un worker par scénario parallèle ; ils sont arrêtés avec le reste (stopAll).
   for (let i = 0; i < JOBS; i++) {
-    started.push(spawn('php', ['-d', 'memory_limit=512M', 'bin/console', 'messenger:consume', 'async', '--time-limit=3600', '--quiet'], { cwd: BACK, stdio: 'ignore', detached: true }))
+    started.push(spawn('php', ['-d', 'memory_limit=512M', 'bin/console', 'messenger:consume', 'async', '--time-limit=3600', '--quiet'], { cwd: BACK, stdio: 'ignore', detached: true, env: { ...process.env, ...FIXTURES_ENV } }))
   }
   await start('Vite', 'http://localhost:5173/', 'npx', ['vite', '--port', '5173', '--strictPort'], FRONT)
   await run()
@@ -153,6 +170,7 @@ async function run() {
     ['18', (b) => scenario(b, '18', s18)],
     ['19', (b) => scenario(b, '19', s19)],
     ['20', (b) => scenario(b, '20', s20)],
+    ['21', (b) => scenario(b, '21', s21)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -746,4 +764,82 @@ async function s20({ page, log, shot, problem }) {
   if (!body?.decks?.['0'] || typeof body.decks['0'] !== 'string') problem('recette decklists : decklist de J0 absente du POST')
   if (body?.decks?.['1']?.commander !== 'Isamaru, Hound of Konda') problem('recette decklists : commandant de J1 absent du POST')
   if (body?.decks?.['2'] !== undefined) problem('recette decklists : un siège vide ne doit pas envoyer de deck')
+}
+
+// 21 : shockland et fetchland. Deck de J0 chargé depuis Scryfall figé (SCRYFALL_FIXTURES=1) : commandant W/U, Hallowed Fountain,
+// Flooded Strand, Mana Confluence. Les graines se cherchent par l'API (la carte en main de départ, puis le moment où l'action est
+// proposée) ; l'UI n'est ouverte qu'à ce moment. 21a : J0 joue la shockland en payant 2 PV. 21b : J0 sacrifie la fetchland pour un Island.
+/** Cherche une graine où J0 (deck de DECK_21) a `card` en main de départ puis, en jouant, atteint une décision où `stop` est vrai. */
+async function findDeckSeed(card, stop, known = []) {
+  const policy = (p, step) => {
+    const first = (type, re) => p.actions.find((a) => a.type === type && (!re || re.test(a.label)))
+    if (step > 200) return null
+    if (p.player === 0 && stop(p.actions)) return 'stop'
+    return first('discard') ?? first('done') ?? first('land') ?? first('pass') ?? null
+  }
+  for (const seed of [...known, ...Array.from({ length: 400 }, (_, i) => i + 1)]) {
+    const sim = await api.createHumanWithDeck(seed, DECK_21)
+    if (!(await api.handOf(sim.id)).names.includes(card)) continue
+    if ((await api.drive(sim.id, policy)).stopped) return { seed, id: sim.id }
+  }
+  throw new Error(`aucune graine ne propose ${card} à J0`)
+}
+
+async function s21({ page, log, shot, problem, openGame, tryClick }) {
+  const flat = (t) => t?.replace(/\s+/g, ' ').trim()
+  const lastSeq = async (id) => (await api.events(id)).at(-1)?.seq ?? 0
+  // Événements produits depuis `seq` (l'UI vient d'agir) : le jeu avance jusqu'à la décision suivante de J0, d'où les événements plutôt que l'état final.
+  const since = async (id, seq) => (await api.events(id)).filter((e) => e.seq > seq)
+  // 21a : shockland, payer 2 PV.
+  {
+    const { seed, id } = await findDeckSeed('Hallowed Fountain', (acts) => acts.some((a) => a.type === 'land' && /Hallowed Fountain.*payer 2 PV/.test(a.label)), [30])
+    const before = (await api.state(id)).players[0].life
+    const seq = await lastSeq(id)
+    log('21a graine retenue :', seed, '(#' + id + ') | PV de J0 :', before)
+    await openGame(id)
+    const pay = page.locator('.actions h4:has-text("Terrains") ~ button:not([disabled]):has-text("Hallowed Fountain"):has-text("payer 2 PV")').first()
+    const tapped = page.locator('.actions h4:has-text("Terrains") ~ button:not([disabled]):has-text("Hallowed Fountain"):has-text("engagé")')
+    log('21a variantes proposées : payer 2 PV =', await pay.count(), '| arriver engagée =', await tapped.count())
+    if (!(await pay.count()) || !(await tapped.count())) problem('recette shockland : les deux variantes (payer 2 PV / engagée) ne sont pas proposées')
+    await shot('21a-shockland-choix')
+    if (await tryClick(pay)) await page.locator('text=/J0 joue Hallowed Fountain/').first().waitFor({ timeout: 10_000 }).catch(() => {})
+    const evs = await since(id, seq)
+    const played = evs.find((e) => e.type === 'LandPlayed' && e.payload.card.name === 'Hallowed Fountain')
+    const paid = evs.find((e) => e.type === 'LifePaid' && e.payload.player === 0)
+    // État final (la partie avance jusqu'à la décision suivante de J0) : la shockland y est, et seul LandPlayed.tapped dit si elle est arrivée engagée.
+    const land = (await api.state(id)).players[0].battlefield.find((c) => c.name === 'Hallowed Fountain')
+    const journal = flat(await page.locator('text=/J0 joue Hallowed Fountain/').first().textContent().catch(() => '(absent)'))
+    log('21a LandPlayed :', !!played, '(tapped =', played?.payload.tapped, ') | LifePaid :', JSON.stringify(paid?.payload), '| sur le champ :', !!land, '| journal :', journal)
+    await shot('21a-shockland-jouee')
+    if (!played) problem('recette shockland : LandPlayed de Hallowed Fountain absent')
+    if (played?.payload.tapped) problem('recette shockland : la shockland arrive engagée alors que 2 PV ont été payés')
+    if (paid?.payload.amount !== 2 || paid?.payload.life !== before - 2) problem(`recette shockland : LifePaid ${JSON.stringify(paid?.payload)} (attendu 2 PV, ${before - 2} restants)`)
+    if (!land) problem('recette shockland : Hallowed Fountain absente du champ de bataille')
+  }
+  // 21b : fetchland, cible « → Island ». Page rechargée : openGame attend un panneau d'actions neuf.
+  {
+    const { seed, id } = await findDeckSeed('Flooded Strand', (acts) => acts.some((a) => a.type === 'ability' && /Flooded Strand.*→ Island/.test(a.label)), [7])
+    const before = (await api.state(id)).players[0].life
+    const seq = await lastSeq(id)
+    log('21b graine retenue :', seed, '(#' + id + ') | PV de J0 :', before)
+    await page.goto('http://localhost:5173/')
+    await openGame(id)
+    const fetchBtn = page.locator('.actions h4:has-text("Capacités") ~ button:not([disabled]):has-text("Flooded Strand"):has-text("→ Island")').first()
+    log('21b libellé de la capacité :', flat(await fetchBtn.textContent({ timeout: 5000 }).catch(() => '(absent)')))
+    await shot('21b-fetchland-choix')
+    if (!(await fetchBtn.count())) problem('recette fetchland : la capacité « → Island » de Flooded Strand n\'est pas proposée')
+    else if (await tryClick(fetchBtn)) await page.locator('text=/J0 cherche Island/').first().waitFor({ timeout: 15_000 }).catch(() => {})
+    const evs = await since(id, seq)
+    const fetched = evs.find((e) => e.type === 'LandFetched' && e.payload.player === 0)
+    const paid = evs.find((e) => e.type === 'LifePaid' && e.payload.player === 0)
+    const final = (await api.state(id)).players[0]
+    const journal = flat(await page.locator('text=/J0 cherche Island/').first().textContent().catch(() => '(absent)'))
+    log('21b LifePaid :', JSON.stringify(paid?.payload), '| LandFetched :', fetched?.payload.card?.name, '| champ :', final.battlefield.map((c) => c.name).join(', '), '| journal :', journal)
+    await shot('21b-fetchland-resolue')
+    if (paid?.payload.amount !== 1 || paid?.payload.life !== before - 1) problem(`recette fetchland : LifePaid ${JSON.stringify(paid?.payload)} (attendu 1 PV, ${before - 1} restants)`)
+    if (fetched?.payload.card?.name !== 'Island') problem(`recette fetchland : LandFetched ${JSON.stringify(fetched?.payload)} (attendu un Island)`)
+    if (final.battlefield.some((c) => c.name === 'Flooded Strand')) problem('recette fetchland : Flooded Strand devrait être sacrifiée')
+    if (!final.battlefield.some((c) => c.id === fetched?.payload.card?.id)) problem('recette fetchland : l\'Island cherché n\'est pas sur le champ de bataille')
+    if (!/cherche Island/.test(journal ?? '')) problem('recette fetchland : « J0 cherche Island » absent du journal')
+  }
 }

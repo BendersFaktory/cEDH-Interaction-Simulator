@@ -29,7 +29,10 @@ export const create = async (seed, controllers, { keep = true } = {}) => {
 }
 /** Même configuration que le bouton « Nouvelle partie Commander » (J0 humain contre 3 IA). */
 export const createHuman = (seed) => create(seed, { 0: 'human:auto', 1: 'ai:heuristic', 2: 'ai:heuristic', 3: 'ai:heuristic' }, { keep: true })
-export const get = (id) => json(`${API}/${id}`)
+/** J0 humain avec une decklist (texte) : demande l'API démarrée avec SCRYFALL_FIXTURES=1 (Scryfall figé, voir recette.mjs). */
+export const createHumanWithDeck = async (seed, decklist) =>
+  keepHands(await waitReady(await post(API, { seed, controllers: { 0: 'human:auto', 1: 'ai:heuristic', 2: 'ai:heuristic', 3: 'ai:heuristic' }, decks: { 0: decklist } })))
+export const get =(id) => json(`${API}/${id}`)
 export const pending = (id) => json(`${API}/${id}/pending`)
 export const events = (id) => json(`${API}/${id}/events`)
 export const state = async (id, seq) => (await json(`${API}/${id}/state${seq === undefined ? '' : `?at=${seq}`}`)).state
