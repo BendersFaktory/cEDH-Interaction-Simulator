@@ -290,7 +290,8 @@ final class ManaPayment
     /**
      * Meilleure couverture de `$residual` (colorés) + `$generic` par des engagements.
      *
-     * @return array{waste: int, sac: int, taps: int, multi: int, picks: list<array{card: string, ability: int, option: int, prod: array<string,int>}>}|null
+     * @param array{nodes: int} $state
+     * @return array{waste: int, sac: int, taps: int, multi: int, picks: list<array{card: string, ability: int, option: int, prod: array<string,int>, rk: string|null}>}|null
      */
     private static function cover(array $sources, array $residual, int $generic, array &$state): ?array
     {
@@ -622,7 +623,7 @@ final class ManaPayment
      * (`$rSpend` pris dans la réserve, production des options restreintes, consommée avant la libre) ne paie que le coût
      * demandé : `$rSpend` s'ajoute à `spend`, et une option restreinte n'est jamais choisie avec un convertisseur.
      *
-     * @param list<array{card: string, ability: int, option: int, prod: array<string,int>}> $picks
+     * @param list<array{card: string, ability: int, option: int, prod: array<string,int>, rk: string|null}> $picks
      * @param list<array{card: string, ability: int, option: int, prod: array<string,int>, cost: ManaCost}> $combo
      */
     private static function build(array $picks, array $residual, int $generic, array $poolSpend, array $combo = [], array $outSpend = [], array $restColored = [], array $rSpend = []): ManaPlan
