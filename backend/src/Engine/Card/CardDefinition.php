@@ -49,6 +49,7 @@ final class CardDefinition
         public readonly array $keywords = [],
         public readonly array $supertypes = [],
         array $effects = [],
+        public readonly int $untappedLifeCost = 0,
     ) {
         try {
             $this->effects = SpellEffect::assertList($effects !== [] ? $effects : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]), $name);
@@ -62,7 +63,7 @@ final class CardDefinition
         return new CardInstance(
             $id, $this->name, $this->type, $this->cost, null, 0, false, $commander,
             $this->power, $this->toughness, 0, 0, $this->manaCost, $this->produces, $this->abilities, null, false,
-            $this->triggers, $this->subtypes, $this->keywords, $this->supertypes, $this->effects,
+            $this->triggers, $this->subtypes, $this->keywords, $this->supertypes, $this->effects, $this->untappedLifeCost,
         );
     }
 
@@ -73,7 +74,7 @@ final class CardDefinition
             'abilities' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->abilities),
             'triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers),
             'subtypes' => $this->subtypes, 'keywords' => $this->keywords, 'supertypes' => $this->supertypes,
-        ] + (count($this->effects) > 1
+        ] + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []) + (count($this->effects) > 1
             ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)]
             : ['spell' => isset($this->effects[0]) ? $this->effects[0]->toArray() : []]);
     }
@@ -87,7 +88,7 @@ final class CardDefinition
             null, 0, null, $d['produces'] ?? [],
             array_map([ActivatedAbility::class, 'fromArray'], $d['abilities'] ?? []),
             array_map([TriggeredAbility::class, 'fromArray'], $d['triggers'] ?? []),
-            $d['subtypes'] ?? [], $d['keywords'] ?? [], $d['supertypes'] ?? [], $effects,
+            $d['subtypes'] ?? [], $d['keywords'] ?? [], $d['supertypes'] ?? [], $effects, (int) ($d['untappedLifeCost'] ?? 0),
         );
     }
 }

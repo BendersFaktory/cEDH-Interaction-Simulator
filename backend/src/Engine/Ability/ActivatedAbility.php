@@ -50,7 +50,12 @@ final class ActivatedAbility
         public readonly bool $sorcerySpeed = false,
         public readonly string $spec = '',
         public readonly array $restrictions = [],
+        public readonly int $lifeCost = 0,   // PV payés à l'activation (Mana Confluence, fetchlands) ; impossible avec moins de PV (CR 119.4)
+        public readonly int $selfDamage = 0, // dégâts infligés à son contrôleur par la capacité (Ancient Tomb, Talismans, pain lands)
     ) {
+        if ($effect === 'fetch') {
+            $this->fetchSpec();
+        }
         if ($effect === 'token') {
             $this->tokenSpec();
         }
@@ -63,14 +68,55 @@ final class ActivatedAbility
      * `{T}: ajoute …` ; `$spec` = alternatives séparées par `|`, ex. `{C}{C}`, `{R}|{G}` ou `{C}{C}@eldrazi` (restreinte).
      * `$cost` = coût de mana en plus du `{T}` (Signet : `{1}`).
      */
-    public static function mana(string $spec, ?string $cost = null): self
+    public static function mana(string $spec, ?string $cost = null, int $selfDamage = 0, int $lifeCost = 0): self
     {
         // Objet valeur immuable, fonction pure de ses arguments : instances partagées (poids mouche), aucun état de partie.
-        return self::$manaMemo[$spec . "\0" . $cost] ??= (function () use ($spec, $cost): self {
+        return self::$manaMemo[$spec . "\0" . $cost . "\0" . $selfDamage . "\0" . $lifeCost] ??= (function () use ($spec, $cost, $selfDamage, $lifeCost): self {
             [$options, $restrictions] = self::parseOptions(explode('|', $spec));
 
-            return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, restrictions: $restrictions);
+            return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, restrictions: $restrictions,
+                lifeCost: $lifeCost, selfDamage: $selfDamage);
         })();
+    }
+
+    /**
+     * Fetchland : `{T}, [payer $lifeCost PV], sacrifier : chercher un terrain` de l'un des types `$spec` (`Island|Swamp`, carte
+     * dont un sous-type de terrain convient, duals comprises) ou `basic` (terrain de base), mis sur le champ de bataille
+     * (engagé si `$tapped`), puis mélanger. Le terrain cherché est choisi à l'activation (cible `library:<id>`).
+     */
+    public static function fetch(string $spec, bool $tapped = false, int $lifeCost = 0): self
+    {
+        return new self(false, 'fetch', true, null, [], 0, true, spec: $spec . ($tapped ? ':tapped' : ''), lifeCost: $lifeCost);
+    }
+
+    /** @return array{types: list<string>, basic: bool, tapped: bool} ce que cherche une capacité `fetch` */
+    public function fetchSpec(): array
+    {
+        if (!preg_match('/^(basic|[A-Z][a-z]+(?:\|[A-Z][a-z]+)*)(:tapped)?$/', $this->spec, $m)) {
+            throw new \InvalidArgumentException("Recherche invalide : {$this->spec}");
+        }
+
+        return ['types' => $m[1] === 'basic' ? [] : explode('|', $m[1]), 'basic' => $m[1] === 'basic', 'tapped' => isset($m[2])];
+    }
+
+    /** Le terrain `$land` convient-il à cette recherche (`fetch`) ? */
+    public function fetches(\App\Engine\Game\CardInstance $land): bool
+    {
+        if (!$land->isLand()) {
+            return false;
+        }
+        ['types' => $types, 'basic' => $basic] = $this->fetchSpec();
+        if ($basic) {
+            return in_array($land->name, \App\Engine\Card\Decks::BASIC_LANDS, true);
+        }
+        foreach ($types as $type) {
+            // Terrain de base des decks de démo : construit sans sous-type, reconnu par son nom.
+            if ($land->hasSubtype($type, \App\Engine\Game\CardInstance::LAND) || $land->name === $type) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Treasure : `{T}, sacrifier : un mana de la couleur de son choix`. */
@@ -194,6 +240,7 @@ final class ActivatedAbility
             $this->sacrifice ? 'sacrifier' : '',
             $this->sacrificeCreature ? 'sacrifier une créature' : '',
             $this->discard > 0 ? "défausser {$this->discard}" : '',
+            $this->lifeCost > 0 ? "payer {$this->lifeCost} PV" : '',
         ], static fn (string $p) => $p !== ''));
         $what = match ($this->effect) {
             'mana' => implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? []))
@@ -202,10 +249,12 @@ final class ActivatedAbility
             'draw' => sprintf('piocher %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'pump' => $this->spec,
+            'fetch' => 'chercher ' . ($this->fetchSpec()['basic'] ? 'un terrain de base' : implode(' ou ', $this->fetchSpec()['types'])) . ($this->fetchSpec()['tapped'] ? ' (engagé)' : ''),
             default => $this->effect,
         };
 
-        return "$cost : $what" . ($this->sorcerySpeed ? ' (rituel)' : '');
+        return "$cost : $what" . ($this->selfDamage > 0 ? ", {$this->selfDamage} dégât" . ($this->selfDamage > 1 ? 's' : '') . ' à vous' : '')
+            . ($this->sorcerySpeed ? ' (rituel)' : '');
     }
 
     public function toArray(): array
@@ -223,6 +272,8 @@ final class ActivatedAbility
             'discard' => $this->discard,
             'sorcerySpeed' => $this->sorcerySpeed,
             'spec' => $this->spec,
+            'lifeCost' => $this->lifeCost,
+            'selfDamage' => $this->selfDamage,
         ]);
     }
 
@@ -243,6 +294,8 @@ final class ActivatedAbility
             (bool) ($d['sorcerySpeed'] ?? false),
             (string) ($d['spec'] ?? ''),
             $restrictions,
+            (int) ($d['lifeCost'] ?? 0),
+            (int) ($d['selfDamage'] ?? 0),
         );
     }
 

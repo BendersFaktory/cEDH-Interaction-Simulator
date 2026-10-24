@@ -111,9 +111,24 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'LandPlayed': {
       const pl = v.players[p.player]
       removeCard(pl.hand, p.card.id)
-      pl.battlefield.push(board(p.card))
+      pl.battlefield.push({ ...board(p.card), tapped: p.tapped === true }) // shockland non payée : arrive engagée
       break
     }
+
+    case 'LandFetched': {
+      const pl = v.players[p.player]
+      pl.library = p.library
+      pl.battlefield.push({ ...board(p.card), tapped: p.tapped === true })
+      break
+    }
+
+    case 'LibraryShuffled':
+      v.players[p.player].library = p.library
+      break
+
+    case 'LifePaid':
+      v.players[p.player].life = p.life
+      break
 
     case 'SpellCast': {
       const pl = v.players[p.player]

@@ -35,6 +35,7 @@ final class StackResolver
                 'draw' => $this->draw($s, $item->controller, $ability->amount),
                 'token' => $this->tokens($s, $item->controller, $ability->spec, $ability->amount),
                 'pump' => $this->pump($s, $item->controller, $card->id, $item->ability),
+                'fetch' => $this->fetch($s, $item->controller, $item->ability, $item->targets),
                 default => null,
             };
 
@@ -77,6 +78,28 @@ final class StackResolver
             $p->pool->add(Color::fromSymbol($symbol), $n);
         }
         $s->emit('ManaAdded', ['player' => $player, 'mana' => $cost->colored, 'pool' => $p->pool->toArray()] + $p->pool->restrictedField() + ['source' => $stackId]);
+    }
+
+    /**
+     * Fetchland : le terrain choisi à l'activation (`library:<id>`, suivi de `life` pour payer une shockland) est cherché s'il est
+     * encore dans la bibliothèque et convient ; sinon la recherche échoue (permis, CR 701.19b). La bibliothèque est mélangée
+     * dans tous les cas (`LibraryShuffled`).
+     *
+     * @param list<string> $targets
+     */
+    private function fetch(GameState $s, int $player, ActivatedAbility $ability, array $targets): void
+    {
+        $p = $s->player($player);
+        $id = substr($targets[0] ?? '', strlen('library:'));
+        foreach ($p->library as $i => $card) {
+            if ($card->id === $id && $ability->fetches($card)) {
+                array_splice($p->library, $i, 1);
+                $s->putLandOntoBattlefield($player, $card, in_array('life', $targets, true), 'LandFetched', $ability->fetchSpec()['tapped']);
+                break;
+            }
+        }
+        $p->library = $s->rng->shuffle($p->library);
+        $s->emit('LibraryShuffled', ['player' => $player, 'library' => count($p->library)]);
     }
 
     /** Pioche : une bibliothèque vide fait perdre le joueur à la prochaine vérification des SBA (CR 704.5b). */

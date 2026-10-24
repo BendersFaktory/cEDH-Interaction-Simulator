@@ -112,6 +112,45 @@ final class DeckLoaderTest extends TestCase
         self::assertCount(5, $petal->options);
     }
 
+    public function testMapsPainSourcesShocksAndFetches(): void
+    {
+        $tomb = self::map('Ancient Tomb');
+        self::assertSame([], $tomb->produces);
+        self::assertSame([2, ['C' => 2]], [$tomb->abilities[0]->selfDamage, $tomb->abilities[0]->produced()]);
+        self::assertCount(1, $tomb->instantiate('t')->abilities()); // pas de {C} implicite sans douleur
+
+        $talisman = self::map('Talisman of Dominance')->abilities;
+        self::assertSame([0, 1], [$talisman[0]->selfDamage, $talisman[1]->selfDamage]);
+        $river = self::map('Underground River');
+        self::assertSame(['C'], $river->produces);
+        self::assertSame(1, $river->abilities[0]->selfDamage);
+
+        $confluence = self::map('Mana Confluence')->abilities[0];
+        self::assertSame([1, 5], [$confluence->lifeCost, count($confluence->options)]);
+
+        $delta = self::map('Polluted Delta')->abilities[0];
+        self::assertSame(['fetch', 1, true, true, 'Island|Swamp'], [$delta->effect, $delta->lifeCost, $delta->tap, $delta->sacrifice, $delta->spec]);
+        self::assertSame([], self::map('Polluted Delta')->instantiate('d')->abilities()[1] ?? []); // seule la fetch
+        self::assertSame('basic', self::map('Prismatic Vista')->abilities[0]->spec);
+        self::assertSame(['C'], self::map('Prismatic Vista')->produces);
+        $wilds = self::map('Evolving Wilds')->abilities[0];
+        self::assertSame(['basic:tapped', 0], [$wilds->spec, $wilds->lifeCost]);
+
+        $grave = self::map('Watery Grave');
+        self::assertSame([2, ['U', 'B']], [$grave->untappedLifeCost, $grave->produces]);
+    }
+
+    public function testDeckWithPainLandsAndFetchesPlays(): void
+    {
+        $list = "CMDR: Isamaru, Hound of Konda\n1 Ancient Tomb\n1 Mana Confluence\n1 Evolving Wilds\n1 Prismatic Vista\n95 Plains";
+        $deck = $this->loader()->load($list);
+        self::assertCount(99, $deck->library);
+        $state = GameFactory::create(11, [0 => 'ai:heuristic', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic'], static fn (int $id): array => $deck->instantiate($id));
+        $types = array_map(static fn ($e) => $e->type, (new \App\Engine\Game\GameEngine(new \App\Engine\Agent\AgentRegistry()))->advance($state)->events);
+        self::assertContains('GameOver', $types);
+        self::assertContains('LandFetched', $types); // l'IA active Evolving Wilds / Prismatic Vista
+    }
+
     public function testDeckWithCommonCreatureTypesLoads(): void
     {
         $deck = $this->loader()->load("CMDR: Isamaru, Hound of Konda\n1 Serra Angel\n1 Wall of Omens\n1 Mind Stone\n1 Perilous Myr\n95 Plains");

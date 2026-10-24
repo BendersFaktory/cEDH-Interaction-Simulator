@@ -45,6 +45,16 @@ final class ScryfallFixtures
             // Cartes factices (aucune carte réelle n'a exactement ces deux lignes) : plusieurs effets par sort.
             'Shock and Draw' => $c('Shock and Draw', 'Instant', '{1}{R}', 2, "Shock and Draw deals 2 damage to any target.\nDraw a card."),
             'Bolt and Counter' => $c('Bolt and Counter', 'Instant', '{U}{R}', 2, "Bolt and Counter deals 3 damage to any target.\nCounter target spell."),
+            'Ancient Tomb' => $c('Ancient Tomb', 'Land', '', 0, '{T}: Add {C}{C}. Ancient Tomb deals 2 damage to you.'),
+            'Talisman of Dominance' => $c('Talisman of Dominance', 'Artifact', '{2}', 2, "{T}: Add {C}.\n{T}: Add {U} or {B}. Talisman of Dominance deals 1 damage to you."),
+            'Underground River' => $c('Underground River', 'Land', '', 0, "{T}: Add {C}.\n{T}: Add {U} or {B}. Underground River deals 1 damage to you."),
+            'Mana Confluence' => $c('Mana Confluence', 'Land', '', 0, '{T}, Pay 1 life: Add one mana of any color.'),
+            'Polluted Delta' => $c('Polluted Delta', 'Land', '', 0, '{T}, Pay 1 life, Sacrifice Polluted Delta: Search your library for an Island or Swamp card, put it onto the battlefield, then shuffle.'),
+            'Prismatic Vista' => $c('Prismatic Vista', 'Land', '', 0, "{T}: Add {C}.\n{T}, Pay 1 life, Sacrifice Prismatic Vista: Search your library for a basic land card, put it onto the battlefield, then shuffle."),
+            'Evolving Wilds' => $c('Evolving Wilds', 'Land', '', 0, '{T}, Sacrifice Evolving Wilds: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.'),
+            'Watery Grave' => $c('Watery Grave', 'Land — Island Swamp', '', 0, "({T}: Add {U} or {B}.)\nAs Watery Grave enters, you may pay 2 life. If you don't, it enters tapped."),
+            'Island' => $c('Island', 'Basic Land — Island', '', 0, '({T}: Add {U}.)'),
+            'Swamp' => $c('Swamp', 'Basic Land — Swamp', '', 0, '({T}: Add {B}.)'),
             'Tarmogoyf' => $c('Tarmogoyf', 'Creature — Lhurgoyf', '{1}{G}', 2, "Tarmogoyf's power is equal to the number of card types among cards in all graveyards.", ['power' => '*', 'toughness' => '1+*']),
         ];
     }

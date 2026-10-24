@@ -294,3 +294,28 @@ describe('reducer — mulligan de Londres', () => {
     expect(JSON.stringify(v.players)).toBe(snapshot)
   })
 })
+
+describe('reducer — shocklands, fetchlands et PV payés', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const card = (id: string, name: string): PublicCard => ({ id, name, type: 'land', cost: 0, effect: null, amount: 0 })
+
+  it('terrain engagé à l\'arrivée, terrain cherché, mélange et PV payés en valeurs absolues', () => {
+    const start = events.find((e) => e.type === 'GameStarted')!
+    let v = replay(events, start.seq)
+    const pl = v.players[0]
+    pl.hand.push({ ...card('vents', 'Steam Vents'), tapped: false })
+    let seq = start.seq
+    v = applyEvent(v, ev(++seq, 'LandPlayed', { player: 0, card: card('vents', 'Steam Vents'), tapped: true }))
+    expect(v.players[0].battlefield.find((c) => c.id === 'vents')?.tapped).toBe(true)
+    expect(v.players[0].hand.some((c) => c.id === 'vents')).toBe(false)
+
+    v = applyEvent(v, ev(++seq, 'LifePaid', { player: 0, amount: 1, life: 39, source: 'Polluted Delta' }))
+    v = applyEvent(v, ev(++seq, 'LandFetched', { player: 0, card: card('grave', 'Watery Grave'), library: 80 }))
+    v = applyEvent(v, ev(++seq, 'LifePaid', { player: 0, amount: 2, life: 37, source: 'Watery Grave' }))
+    v = applyEvent(v, ev(++seq, 'LibraryShuffled', { player: 0, library: 80 }))
+    const after = v.players[0]
+    expect(after.life).toBe(37)
+    expect(after.library).toBe(80)
+    expect(after.battlefield.find((c) => c.id === 'grave')?.tapped).toBe(false)
+  })
+})

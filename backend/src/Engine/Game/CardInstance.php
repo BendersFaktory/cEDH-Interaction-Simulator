@@ -93,6 +93,8 @@ final class CardInstance
         public readonly array $supertypes = [],
         /** @var list<SpellEffect> effets du sort dans l'ordre (remplace `effect` / `amount` / `adds` s'il est non vide) */
         array $effects = [],
+        /** PV à payer en arrivant pour ne pas arriver engagé (shockland : 2) ; 0 = terrain ordinaire */
+        public readonly int $untappedLifeCost = 0,
     ) {
         $this->effects = SpellEffect::assertList($effects !== [] ? $effects : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]), $name);
         $this->types = is_array($type) ? array_values($type) : [$type];
@@ -257,10 +259,20 @@ final class CardInstance
             return $this->abilities;
         }
 
-        return [...array_map(
-            static fn (string $symbol) => ActivatedAbility::mana('{' . $symbol . '}'),
-            $this->produces === [] ? ['C'] : $this->produces,
-        ), ...$this->abilities];
+        // Sans `produces`, un terrain de démo donne {C} (Kher Keep ; Eldrazi Temple, dont la capacité propre est restreinte).
+        // Pas un terrain chargé depuis Scryfall qui a sa propre capacité de mana libre (Ancient Tomb : seulement {C}{C} avec
+        // dégâts), ni une fetchland, qui ne produit aucun mana.
+        $produces = $this->produces;
+        if ($produces === []) {
+            $produces = ['C'];
+            foreach ($this->abilities as $ability) {
+                if ($ability->effect === 'fetch' || ($ability->isManaAbility && $ability->restrictions === [])) {
+                    $produces = [];
+                }
+            }
+        }
+
+        return [...array_map(static fn (string $symbol) => ActivatedAbility::mana('{' . $symbol . '}'), $produces), ...$this->abilities];
     }
 
     /** Force actuelle (bonus du tour compris). */
@@ -320,7 +332,8 @@ final class CardInstance
             + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]) // idem
             + ($this->keywords === [] ? [] : ['keywords' => $this->keywords]) // idem
             + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]) // idem
-            + (count($this->effects) > 1 ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []); // idem
+            + (count($this->effects) > 1 ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []) // idem
+            + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []); // idem
     }
 
     public function toArray(): array
@@ -362,6 +375,7 @@ final class CardInstance
             $d['keywords'] ?? [],
             $d['supertypes'] ?? [],
             array_map([SpellEffect::class, 'fromArray'], $d['effects'] ?? []),
+            (int) ($d['untappedLifeCost'] ?? 0),
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);

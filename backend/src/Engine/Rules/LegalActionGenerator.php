@@ -76,7 +76,14 @@ final class LegalActionGenerator
             foreach ($p->hand as $card) {
                 if ($card->isLand() && !isset($seen[$card->name])) {
                     $seen[$card->name] = true;
-                    $actions[] = new PlayLand($playerId, $card->id);
+                    if ($card->untappedLifeCost === 0) {
+                        $actions[] = new PlayLand($playerId, $card->id);
+                        continue;
+                    }
+                    if ($p->life >= $card->untappedLifeCost) {
+                        $actions[] = new PlayLand($playerId, $card->id, true);
+                    }
+                    $actions[] = new PlayLand($playerId, $card->id, false);
                 }
             }
         }
@@ -140,9 +147,11 @@ final class LegalActionGenerator
                     continue;
                 }
                 $options = $ability->isManaAbility ? array_keys($ability->options) : [0];
-                $targetSets = $ability->effect === 'damage'
-                    ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
-                    : [[]];
+                $targetSets = match ($ability->effect) {
+                    'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
+                    'fetch' => self::fetchTargets($p, $ability),
+                    default => [[]],
+                };
                 foreach (AbilityManager::costChoices($p, $card, $ability) as $choices) {
                     $names = implode(',', array_map(static fn (CardInstance $c) => $c->name, $choices));
                     $ids = array_map(static fn (CardInstance $c) => $c->id, $choices);
@@ -416,5 +425,31 @@ final class LegalActionGenerator
             'counter' => array_map(static fn ($item) => ['stack:' . $item->id], array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility()))),
             default => [[]],
         };
+    }
+
+    /**
+     * Cibles d'une fetchland : un terrain de la bibliothèque qui convient, dédoublonné par nom (`library:<id>`), suivi de `life`
+     * pour une shockland dont on paie les PV ; `library:none` si rien ne convient (chercher sans trouver est permis).
+     *
+     * @return list<list<string>>
+     */
+    private static function fetchTargets(PlayerState $p, \App\Engine\Ability\ActivatedAbility $ability): array
+    {
+        $out = [];
+        $seen = [];
+        $tapped = $ability->fetchSpec()['tapped'];
+        foreach ($p->library as $card) {
+            if (isset($seen[$card->name]) || !$ability->fetches($card)) {
+                continue;
+            }
+            $seen[$card->name] = true;
+            // Shockland cherchée : payer ses PV (s'il en reste assez après le coût de la fetchland) ou l'avoir engagée.
+            if (!$tapped && $card->untappedLifeCost > 0 && $p->life - $ability->lifeCost >= $card->untappedLifeCost) {
+                $out[] = ['library:' . $card->id, 'life'];
+            }
+            $out[] = ['library:' . $card->id];
+        }
+
+        return $out === [] ? [['library:none']] : $out;
     }
 }

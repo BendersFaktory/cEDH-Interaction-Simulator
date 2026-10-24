@@ -162,14 +162,18 @@ final class PlayerState
      * Les sources dont le coût inclut un sacrifice (Treasure) restent engagées sur le champ de bataille : l'appelant les
      * sacrifie aussitôt avec `GameState::sacrifice($joueur, $result['sacrifice'])`.
      *
-     * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>, sacrifice: list<string>}
-     *         ids engagés, mana produit par les activations, mana pris dans la réserve préexistante, ids à sacrifier
+     * Les PV payés et les dégâts que s'infligent les sources (`lifeCost`, `selfDamage`) ne sont PAS appliqués ici : l'appelant
+     * les applique avec `GameState::hurtByMana($joueur, $result['pain'])` (événements à valeurs absolues).
+     *
+     * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>, sacrifice: list<string>, pain: list<array{source: string, lifeCost: int, selfDamage: int}>}
+     *         ids engagés, mana produit par les activations, mana pris dans la réserve préexistante, ids à sacrifier, blessures
      */
     public function payWithPlan(ManaPlan $plan): array
     {
         $tapped = [];
         $paid = [];
         $sacrifice = [];
+        $pain = [];
         foreach ($plan->taps as ['card' => $cardId, 'ability' => $abilityIndex, 'option' => $option]) {
             $card = $this->findOnBattlefield($cardId);
             $ability = $card?->abilities()[$abilityIndex] ?? null;
@@ -181,6 +185,9 @@ final class PlayerState
             }
             if ($ability->sacrifice) {
                 $sacrifice[] = $cardId;
+            }
+            if ($ability->lifeCost > 0 || $ability->selfDamage > 0) {
+                $pain[] = ['source' => $card->name, 'lifeCost' => $ability->lifeCost, 'selfDamage' => $ability->selfDamage];
             }
             foreach ($this->activateManaSource($card, $ability, $option) as $symbol => $n) {
                 $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
@@ -228,7 +235,7 @@ final class PlayerState
             }
         }
 
-        return ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice];
+        return ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain];
     }
 
     public function findOnBattlefield(string $cardId): ?CardInstance

@@ -229,6 +229,57 @@ final class GameState
      * Seul chemin d'entrée sur le champ de bataille (sort résolu, terrain joué, jeton créé) : note le tour d'arrivée (mal
      * d'invocation) et met en file les triggers `etb` de la carte. L'appelant journalise.
      */
+    /**
+     * Met un terrain sur le champ de bataille (joué depuis la main, ou cherché par une fetchland) et émet `$event` (`LandPlayed`
+     * ou `LandFetched`) avec `tapped: true` s'il arrive engagé. Shockland (`untappedLifeCost`) : « en arrivant, vous pouvez payer
+     * N PV ; sinon il arrive engagé » ; `$payLife` porte le choix (payé seulement s'il reste assez de PV, CR 119.4).
+     */
+    public function putLandOntoBattlefield(int $playerId, CardInstance $card, ?bool $payLife, string $event, bool $tapped = false): void
+    {
+        $pays = $card->untappedLifeCost > 0 && $payLife === true && $this->player($playerId)->life >= $card->untappedLifeCost;
+        $tapped = $tapped || ($card->untappedLifeCost > 0 && !$pays);
+        $card->tapped = $tapped;
+        $this->enterBattlefield($playerId, $card);
+        $this->emit($event, ['player' => $playerId, 'card' => $card->toPublic()] + ($tapped ? ['tapped' => true] : [])
+            + ($event === 'LandFetched' ? ['library' => count($this->player($playerId)->library)] : []));
+        if ($pays) {
+            $this->payLife($playerId, $card->untappedLifeCost, $card->name);
+        }
+    }
+
+    /** Payer des PV (coût : Mana Confluence, fetchland, shockland) : `LifePaid` avec les PV résultants. */
+    public function payLife(int $playerId, int $amount, string $source): void
+    {
+        $p = $this->player($playerId);
+        $p->life -= $amount;
+        $this->emit('LifePaid', ['player' => $playerId, 'amount' => $amount, 'life' => $p->life, 'source' => $source]);
+    }
+
+    /** Dégâts qu'une source inflige à son propre contrôleur (Ancient Tomb, Talismans) : `DamageDealt` vers lui. */
+    public function damageSelf(int $playerId, int $amount, string $source): void
+    {
+        $p = $this->player($playerId);
+        $p->life -= $amount;
+        $this->emit('DamageDealt', ['source' => $source, 'target' => 'player:' . $playerId, 'amount' => $amount, 'life' => $p->life]);
+    }
+
+    /**
+     * Applique les blessures d'un paiement (`PlayerState::payWithPlan()['pain']`) : PV payés puis dégâts, source par source.
+     *
+     * @param list<array{source: string, lifeCost: int, selfDamage: int}> $pain
+     */
+    public function hurtByMana(int $playerId, array $pain): void
+    {
+        foreach ($pain as ['source' => $source, 'lifeCost' => $life, 'selfDamage' => $damage]) {
+            if ($life > 0) {
+                $this->payLife($playerId, $life, $source);
+            }
+            if ($damage > 0) {
+                $this->damageSelf($playerId, $damage, $source);
+            }
+        }
+    }
+
     public function enterBattlefield(int $playerId, CardInstance $card): void
     {
         $card->enteredTurn = $this->turn;

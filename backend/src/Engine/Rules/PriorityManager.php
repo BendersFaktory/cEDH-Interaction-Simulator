@@ -146,9 +146,8 @@ final class PriorityManager
     {
         $p = $s->player($a->player());
         $card = $p->takeFromHand($a->cardId) ?? throw new IllegalActionException('Terrain absent de la main');
-        $s->enterBattlefield($a->player(), $card);
         $s->landsPlayed++;
-        $s->emit('LandPlayed', ['player' => $a->player(), 'card' => $card->toPublic()]);
+        $s->putLandOntoBattlefield($a->player(), $card, $a->payLife, 'LandPlayed');
     }
 
     private function cast(GameState $s, CastSpell $a): void
@@ -169,7 +168,7 @@ final class PriorityManager
             $card = $p->takeFromCommand($a->cardId);
             $fromCommand = true;
         }
-        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice] = $p->payWithPlan($plan);
+        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain] = $p->payWithPlan($plan);
         if ($fromCommand) {
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
@@ -193,6 +192,7 @@ final class PriorityManager
             'fromCommand' => $fromCommand,
         ]);
         $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût
+        $s->hurtByMana($a->player(), $pain);     // Ancient Tomb, Talismans, Mana Confluence
         // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
         $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);
 

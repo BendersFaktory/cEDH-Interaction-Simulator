@@ -47,6 +47,9 @@ use App\Engine\Mana\ManaPayment;
  */
 final class HeuristicAgent implements PlayerAgent
 {
+    /** PV au-dessus desquels l'IA paie une shockland plutôt que de l'avoir engagée. */
+    private const SHOCK_LIFE_FLOOR = 10;
+
     /**
      * @param int  $counterThreshold menace minimale d'un sort adverse pour le contrer (voir `threat`)
      * @param int  $hugeThreat       valeur d'un de mes sorts pour le lancer malgré la réserve de contresort
@@ -112,7 +115,15 @@ final class HeuristicAgent implements PlayerAgent
 
         foreach ($legal as $action) {
             if ($action instanceof PlayLand) {
-                return $action;
+                return $this->landVariant($state, $playerId, $action, $legal);
+            }
+        }
+
+        // Fetchland : dès sa propre phase principale, pile vide, pour avoir le terrain cherché à temps (jamais « sans rien trouver »).
+        if ($top === null && $state->activePlayer === $playerId && $state->phase->isMain()) {
+            $fetch = $this->fetchAction($state, $playerId, $legal);
+            if ($fetch !== null) {
+                return $fetch;
             }
         }
 
@@ -183,6 +194,87 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return AutoPassAgent::pass($legal, $playerId);
+    }
+
+    /**
+     * Shockland : payer les PV (variante `payLife: true`) tant qu'il en reste plus de `SHOCK_LIFE_FLOOR`, sinon l'avoir engagée.
+     * Terrain ordinaire : l'action telle quelle.
+     *
+     * @param list<Action> $legal
+     */
+    private function landVariant(GameState $state, int $playerId, PlayLand $first, array $legal): PlayLand
+    {
+        if ($first->payLife === null) {
+            return $first;
+        }
+        $pay = $state->player($playerId)->life > self::SHOCK_LIFE_FLOOR;
+        foreach ($legal as $action) {
+            if ($action instanceof PlayLand && $action->cardId === $first->cardId && $action->payLife === $pay) {
+                return $action;
+            }
+        }
+
+        return $first;
+    }
+
+    /**
+     * Fetchland à activer : le terrain cherché qui apporte le plus de couleurs que ses terrains ne produisent pas encore, sinon
+     * le premier ; une shockland cherchée n'est payée qu'au-dessus de `SHOCK_LIFE_FLOOR`. Rien si la recherche ne trouverait
+     * rien, ou si les PV sont trop bas pour payer le coût sans risque.
+     *
+     * @param list<Action> $legal
+     */
+    private function fetchAction(GameState $state, int $playerId, array $legal): ?ActivateAbility
+    {
+        $p = $state->player($playerId);
+        $produced = [];
+        foreach ($p->battlefield as $card) {
+            if ($card->isLand()) {
+                foreach (self::colorsProduced($card) as $symbol) {
+                    $produced[$symbol] = true;
+                }
+            }
+        }
+        $best = null;
+        foreach ($legal as $action) {
+            $ability = $action instanceof ActivateAbility ? $this->ability($state, $action) : null;
+            if ($ability?->effect !== 'fetch' || $action->targets === ['library:none'] || $p->life <= $ability->lifeCost + self::SHOCK_LIFE_FLOOR / 2) {
+                continue;
+            }
+            $land = null;
+            foreach ($p->library as $c) {
+                if ('library:' . $c->id === $action->targets[0]) {
+                    $land = $c;
+                }
+            }
+            if ($land === null) {
+                continue;
+            }
+            if ($land->untappedLifeCost > 0 && in_array('life', $action->targets, true) !== ($p->life - $ability->lifeCost > self::SHOCK_LIFE_FLOOR)) {
+                continue;
+            }
+            $new = count(array_diff(self::colorsProduced($land), array_keys($produced)));
+            if ($best === null || $new > $best[1]) {
+                $best = [$action, $new];
+            }
+        }
+
+        return $best[0] ?? null;
+    }
+
+    /** @return list<string> couleurs (lettres) que produisent les capacités de mana d'une carte */
+    private static function colorsProduced(CardInstance $card): array
+    {
+        $out = [];
+        foreach ($card->abilities() as $a) {
+            foreach ($a->options as $option) {
+                foreach ($option as $color) {
+                    $out[$color->symbol()] = true;
+                }
+            }
+        }
+
+        return array_keys($out);
     }
 
     private function ability(GameState $state, ActivateAbility $a): ?ActivatedAbility

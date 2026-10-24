@@ -73,6 +73,7 @@ final class CardMapper
         }
 
         $effects = [];
+        $untappedLifeCost = 0;
         $produces = [];
         $abilities = [];
         $triggers = [];
@@ -94,6 +95,10 @@ final class CardMapper
                 $effects[] = new SpellEffect('mana', 0, $m[1]);
             } elseif ($isSpell && preg_match('/^Draw (a card|one card|two cards|three cards|four cards)\.$/', $line, $m)) {
                 $effects[] = new SpellEffect('draw', self::DRAW_COUNT[$m[1]]);
+            } elseif (!$isSpell && preg_match('/^\{T\}: Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\. ~ deals (\d+) damage to you\.$/', $line, $m)) {
+                $abilities[] = ActivatedAbility::mana(implode('|', explode(' or ', $m[1])), null, (int) $m[2]); // Ancient Tomb, Talismans, pain lands
+            } elseif ($isLand && preg_match("/^As ~ enters, you may pay (\\d+) life\\. If you don't, it enters tapped\\.$/", $line, $m)) {
+                $untappedLifeCost = (int) $m[1]; // shockland
             } elseif (!$isSpell && preg_match('/^\{T\}: Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\.$/', $line, $m)) {
                 $options = explode(' or ', $m[1]);
                 if ($isLand && count(array_filter($options, static fn (string $o) => strlen($o) > 3)) === 0) {
@@ -125,7 +130,7 @@ final class CardMapper
         return new CardDefinition(
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
             null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
-            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail),
+            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost,
         );
     }
 
@@ -183,17 +188,20 @@ final class CardMapper
      */
     private function activated(string $line): ?ActivatedAbility
     {
-        if (!preg_match('/^((?:\{[^}]+\}|Sacrifice ~)(?:, (?:\{[^}]+\}|Sacrifice ~))*): (.+)$/', $line, $m)) {
+        if (!preg_match('/^((?:\{[^}]+\}|Sacrifice ~|Pay \d+ life)(?:, (?:\{[^}]+\}|Sacrifice ~|Pay \d+ life))*): (.+)$/', $line, $m)) {
             return null;
         }
         $tap = false;
         $sacrifice = false;
+        $life = 0;
         $cost = '';
         foreach (explode(', ', $m[1]) as $part) {
             if ($part === '{T}') {
                 $tap = true;
             } elseif ($part === 'Sacrifice ~') {
                 $sacrifice = true;
+            } elseif (preg_match('/^Pay (\d+) life$/', $part, $l)) {
+                $life = (int) $l[1];
             } elseif (preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $part)) {
                 $cost .= $part;
             } else {
@@ -201,14 +209,22 @@ final class CardMapper
             }
         }
         $cost = $cost === '' ? null : $cost;
+        if ($tap && $sacrifice && $cost === null
+            && preg_match('/^Search your library for (?:a (basic) land card|an? ([A-Z][a-z]+) or ([A-Z][a-z]+) card), put (?:it|that card) onto the battlefield( tapped)?, then shuffle\.$/', $m[2], $f)) {
+            // Fetchland (Polluted Delta, Prismatic Vista) ou Evolving Wilds (terrain de base, engagé).
+            return ActivatedAbility::fetch($f[1] === 'basic' ? 'basic' : $f[2] . '|' . $f[3], ($f[4] ?? '') !== '', $life);
+        }
+        if ($life > 0 && !($tap && !$sacrifice && $cost === null && str_starts_with($m[2], 'Add '))) {
+            return null; // PV payés : seulement pour une fetchland ou `{T}, Pay N life: Add …` (Mana Confluence)
+        }
         if (preg_match('/^Draw (a card|one card|two cards|three cards|four cards)\.$/', $m[2], $d)) {
             return ActivatedAbility::draw(self::DRAW_COUNT[$d[1]], $cost, $tap, $sacrifice);
         }
         if ($tap && $sacrifice && $cost === null && $m[2] === 'Add ' . self::ANY_COLOR . '.') {
             return ActivatedAbility::treasure(); // Lotus Petal : {T}, sacrifier : un mana de la couleur de son choix
         }
-        if ($tap && !$sacrifice && $cost !== null && preg_match('/^Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\.$/', $m[2], $a)) {
-            return ActivatedAbility::mana(implode('|', explode(' or ', $a[1])), $cost);
+        if ($tap && !$sacrifice && ($cost !== null || $life > 0) && preg_match('/^Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\.$/', $m[2], $a)) {
+            return ActivatedAbility::mana(implode('|', explode(' or ', $a[1])), $cost, 0, $life); // Signet ; Mana Confluence
         }
 
         return null;

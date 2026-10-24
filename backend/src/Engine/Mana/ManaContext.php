@@ -130,6 +130,12 @@ final class ManaContext
                     || !AbilityManager::sourceReady($card, $ability, $this->turn)) {
                     continue;
                 }
+                // Source qui blesse (PV payés ou dégâts à soi) : jamais si elle ferait tomber son contrôleur à 0 PV ou moins
+                // (et un coût en PV exige ces PV, CR 119.4) ; sinon comptée comme un sacrifice, en dernier recours.
+                $hurt = $ability->lifeCost + $ability->selfDamage;
+                if ($hurt > 0 && $this->p->life <= $hurt) {
+                    continue;
+                }
                 $withCost = $ability->manaCost !== null;
                 if ($withCost && ($ability->manaCost->hybrid !== [] || $ability->manaCost->x > 0)) {
                     continue;
@@ -145,7 +151,7 @@ final class ManaContext
                         continue;
                     }
                     $first = $ability->options[$oi][0]->symbol();
-                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice ? 1 : 0, 'rk' => $restriction?->kind];
+                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice || $hurt > 0 ? 1 : 0, 'rk' => $restriction?->kind];
                     if ($withCost) {
                         $choice['cost'] = $ability->manaCost;
                         $choice['costTotal'] = $ability->manaCost->manaValue();

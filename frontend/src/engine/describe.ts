@@ -29,7 +29,13 @@ export function describeEvent(e: GameEvent): string {
     case 'PriorityPassed':
       return `J${p.player} passe`
     case 'LandPlayed':
-      return `J${p.player} joue ${p.card.name}`
+      return `J${p.player} joue ${p.card.name}${p.tapped ? ' (engagé)' : ''}`
+    case 'LandFetched':
+      return `J${p.player} cherche ${p.card.name}${p.tapped ? ' (engagé)' : ''}`
+    case 'LibraryShuffled':
+      return `J${p.player} mélange sa bibliothèque (${p.library} cartes)`
+    case 'LifePaid':
+      return `J${p.player} paie ${p.amount} PV (${p.source}) → ${p.life}`
     case 'SpellCast': {
       const t = (p.targets as string[]).map(target).join(', ')
       const from = p.fromCommand ? ' depuis la zone de commandement' : ''

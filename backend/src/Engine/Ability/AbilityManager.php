@@ -19,8 +19,9 @@ use App\Engine\Mana\ManaPlan;
  * immédiatement (règle 605 : ni pile, ni nouvelle ronde, la priorité reste au joueur) ; toute autre capacité
  * va sur la pile et remet les passes à zéro.
  *
- * Coûts payés à l'activation, dans cet ordre : mana (les autres sources), {T}, défausse, sacrifices. Les événements
- * de coût (`CardDiscarded`, `PermanentSacrificed`) suivent l'événement d'activation.
+ * Coûts payés à l'activation, dans cet ordre : mana (les autres sources), {T}, défausse, sacrifices, PV. Les événements
+ * de coût (`CardDiscarded`, `PermanentSacrificed`, `LifePaid`) suivent l'événement d'activation, puis les dégâts qu'une
+ * capacité de mana inflige à son contrôleur (`DamageDealt`, Ancient Tomb).
  */
 final class AbilityManager
 {
@@ -39,6 +40,9 @@ final class AbilityManager
         }
         if (self::costChoices($p, $card, $ability) === []) {
             return false;
+        }
+        if ($ability->lifeCost > $p->life) {
+            return false; // on ne peut payer que des PV qu'on a (CR 119.4)
         }
         if ($ability->manaCost !== null && self::costPlan($s, $p, $card, $ability, $mana) === null) {
             return false;
@@ -136,9 +140,14 @@ final class AbilityManager
         // Mana : payé par les autres sources (Signet, Mind Stone) ; elles sont journalisées dans `tapped`.
         $payers = [];
         $sacrifice = [];
+        $pain = [];
         if ($ability->manaCost !== null) {
             $plan = self::costPlan($s, $p, $card, $ability) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
-            ['tapped' => $payers, 'sacrifice' => $sacrifice] = $p->payWithPlan($plan);
+            ['tapped' => $payers, 'sacrifice' => $sacrifice, 'pain' => $pain] = $p->payWithPlan($plan);
+        }
+        // PV payés à l'activation (fetchland, Mana Confluence), et dégâts d'une capacité de mana à elle-même (Ancient Tomb).
+        if ($ability->lifeCost > 0 || ($ability->isManaAbility && $ability->selfDamage > 0)) {
+            $pain[] = ['source' => $card->name, 'lifeCost' => $ability->lifeCost, 'selfDamage' => $ability->isManaAbility ? $ability->selfDamage : 0];
         }
         $tapped = [...($ability->tap ? [$card->id] : []), ...$payers];
         if ($ability->sacrifice) {
@@ -162,6 +171,7 @@ final class AbilityManager
                 'pool' => $p->pool->toArray(),
             ] + $p->pool->restrictedField(), verbose: true);
             self::payCardCosts($s, $a->player(), $discard, $sacrifice);
+            $s->hurtByMana($a->player(), $pain);
 
             return; // résolue sur-le-champ : la pile et les passes ne sont pas touchées
         }
@@ -183,6 +193,7 @@ final class AbilityManager
             'tapped' => $tapped,
         ]);
         self::payCardCosts($s, $a->player(), $discard, $sacrifice);
+        $s->hurtByMana($a->player(), $pain);
 
         $s->priority->passed = [];
         $s->priority->announced = false; // l'activateur reçoit la priorité en premier

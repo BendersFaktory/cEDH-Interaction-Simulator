@@ -57,8 +57,20 @@ final class ActivateAbility implements Action
             }
             $label .= ' en ' . ($ability?->sacrificeCreature ? 'sacrifiant ' : 'défaussant ') . implode(', ', $names);
         }
-        if ($this->targets !== []) {
-            $label .= ' → joueur ' . substr($this->targets[0], 7);
+        $target = $this->targets[0] ?? null;
+        if ($target !== null && str_starts_with($target, 'library:')) {
+            // Fetchland : le terrain cherché (et, pour une shockland, si on paie ses PV).
+            $id = substr($target, 8);
+            $found = null;
+            foreach ($state->player($this->player)->library as $c) {
+                if ($c->id === $id) {
+                    $found = $c;
+                }
+            }
+            $label .= $id === 'none' ? ' → rien à chercher' : ' → ' . ($found?->name ?? $id)
+                . (in_array('life', $this->targets, true) ? " (payer {$found?->untappedLifeCost} PV)" : ($found?->untappedLifeCost ? ' (engagé)' : ''));
+        } elseif ($target !== null) {
+            $label .= ' → joueur ' . substr($target, 7);
         }
 
         return 'Activer ' . $label;
