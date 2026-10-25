@@ -68,6 +68,8 @@ final class StackResolver
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
                 'exile' => $this->exileTarget($s, $item->targets[0] ?? '', $effect, $card->name),
+                'tutor' => $this->tutor($s, $item->controller, $item->targets[0] ?? ''),
+                'scry' => null, // rangement déjà décidé avant la résolution (PriorityManager::scry)
             };
         }
     }
@@ -125,6 +127,24 @@ final class StackResolver
         }
         $p->library = $s->rng->shuffle($p->library);
         $s->emit('LibraryShuffled', ['player' => $player, 'library' => count($p->library)]);
+    }
+
+    /** Tuteur (CR 701.19) : la carte cherchée va en main, la bibliothèque est mélangée (`CardTutored`, `LibraryShuffled`). */
+    private function tutor(GameState $s, int $player, string $target): void
+    {
+        $p = $s->player($player);
+        $id = substr($target, strlen('library:'));
+        foreach ($p->library as $i => $card) {
+            if ($card->id === $id) {
+                array_splice($p->library, $i, 1);
+                $p->hand[] = $card;
+                $p->library = $s->rng->shuffle($p->library);
+                $s->emit('CardTutored', ['player' => $player, 'card' => $card->toPublic(), 'library' => count($p->library)]);
+                $s->emit('LibraryShuffled', ['player' => $player, 'library' => count($p->library)]);
+
+                return;
+            }
+        }
     }
 
     /** Pioche : une bibliothèque vide fait perdre le joueur à la prochaine vérification des SBA (CR 704.5b). */

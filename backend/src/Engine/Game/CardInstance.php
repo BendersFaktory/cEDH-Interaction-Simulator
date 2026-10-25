@@ -25,6 +25,10 @@ final class CardInstance
     public const ARTIFACT = 'artifact';
     public const ENCHANTMENT = 'enchantment';
 
+    // Coûts alternatifs (`altCost`) : Force of Will (1 PV + exiler un bleu de la main), Fierce Guardianship (gratuit si commandant).
+    public const ALT_PITCH_BLUE = 'pitch_blue';
+    public const ALT_COMMANDER = 'commander';
+
     // Mots-clés de combat (CR 702).
     public const FLYING = 'flying';
     public const REACH = 'reach';
@@ -96,6 +100,7 @@ final class CardInstance
         array $effects = [],
         /** PV à payer en arrivant pour ne pas arriver engagé (shockland : 2) ; 0 = terrain ordinaire */
         public readonly int $untappedLifeCost = 0,
+        public readonly ?string $altCost = null, // coût alternatif (ALT_PITCH_BLUE | ALT_COMMANDER), null = coût de mana seul
     ) {
         $this->effects = SpellEffect::assertList($effects !== [] ? $effects : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]), $name);
         $this->types = is_array($type) ? array_values($type) : [$type];
@@ -154,6 +159,18 @@ final class CardInstance
     }
 
     /** Légendaire : soumis à la règle des légendes (CR 704.5j). */
+    /** Bleue : une de ses couleurs d'identité est le bleu (Force of Will exile une carte bleue de la main). */
+    public function isBlue(): bool
+    {
+        foreach ($this->colorIdentity() as $color) {
+            if ($color->symbol() === 'U') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function isLegendary(): bool
     {
         return in_array(self::LEGENDARY, $this->supertypes, true);
@@ -339,7 +356,8 @@ final class CardInstance
             + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]) // idem
             // `effects` à partir de deux, ou quand le premier porte une précision absente des clés historiques (`target`, `powerLife` d'un exil).
             + (count($this->effects) > 1 || ($this->effects[0] ?? null)?->isPrecise() === true ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []) // idem
-            + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []); // idem
+            + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []) // idem
+            + ($this->altCost === null ? [] : ['altCost' => $this->altCost]); // idem
     }
 
     public function toArray(): array
@@ -382,6 +400,7 @@ final class CardInstance
             $d['supertypes'] ?? [],
             array_map([SpellEffect::class, 'fromArray'], $d['effects'] ?? []),
             (int) ($d['untappedLifeCost'] ?? 0),
+            $d['altCost'] ?? null,
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);

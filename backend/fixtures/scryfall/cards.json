@@ -460,6 +460,53 @@
         "keywords": []
     },
     {
+        "name": "Delighted Halfling",
+        "layout": "normal",
+        "type_line": "Legendary Creature — Halfling",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "power": "1",
+        "toughness": "2",
+        "oracle_text": "{T}: Add {G}. Spend this mana only to cast a legendary spell.",
+        "keywords": []
+    },
+    {
+        "name": "Demonic Tutor",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{1}{B}",
+        "cmc": 2,
+        "oracle_text": "Search your library for a card, put that card into your hand, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Force of Will",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{3}{U}{U}",
+        "cmc": 5,
+        "oracle_text": "You may pay 1 life and exile a blue card from your hand rather than pay this spell's mana cost.\nCounter target spell.",
+        "keywords": []
+    },
+    {
+        "name": "Fierce Guardianship",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "If you control a commander, you may cast this spell without paying its mana cost.\nCounter target noncreature spell.",
+        "keywords": []
+    },
+    {
+        "name": "Preordain",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{U}",
+        "cmc": 1,
+        "oracle_text": "Scry 2, then draw a card.",
+        "keywords": []
+    },
+    {
         "name": "Ambush Viper",
         "layout": "normal",
         "type_line": "Creature — Snake",

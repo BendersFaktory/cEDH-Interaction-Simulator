@@ -46,6 +46,9 @@ final class GameState
      * ce choix. Sérialisé sous `sbaResume`, omis quand null.
      */
     public ?PriorityState $sbaResume = null;
+
+    /** Un sort avec Scry attend le rangement de son contrôleur (`ScryArrange`), avant sa résolution. Sérialisé, omis quand faux. */
+    public bool $scryPending = false;
     /**
      * Stops de l'auto-pass par joueur (voir StopConfig) ; un joueur absent garde le comportement par défaut. Sérialisé
      * sous la clé `stops`, omise quand le tableau est vide (ne gonfle pas les états des parties sans config).
@@ -194,6 +197,20 @@ final class GameState
         $this->player($ownerId)->exile[] = $card;
 
         return 'exile';
+    }
+
+    /** Exile une carte de la main de `$playerId` payée en coût alternatif (Force of Will) ; `CardExiled` avec `from: hand`. */
+    public function exileFromHand(int $playerId, CardInstance $card, string $source): void
+    {
+        $destination = $this->exile($playerId, $card);
+        $this->emit('CardExiled', [
+            'player' => $playerId,
+            'card' => $card->toPublic(),
+            'from' => 'hand',
+            'destination' => $destination,
+            'source' => $source,
+            'exile' => count($this->player($playerId)->exile),
+        ]);
     }
 
     /**
@@ -428,6 +445,9 @@ final class GameState
         if ($this->mulligan !== null) {
             $d['mulligan'] = $this->mulligan;
         }
+        if ($this->scryPending) {
+            $d['scryPending'] = true;
+        }
         if ($this->sbaResume !== null) {
             $d['sbaResume'] = $this->sbaResume->toArray();
         }
@@ -463,6 +483,7 @@ final class GameState
         $s->triggerResumeHolder = isset($d['triggerResumeHolder']) ? (int) $d['triggerResumeHolder'] : null;
         $s->cleanupRound = (bool) ($d['cleanupRound'] ?? false);
         $s->sbaResume = isset($d['sbaResume']) ? PriorityState::fromArray($d['sbaResume']) : null;
+        $s->scryPending = (bool) ($d['scryPending'] ?? false);
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];

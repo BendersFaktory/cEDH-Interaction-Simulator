@@ -15,6 +15,7 @@ use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\KeepHand;
 use App\Engine\Action\KeepLegend;
+use App\Engine\Action\ScryArrange;
 use App\Engine\Action\Mulligan;
 use App\Engine\Action\PlayLand;
 use App\Engine\Action\PutTrigger;
@@ -80,6 +81,9 @@ final class HeuristicAgent implements PlayerAgent
 
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
+        if ($state->scryPending) {
+            return $this->scryDecision($state, $playerId, $legal);
+        }
         if ($state->mulligan !== null) {
             return $this->mulliganDecision($state, $legal, $playerId);
         }
@@ -106,7 +110,7 @@ final class HeuristicAgent implements PlayerAgent
 
         if ($top !== null && $top->controller !== $playerId && $this->threat($state, $playerId, $top) >= $this->counterThreshold) {
             foreach ($legal as $action) {
-                if ($action instanceof CastSpell && $this->isCounter($state, $action)
+                if ($action instanceof CastSpell && $this->isCounter($state, $action) && !$this->isPitch($action)
                     && $action->targets === ['stack:' . $top->id]) {
                     return $action;
                 }
@@ -161,6 +165,7 @@ final class HeuristicAgent implements PlayerAgent
             foreach ($legal as $action) {
                 if ($action instanceof CastSpell
                     && !$this->isCounter($state, $action)
+                    && !$this->isPitch($action)
                     && !in_array('player:' . $playerId, $action->targets, true)) {
                     $casts[] = $action;
                 }
@@ -171,6 +176,7 @@ final class HeuristicAgent implements PlayerAgent
                 }
             }
             $casts = $this->bestExileTargets($state, $playerId, $casts);
+            $casts = $this->bestTutorTargets($state, $playerId, $casts);
             $casts = array_values(array_filter($casts, fn (CastSpell $c) => $this->worthCasting($state, $playerId, $c)));
             $casts = $this->keepCounterMana($state, $playerId, $casts);
             if ($casts !== []) {
@@ -302,6 +308,50 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return array_values(array_filter($casts, static fn (CastSpell $c) => !$isExile($c) || ($best[$c->cardId][0] ?? null) === $c));
+    }
+
+    /** Scry : garder sur le dessus les cartes qui ne sont pas des terrains (dans l'ordre), mettre les terrains dessous. */
+    private function scryDecision(GameState $state, int $playerId, array $legal): Action
+    {
+        $scries = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ScryArrange));
+        $count = $scries[0]->count;
+        $keep = [];
+        foreach (array_slice($state->player($playerId)->library, 0, $count) as $card) {
+            if (!$card->isLand()) {
+                $keep[] = $card->id;
+            }
+        }
+        foreach ($scries as $scry) {
+            if ($scry->kept === $keep) {
+                return $scry;
+            }
+        }
+
+        return $scries[0];
+    }
+
+    /** Tuteur : la carte de la bibliothèque la plus forte (`cardValue`) ; une seule cible par sort (la première à égalité). */
+    private function bestTutorTargets(GameState $state, int $playerId, array $casts): array
+    {
+        $isTutor = static fn (CastSpell $c) => $state->player($playerId)->findCastable($c->cardId)?->hasEffect('tutor') === true;
+        $best = [];
+        foreach ($casts as $c) {
+            if (!$isTutor($c)) {
+                continue;
+            }
+            $found = null;
+            foreach ($state->player($playerId)->library as $card) {
+                if ('library:' . $card->id === ($c->targets[0] ?? '')) {
+                    $found = $card;
+                }
+            }
+            $score = $found === null ? -1 : $this->cardValue($found, 0);
+            if (!isset($best[$c->cardId]) || $score > $best[$c->cardId][1]) {
+                $best[$c->cardId] = [$c, $score];
+            }
+        }
+
+        return array_values(array_filter($casts, static fn (CastSpell $c) => !$isTutor($c) || ($best[$c->cardId][0] ?? null) === $c));
     }
 
     /** @return array{0: int, 1: CardInstance}|null contrôleur et permanent visés par `permanent:<id>` */
@@ -1178,6 +1228,12 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return false;
+    }
+
+    /** Coût alternatif par exil d'une carte de la main (Force of Will) : l'IA ne le paie jamais (deux cartes pour une). */
+    private function isPitch(CastSpell $action): bool
+    {
+        return str_starts_with((string) $action->alt, CastSpell::ALT_PITCH);
     }
 
     private function isCounter(GameState $state, CastSpell $action): bool

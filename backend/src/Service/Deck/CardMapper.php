@@ -9,6 +9,7 @@ use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Card\CardDefinition;
 use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
+use App\Engine\Mana\ManaRestriction;
 
 /**
  * Carte Scryfall -> `CardDefinition`. Pas d'interprétation libre du texte Oracle : seuls des motifs connus sont reconnus
@@ -75,6 +76,7 @@ final class CardMapper
 
         $effects = [];
         $untappedLifeCost = 0;
+        $altCost = null; // coût alternatif de la carte (Force of Will, Fierce Guardianship)
         $produces = [];
         $abilities = [];
         $triggers = [];
@@ -91,6 +93,19 @@ final class CardMapper
                     throw $fail('dégâts X sans {X} dans le coût');
                 }
                 $effects[] = new SpellEffect('damage', $m[1] === 'X' ? 0 : (int) $m[1]);
+            } elseif ($isSpell && $line === 'You may pay 1 life and exile a blue card from your hand rather than pay ~\'s mana cost.') {
+                $altCost = CardInstance::ALT_PITCH_BLUE; // Force of Will
+            } elseif ($isSpell && $line === 'If you control a commander, you may cast ~ without paying its mana cost.') {
+                $altCost = CardInstance::ALT_COMMANDER; // Fierce Guardianship
+            } elseif ($isSpell && $line === 'Counter target noncreature spell.') {
+                $effects[] = new SpellEffect('counter', 0, null, 'noncreature');
+            } elseif ($isSpell && preg_match('/^Scry (\d+)\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('scry', (int) $m[1]);
+            } elseif ($isSpell && preg_match('/^Scry (\d+), then draw a card\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('scry', (int) $m[1]); // Preordain : le rangement précède la pioche
+                $effects[] = new SpellEffect('draw', 1);
+            } elseif ($isSpell && $line === 'Search your library for a card, put that card into your hand, then shuffle.') {
+                $effects[] = new SpellEffect('tutor'); // Demonic Tutor
             } elseif ($isSpell && $line === 'Create a Treasure token.') {
                 $effects[] = new SpellEffect('treasure');
             } elseif ($isSpell && $line === 'Counter target spell.') {
@@ -111,6 +126,8 @@ final class CardMapper
                 $abilities[] = ActivatedAbility::mana(implode('|', explode(' or ', $m[1])), null, (int) $m[2]); // Ancient Tomb, Talismans, pain lands
             } elseif ($isLand && preg_match("/^As ~ enters, you may pay (\\d+) life\\. If you don't, it enters tapped\\.$/", $line, $m)) {
                 $untappedLifeCost = (int) $m[1]; // shockland
+            } elseif (!$isSpell && preg_match('/^\{T\}: Add (\{[WUBRGC]\})\. Spend this mana only to cast a legendary spell\.$/', $line, $m)) {
+                $abilities[] = ActivatedAbility::mana($m[1] . '@' . ManaRestriction::LEGENDARY); // Delighted Halfling
             } elseif (!$isSpell && preg_match('/^\{T\}: Add ((?:\{[WUBRGC]\})+(?: or (?:\{[WUBRGC]\})+)*)\.$/', $line, $m)) {
                 $options = explode(' or ', $m[1]);
                 if ($isLand && count(array_filter($options, static fn (string $o) => strlen($o) > 3)) === 0) {
@@ -151,7 +168,7 @@ final class CardMapper
         return new CardDefinition(
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
             null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
-            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost,
+            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost, $altCost,
         );
     }
 

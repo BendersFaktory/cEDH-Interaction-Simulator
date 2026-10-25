@@ -16,12 +16,12 @@ use App\Engine\Game\CardInstance;
  */
 final class SpellEffect
 {
-    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile'];
-    public const TARGETED = ['damage', 'counter', 'exile'];
+    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry'];
+    public const TARGETED = ['damage', 'counter', 'exile', 'tutor'];
     /** Genres de permanents qu'un effet `exile` peut cibler. */
     public const PERMANENT_TARGETS = ['creature', 'permanent'];
     /** Types de sorts qu'un effet `counter` peut viser (`target`, alternatives séparées par `|`) ; null = tout sort (Counterspell). */
-    public const COUNTER_TARGETS = [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY];
+    public const COUNTER_TARGETS = [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY, 'noncreature'];
     /** Mots-clés qu'un jeton créé par un contresort peut recevoir (Swan Song : Bird 2/2 volant). */
     public const TOKEN_KEYWORDS = [CardInstance::FLYING];
 
@@ -73,6 +73,9 @@ final class SpellEffect
     {
         if ($this->target === null) {
             return true;
+        }
+        if ($this->target === 'noncreature') {
+            return !$card->isCreature(); // Fierce Guardianship
         }
         foreach (explode('|', $this->target) as $type) {
             if ($card->hasType($type)) {

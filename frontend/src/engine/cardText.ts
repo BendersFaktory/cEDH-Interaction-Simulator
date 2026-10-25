@@ -66,6 +66,10 @@ function effectText(effect: string, amount: number | undefined, spec?: string): 
       return `crée ${amount ?? 1} jeton ${(spec ?? '').replace(':', ' ')}`
     case 'treasure':
       return `crée ${amount ?? 1} Trésor`
+    case 'tutor':
+      return 'cherche une carte dans sa bibliothèque et la met en main'
+    case 'scry':
+      return `regarde les ${n} cartes du dessus et en range une partie dessous`
     case 'pump':
       return spec ?? 'bonus'
     default:

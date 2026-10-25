@@ -66,6 +66,36 @@ final class DeckLoaderTest extends TestCase
         self::assertSame([['effect' => 'counter']], array_map(static fn ($e) => $e->toArray(), self::map('Counterspell')->effects));
     }
 
+    public function testMapsDelightedHalflingLegendaryMana(): void
+    {
+        $halfling = self::map('Delighted Halfling');
+        self::assertContains(CardInstance::LEGENDARY, $halfling->supertypes);
+        self::assertCount(1, $halfling->abilities);
+        self::assertSame('legendary', $halfling->abilities[0]->restriction(0)?->kind);
+    }
+
+    public function testMapsPreordainScryThenDraw(): void
+    {
+        self::assertSame([['effect' => 'scry', 'amount' => 2], ['effect' => 'draw', 'amount' => 1]],
+            array_map(static fn ($e) => $e->toArray(), self::map('Preordain')->effects));
+    }
+
+    public function testMapsDemonicTutor(): void
+    {
+        self::assertSame([['effect' => 'tutor']], array_map(static fn ($e) => $e->toArray(), self::map('Demonic Tutor')->effects));
+    }
+
+    public function testMapsAlternativeCostCounters(): void
+    {
+        $fow = self::map('Force of Will');
+        self::assertSame(CardInstance::ALT_PITCH_BLUE, $fow->altCost);
+        self::assertSame([['effect' => 'counter']], array_map(static fn ($e) => $e->toArray(), $fow->effects));
+
+        $fierce = self::map('Fierce Guardianship');
+        self::assertSame(CardInstance::ALT_COMMANDER, $fierce->altCost);
+        self::assertSame([['effect' => 'counter', 'target' => 'noncreature']], array_map(static fn ($e) => $e->toArray(), $fierce->effects));
+    }
+
     public function testMapsSwanSongWithItsBirdToken(): void
     {
         $swanSong = self::map('Swan Song');

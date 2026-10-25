@@ -84,6 +84,30 @@ final class PlayerState
         return $this->findInHand($cardId) ?? $this->findInCommand($cardId);
     }
 
+    /** Contrôle-t-il un commandant sur le champ de bataille (Fierce Guardianship) ? */
+    public function controlsCommander(): bool
+    {
+        foreach ($this->battlefield as $card) {
+            if ($card->commander) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Carte de la main d'id `$cardId`, sans la retirer. */
+    public function findHand(string $cardId): ?CardInstance
+    {
+        foreach ($this->hand as $card) {
+            if ($card->id === $cardId) {
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
     public function takeFromHand(string $cardId): ?CardInstance
     {
         foreach ($this->hand as $i => $card) {

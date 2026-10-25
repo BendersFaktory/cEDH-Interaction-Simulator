@@ -27,7 +27,8 @@ final class ManaContext
     /** @var array<string, array<string, int>>|null */
     private ?array $restrictedPool = null;
 
-    public function __construct(private readonly PlayerState $p, private readonly ?int $turn)
+    /** @param bool $spell false : le paiement sert une capacité (`ManaRestriction::allows()` sans sort) */
+    public function __construct(private readonly PlayerState $p, private readonly ?int $turn, private readonly bool $spell = true)
     {
     }
 
@@ -47,7 +48,7 @@ final class ManaContext
         $this->restrictedPool ??= $this->p->pool->restrictedToArray();
         $out = [];
         foreach ($this->restrictedPool as $kind => $amounts) {
-            if ((new ManaRestriction($kind))->allows($for)) {
+            if ((new ManaRestriction($kind))->allows($for, $this->spell)) {
                 $out[$kind] = $amounts;
             }
         }
@@ -75,7 +76,7 @@ final class ManaContext
             }
             $choices = [];
             foreach ($s['choices'] as $i => $choice) {
-                if ($s['restr'][$i] === null || $s['restr'][$i]->allows($for)) {
+                if ($s['restr'][$i] === null || $s['restr'][$i]->allows($for, $this->spell)) {
                     $choices[] = $choice;
                 }
             }

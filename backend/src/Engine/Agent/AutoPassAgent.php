@@ -10,6 +10,7 @@ use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\KeepHand;
 use App\Engine\Action\KeepLegend;
+use App\Engine\Action\ScryArrange;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Game\GameState;
@@ -41,7 +42,7 @@ final class AutoPassAgent implements PlayerAgent
         // Défausse obligatoire / trigger à poser / légende à garder / avant-partie (garder la main, puis la première carte au fond) :
         // le premier choix proposé (déterministe). Jamais de mulligan.
         foreach ($legal as $action) {
-            if ($action instanceof Discard || $action instanceof PutTrigger || $action instanceof KeepLegend || $action instanceof KeepHand || $action instanceof BottomCard) {
+            if ($action instanceof Discard || $action instanceof PutTrigger || $action instanceof KeepLegend || $action instanceof KeepHand || $action instanceof BottomCard || $action instanceof ScryArrange) {
                 return $action;
             }
         }

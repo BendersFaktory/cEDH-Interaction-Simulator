@@ -133,6 +133,18 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'Scried':
+      // Le rangement ne change que la taille de la bibliothèque côté public (le dessus n'est visible que de son contrôleur).
+      v.players[p.player].library = p.library
+      break
+
+    case 'CardTutored': {
+      const pl = v.players[p.player]
+      pl.hand.push(board(p.card))
+      pl.library = p.library
+      break
+    }
+
     case 'LibraryShuffled':
       v.players[p.player].library = p.library
       break
@@ -264,9 +276,9 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     }
 
     case 'CardExiled': {
-      // Champ de bataille → exil (`none` : un jeton cesse d'exister).
+      // Champ de bataille (ou main, coût alternatif de Force of Will) → exil (`none` : un jeton cesse d'exister).
       const pl = v.players[p.player]
-      removeCard(pl.battlefield, p.card.id)
+      removeCard(p.from === 'hand' ? pl.hand : pl.battlefield, p.card.id)
       zoneOf(pl, p.destination)?.push(board(p.card))
       break
     }

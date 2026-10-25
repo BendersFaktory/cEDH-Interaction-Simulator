@@ -33,6 +33,10 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} joue ${p.card.name}${p.tapped ? ' (engagé)' : ''}`
     case 'LandFetched':
       return `J${p.player} cherche ${p.card.name}${p.tapped ? ' (engagé)' : ''}`
+    case 'Scried':
+      return `J${p.player} range ${p.top + p.bottom} cartes du dessus (${p.top} dessus, ${p.bottom} dessous)`
+    case 'CardTutored':
+      return `J${p.player} cherche ${p.card.name} dans sa bibliothèque`
     case 'LibraryShuffled':
       return `J${p.player} mélange sa bibliothèque (${p.library} cartes)`
     case 'LifePaid':

@@ -11,8 +11,10 @@ use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\ScryArrange;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Decision\IllegalActionException;
+use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PriorityState;
 use App\Engine\Mana\ManaPayment;
@@ -109,10 +111,55 @@ final class PriorityManager
                 continue;
             }
 
+            if ($action instanceof ScryArrange) {
+                $s->scryPending = false;
+                $this->scry($s, $action);
+                $this->resolveStack($s);
+                continue;
+            }
+
             throw new \LogicException('Action non gérée : ' . $action::class);
         }
 
         throw new \LogicException('Boucle de priorité sans fin (garde-fou).');
+    }
+
+    /** Le sommet de pile est un sort avec Scry et son contrôleur a de quoi ranger (sinon rien à décider). */
+    private function scryDue(GameState $s): bool
+    {
+        $top = $s->stack[array_key_last($s->stack)];
+
+        return !$top->isAbility() && $top->card->effect('scry') !== null && $s->player($top->controller)->library !== [];
+    }
+
+    /**
+     * Scry (CR 701.22) : les cartes gardées vont sur le dessus, dans l'ordre choisi ; les autres sous la bibliothèque.
+     * Émet `Scried` (nombres seulement : le contenu du dessus n'est connu que du contrôleur).
+     */
+    private function scry(GameState $s, ScryArrange $a): void
+    {
+        $p = $s->player($a->player());
+        $top = array_slice($p->library, 0, $a->count);
+        $rest = array_slice($p->library, $a->count);
+        $kept = [];
+        foreach ($a->kept as $id) {
+            foreach ($top as $card) {
+                if ($card->id === $id) {
+                    $kept[] = $card;
+                }
+            }
+        }
+        $bottom = array_values(array_filter($top, static fn (CardInstance $c) => !in_array($c->id, $a->kept, true)));
+        $p->library = [...$kept, ...$rest, ...$bottom];
+        $s->emit('Scried', ['player' => $a->player(), 'top' => count($kept), 'bottom' => count($bottom), 'library' => count($p->library)]);
+    }
+
+    /** Résolution du sommet de pile, puis nouvelle ronde : le joueur actif (ou le suivant s'il est mort) commence. */
+    private function resolveStack(GameState $s): void
+    {
+        $this->resolver->resolveTop($s);
+        $first = $s->player($s->activePlayer)->lost ? $s->nextAlive($s->activePlayer) : $s->activePlayer;
+        $s->priority = new PriorityState($first);
     }
 
     /** @return bool true si la ronde est terminée (étape suivante) */
@@ -128,10 +175,14 @@ final class PriorityManager
             if ($s->stack === []) {
                 return true;
             }
-            $this->resolver->resolveTop($s);
-            // Après une résolution : nouvelle ronde, le joueur actif (ou le suivant s'il est mort) commence.
-            $first = $s->player($s->activePlayer)->lost ? $s->nextAlive($s->activePlayer) : $s->activePlayer;
-            $s->priority = new PriorityState($first);
+            if ($this->scryDue($s)) {
+                // Scry : le contrôleur du sort range le dessus de sa bibliothèque avant la résolution (décision hors priorité).
+                $s->scryPending = true;
+                $s->priority = new PriorityState($s->stack[array_key_last($s->stack)]->controller, [], true);
+
+                return false;
+            }
+            $this->resolveStack($s);
 
             return false;
         }
@@ -160,7 +211,23 @@ final class PriorityManager
         if ($a->x < 0 || ($a->x > 0 && !$cost->hasX())) {
             throw new IllegalActionException('X invalide pour ce sort');
         }
-        $plan = ManaPayment::plan($p, $cost, $a->x, $s->turn, null, $card) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
+        $plan = null; // coût alternatif : rien à payer en mana
+        if ($a->alt === null) {
+            $plan = ManaPayment::plan($p, $cost, $a->x, $s->turn, null, $card) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
+        } elseif ($a->x !== 0) {
+            throw new IllegalActionException('Coût alternatif sans X');
+        }
+        $pitch = null;
+        if ($a->alt === CastSpell::ALT_FREE) {
+            if ($card->altCost !== CardInstance::ALT_COMMANDER || !$p->controlsCommander()) {
+                throw new IllegalActionException('Coût alternatif gratuit indisponible');
+            }
+        } elseif ($a->alt !== null) {
+            $pitch = $p->findHand(substr($a->alt, strlen(CastSpell::ALT_PITCH)));
+            if ($card->altCost !== CardInstance::ALT_PITCH_BLUE || $p->life < 1 || $pitch === null || !$pitch->isBlue() || $pitch->id === $card->id) {
+                throw new IllegalActionException('Coût alternatif par exil indisponible');
+            }
+        }
 
         $card = $p->takeFromHand($a->cardId);
         $fromCommand = false;
@@ -168,8 +235,15 @@ final class PriorityManager
             $card = $p->takeFromCommand($a->cardId);
             $fromCommand = true;
         }
-        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain] = $p->payWithPlan($plan);
-        if ($plan->lifeCost > 0) {
+        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain] = $plan === null
+            ? ['tapped' => [], 'paid' => [], 'fromPool' => [], 'sacrifice' => [], 'pain' => []]
+            : $p->payWithPlan($plan);
+        if ($pitch !== null) {
+            $s->payLife($a->player(), 1, $card->name);
+            $p->takeFromHand($pitch->id);
+            $s->exileFromHand($a->player(), $pitch, $card->name);
+        }
+        if ($plan !== null && $plan->lifeCost > 0) {
             $pain[] = ['source' => $card->name, 'lifeCost' => $plan->lifeCost, 'selfDamage' => 0]; // symboles phyrexian payés en PV
         }
         if ($fromCommand) {

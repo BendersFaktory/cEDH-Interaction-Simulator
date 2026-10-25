@@ -16,6 +16,7 @@ use App\Engine\Action\DeclareBlocker;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\KeepHand;
 use App\Engine\Action\KeepLegend;
+use App\Engine\Action\ScryArrange;
 use App\Engine\Action\Mulligan;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
@@ -40,11 +41,51 @@ final class LegalActionGenerator
     /** Plus grand X proposé pour un sort à {X} (évite des centaines d'actions identiques). */
     private const MAX_X = 10;
 
+    /**
+     * Scry : une action par rangement possible des cartes du dessus (chacune gardée ou non, dans un ordre). La première est la
+     * plus naturelle (tout garder, dans l'ordre), ce que l'agent passif choisit.
+     *
+     * @return list<ScryArrange>
+     */
+    private function scryActions(GameState $s, int $playerId): array
+    {
+        $top = $s->stack[array_key_last($s->stack)] ?? null;
+        $scry = $top?->card->effect('scry');
+        if ($top === null || $scry === null || $top->controller !== $playerId) {
+            return [];
+        }
+        $count = min($scry->amount, count($s->player($playerId)->library));
+        $ids = array_map(static fn (CardInstance $c) => $c->id, array_slice($s->player($playerId)->library, 0, $count));
+
+        return array_map(static fn (array $seq) => new ScryArrange($playerId, array_map(static fn (int $i) => $ids[$i], $seq), $count), self::orderedSelections($count));
+    }
+
+    /** Toutes les sélections ordonnées d'indices distincts de 0 à `$n - 1`, les plus grandes d'abord (ordre naturel en premier). @return list<list<int>> */
+    private static function orderedSelections(int $n): array
+    {
+        $out = [];
+        $walk = static function (array $prefix) use (&$walk, &$out, $n): void {
+            $out[] = $prefix;
+            for ($i = 0; $i < $n; $i++) {
+                if (!in_array($i, $prefix, true)) {
+                    $walk([...$prefix, $i]);
+                }
+            }
+        };
+        $walk([]);
+        usort($out, static fn (array $a, array $b) => count($b) <=> count($a));
+
+        return $out;
+    }
+
     /** @return list<Action> */
     public function for(GameState $s, int $playerId): array
     {
         if ($s->mulligan !== null) {
             return $this->mulliganActions($s, $playerId);
+        }
+        if ($s->scryPending) {
+            return $this->scryActions($s, $playerId);
         }
         if ($s->sbaResume !== null) {
             return $this->legendActions($s, $playerId);
@@ -97,20 +138,34 @@ final class LegalActionGenerator
             if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed)) {
                 continue;
             }
-            // Payable avec les terrains non engagés (couleurs, hybrides) ; un sort à {X} offre une action par X payable.
+            // Modes de paiement : le coût de mana (si payable avec les terrains non engagés : couleurs, hybrides), puis les coûts alternatifs.
             $cost = $p->castCost($card);
-            if (ManaPayment::plan($p, $cost, 0, $s->turn, null, $card, $mana) === null) {
+            $modes = ManaPayment::plan($p, $cost, 0, $s->turn, null, $card, $mana) === null ? [] : [null];
+            if ($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander()) {
+                $modes[] = CastSpell::ALT_FREE;
+            }
+            if ($card->altCost === CardInstance::ALT_PITCH_BLUE && $p->life >= 1) {
+                foreach ($p->hand as $other) {
+                    if ($other->id !== $card->id && $other->isBlue()) {
+                        $modes[] = CastSpell::ALT_PITCH . $other->id;
+                    }
+                }
+            }
+            if ($modes === []) {
                 continue;
             }
-            $maxX = $cost->hasX() ? min(ManaPayment::maxX($p, $cost, $s->turn, $card, $mana), self::MAX_X) : 0;
-            foreach ($this->targetSets($s, $card) as $targets) {
-                for ($x = 0; $x <= $maxX; $x++) {
-                    $key = $card->name . '|' . implode(',', $targets) . '|' . $x;
-                    if (isset($seen[$key])) {
-                        continue;
+            // Un sort à {X} offre une action par X payable, au coût de mana seulement.
+            $maxX = $cost->hasX() && in_array(null, $modes, true) ? min(ManaPayment::maxX($p, $cost, $s->turn, $card, $mana), self::MAX_X) : 0;
+            foreach ($modes as $alt) {
+                foreach ($this->targetSets($s, $card, $playerId) as $targets) {
+                    for ($x = 0; $x <= ($alt === null ? $maxX : 0); $x++) {
+                        $key = $card->name . '|' . implode(',', $targets) . '|' . $x . '|' . $alt;
+                        if (isset($seen[$key])) {
+                            continue;
+                        }
+                        $seen[$key] = true;
+                        $actions[] = new CastSpell($playerId, $card->id, $targets, $x, $alt);
                     }
-                    $seen[$key] = true;
-                    $actions[] = new CastSpell($playerId, $card->id, $targets, $x);
                 }
             }
         }
@@ -418,11 +473,13 @@ final class LegalActionGenerator
     }
 
     /** @return list<list<string>> */
-    private function targetSets(GameState $s, CardInstance $card): array
+    private function targetSets(GameState $s, CardInstance $card, int $playerId): array
     {
         $effect = $card->targetedEffect();
 
         return match ($effect?->effect) {
+            // Tuteur : une carte de sa bibliothèque par nom (`library:<id>`), comme une fetchland.
+            'tutor' => self::libraryTargets($s->player($playerId)),
             // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`).
             'exile' => self::permanentTargets($s, $effect),
             'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
@@ -430,6 +487,21 @@ final class LegalActionGenerator
             'counter' => array_map(static fn ($item) => ['stack:' . $item->id], array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && ($effect?->canCounter($item->card) ?? false)))),
             default => [[]],
         };
+    }
+
+    /** @return list<list<string>> une cible `library:<id>` par nom de carte de la bibliothèque (`library:none` si elle est vide) */
+    private static function libraryTargets(PlayerState $p): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($p->library as $card) {
+            if (!isset($seen[$card->name])) {
+                $seen[$card->name] = true;
+                $out[] = ['library:' . $card->id];
+            }
+        }
+
+        return $out === [] ? [['library:none']] : $out;
     }
 
     /** @return list<list<string>> une cible `permanent:<id>` par permanent légal, joueurs dans l'ordre du tour */

@@ -115,7 +115,7 @@ final class AbilityManager
     /** Plan de paiement du coût de mana d'une capacité ; la source ne paie jamais son propre coût. */
     private static function costPlan(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability, ?ManaContext $mana = null): ?ManaPlan
     {
-        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id, $card, $mana);
+        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id, $card, $mana ?? new ManaContext($p, $s->turn, false));
     }
 
     public static function activate(GameState $s, ActivateAbility $a): void
