@@ -216,6 +216,8 @@ async function run() {
     ['19', (b) => scenario(b, '19', s19)],
     ['20', (b) => scenario(b, '20', s20)],
     ['21', (b) => scenario(b, '21', s21)],
+    ['22', (b) => scenario(b, '22', s22)],
+    ['23', (b) => scenario(b, '23', s23)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -270,14 +272,14 @@ async function chain({ page, log, shot, info, prog, keepUi }) {
   await shot('3-decisions')
 
   // 4 : navigation
-  await page.click('button[title="Pas en arrière"]')
-  await page.click('button[title="Pas en arrière"]')
+  await page.click('button[title^="Pas en arrière"]')
+  await page.click('button[title^="Pas en arrière"]')
   log('4 recul:', await prog(), '| ActionPanel visible:', await page.locator('.actions').count())
   await page.click('button[title="Début"]')
   log('4 début:', await prog())
-  await page.click('button[title="Lecture"]')
+  await page.click('button[title^="Lecture"]')
   await page.waitForTimeout(1200)
-  await page.click('button[title="Pause"]')
+  await page.click('button[title^="Pause"]')
   log('4 lecture 1,2s:', await prog())
   await page.click('button[title="Fin"]')
   log('4 fin:', await prog(), '| ActionPanel:', await page.locator('.actions').count())
@@ -300,8 +302,8 @@ async function chain({ page, log, shot, info, prog, keepUi }) {
     { timeout: TIMEOUT },
   )
   log('5 info:', await info(), '|', await prog())
-  await page.selectOption('.playback select', '10')
-  await page.click('button[title="Lecture"]')
+  await page.selectOption('.playback select', { label: '4x' })
+  await page.click('button[title^="Lecture"]')
   await page.waitForFunction(
     () => {
       const t = document.querySelector('.playback small')?.textContent ?? ''
@@ -688,7 +690,8 @@ async function s15({ page, log, shot, problem, openGame, tryClick }) {
     return first('pass') ?? null
   }
   let assigned = false,
-    seed15 = null
+    seed15 = null,
+    hurtBefore = 0
   let assignText = '(absent)'
   const tried = []
   // Graine connue d'abord (5 : J1 a deux bloqueurs, depuis le mulligan), puis balayage 1..25 si les decks changent.
@@ -705,6 +708,7 @@ async function s15({ page, log, shot, problem, openGame, tryClick }) {
     if (await other.count()) {
       const total = await options.count()
       const text = (await other.textContent())?.replace(/\s+/g, ' ').trim()
+      hurtBefore = await page.locator('text=/subit \\d+ dégâts/').count()
       if (await tryClick(other)) {
         assignText = text
         await page.waitForTimeout(500)
@@ -715,7 +719,8 @@ async function s15({ page, log, shot, problem, openGame, tryClick }) {
     }
   }
   // Le journal affiche « <id> subit N dégâts » pour chaque bloqueur blessé : on le compare à la répartition choisie.
-  const hurt = assigned ? (await page.locator('text=/subit \\d+ dégâts/').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim()) : []
+  // Seules les lignes apparues après le clic comptent (un bloqueur a pu être blessé dans un combat précédent).
+  const hurt = assigned ? (await page.locator('text=/subit \\d+ dégâts/').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim()).slice(hurtBefore) : []
   log('15 graine retenue :', seed15, '(essayées :', tried.join(','), ') | répartition choisie :', assignText)
   log('15 journal des dégâts subis :', hurt.slice(-4).join(' ; '))
   await page
@@ -1101,4 +1106,170 @@ async function s21({ page, log, shot, problem, openGame, tryClick }) {
     if (!final.battlefield.some((c) => c.id === fetched?.payload.card?.id)) problem("recette fetchland : l'Island cherché n'est pas sur le champ de bataille")
     if (!/cherche Island/.test(journal ?? '')) problem('recette fetchland : « J0 cherche Island » absent du journal')
   }
+}
+
+// 22 : règle des légendes (CR 704.5j) en partie réelle. Reflet de Légende (carte factice, type Cackling Counterpart) crée un jeton
+// copie d'une créature qu'on contrôle : copie du commandant de J0 => deux « Commandant J0 » légendaires, J0 doit choisir lequel garder.
+// Un pilote API joue J0 (terrains, commandant, puis Reflet sur lui) jusqu'à la décision « keepLegend » ; l'UI ouvre alors la partie,
+// J0 garde le JETON (le commandant, carte, passe par le cimetière puis revient en zone de commandement, CR 903.9a).
+async function s22({ page, log, shot, problem, openGame, tryClick }) {
+  const MIRROR = 'Reflet de Légende'
+  const flat = (t) => t?.replace(/\s+/g, ' ').trim()
+  const policy = (p, step) => {
+    const first = (type, re) => p.actions.find((a) => a.type === type && (!re || re.test(a.label)))
+    if (step > 500) return null
+    if (p.player === 0 && first('keepLegend')) return 'stop'
+    return first('discard') ?? first('done') ?? first('land') ?? first('cast', /Reflet de Légende → Commandant J0/) ?? first('cast', /Lancer Commandant J0/) ?? first('pass') ?? null
+  }
+  let found = null
+  const tried = []
+  for (const seed of Array.from({ length: 400 }, (_, i) => i + 1)) {
+    const sim = await api.createHuman(seed)
+    if (!(await api.handOf(sim.id)).names.includes(MIRROR)) continue
+    tried.push(seed)
+    if ((await api.drive(sim.id, policy)).stopped) {
+      found = { seed, id: sim.id }
+      break
+    }
+  }
+  if (!found) return problem(`recette légendes : aucune graine où J0 lance ${MIRROR} sur son commandant (essayées : ${tried.join(',')})`)
+  log('22 graine retenue :', found.seed, '(#' + found.id + ', essayées :', tried.join(','), ')')
+  await openGame(found.id)
+  const group = page.locator('.actions h4:has-text("Règle des légendes")')
+  const choices = page.locator('.actions h4:has-text("Règle des légendes") ~ button:not([disabled])')
+  const labels = (await choices.allTextContents()).map(flat)
+  log('22 choix proposés :', labels.join(' | '))
+  await shot('22a-legende-choix')
+  if (!(await group.count())) problem('recette légendes : le groupe « Règle des légendes » est absent')
+  if (labels.length !== 2 || !labels.every((l) => /^Garder Commandant J0 \(p0_(c|t)\d+\)/.test(l))) problem(`recette légendes : choix inattendus : ${labels.join(' | ')}`)
+  const token = page.locator('.actions h4:has-text("Règle des légendes") ~ button:not([disabled]):has-text("(p0_t")').first()
+  const tokenId = flat(await token.textContent().catch(() => ''))?.match(/\((p0_t\d+)\)/)?.[1]
+  const seq = (await api.events(found.id)).at(-1)?.seq ?? 0
+  const post = page.waitForResponse((r) => r.url().includes(`/simulations/${found.id}/decisions`) && r.request().method() === 'POST', { timeout: 10_000 }).catch(() => null)
+  if (!tokenId || !(await tryClick(token))) return problem('recette légendes : impossible de cliquer sur le jeton copie')
+  const response = await post
+  if (!response || response.status() >= 400) problem(`recette légendes : POST /decisions non envoyé ou refusé (${response?.status()})`)
+  await page
+    .locator('text=/Règle des légendes : J0 garde/')
+    .first()
+    .waitFor({ timeout: 15_000 })
+    .catch(() => {})
+  const evs = (await api.events(found.id)).filter((e) => e.seq > seq)
+  const applied = evs.find((e) => e.type === 'LegendRuleApplied')
+  const state = await api.state(found.id)
+  const left = state.players[0].battlefield.filter((c) => c.name === 'Commandant J0')
+  const journal = flat(
+    await page
+      .locator('text=/Règle des légendes : J0 garde/')
+      .first()
+      .textContent()
+      .catch(() => '(absent)'),
+  )
+  const removed = applied?.payload.removed.map((r) => [r.card.id, r.destination])
+  log(
+    '22 LegendRuleApplied :',
+    JSON.stringify({ kept: applied?.payload.kept, removed }),
+    '| restant :',
+    left.map((c) => c.id).join(','),
+    '| commande :',
+    state.players[0].command.map((c) => c.name).join(','),
+    '| journal :',
+    journal,
+  )
+  await page
+    .locator('text=/Règle des légendes : J0 garde/')
+    .first()
+    .scrollIntoViewIfNeeded()
+    .catch(() => {})
+  await shot('22-legende')
+  if (applied?.payload.kept !== tokenId) problem(`recette légendes : légende gardée ${applied?.payload.kept}, attendu le jeton ${tokenId}`)
+  if (left.length !== 1 || left[0].id !== tokenId) problem(`recette légendes : la légende restante n'est pas le jeton choisi (${left.map((c) => c.id).join(',')})`)
+  if (!evs.some((e) => e.type === 'CommanderReturned')) problem("recette légendes : le commandant n'est pas revenu en zone de commandement (CommanderReturned absent)")
+  if (!/garde/.test(journal ?? '')) problem('recette légendes : « Règle des légendes » absente du journal')
+  // Le front applique l'événement : le panneau ne propose plus de choix de légende.
+  if (await group.count()) problem('recette légendes : le groupe « Règle des légendes » reste affiché après le choix')
+}
+
+// 23 : blocage à deux par l'IA vu dans l'UI. J0 (human:auto) attaque avec une grosse créature ; un siège IA la bloque avec DEUX
+// créatures (l'IA le fait quand la paire tue l'attaquant sans mourir toute entière). Un pilote API joue J0 jusqu'à ce que J0 doive
+// répartir ses dégâts (attaquant bloqué par deux créatures) ; l'UI ouvre alors la partie, J0 choisit la répartition par défaut.
+async function s23({ page, log, shot, problem, openGame, tryClick }) {
+  const flat = (t) => t?.replace(/\s+/g, ' ').trim()
+  const BIG = ['Craw Wurm', 'Yavimaya Wurm', 'Colossal Dreadmaw', 'Leatherback Baloth', 'Hill Giant', 'Giant Spider', 'Centaur Courser', 'Trained Armodon', 'Kalonian Tusker', 'Commandant']
+  const CAST = /Craw Wurm|Yavimaya Wurm|Colossal Dreadmaw|Leatherback Baloth|Hill Giant|Giant Spider|Centaur Courser|Trained Armodon|Kalonian Tusker|Elves|Mystic|Druid|Commandant|Bear|Gray Ogre/
+  // Répartition proposée à J0 : « Dégâts de <attaquant> (<id>) : n → <bloqueur> (<id>), … ». Double blocage IA = au moins deux bloqueurs du même siège IA.
+  const doubleBlockOf = (label) => {
+    const attacker = label.match(/^Dégâts de .*\((p\d+_[ct]\d+)\) :/)?.[1]
+    const blockers = [...label.matchAll(/→ [^,]*?\((p(\d+)_[ct]\d+)\)/g)].map((m) => ({ id: m[1], seat: Number(m[2]) }))
+    return attacker && blockers.length >= 2 && blockers.every((x) => x.seat === blockers[0].seat && x.seat !== 0) ? { attacker, seat: blockers[0].seat, blockers: blockers.map((x) => x.id) } : null
+  }
+  const tried = []
+  let found = null
+  for (const seed of Array.from({ length: 300 }, (_, i) => i + 1)) {
+    tried.push(seed)
+    const sim = await api.createHuman(seed)
+    let attacked = false
+    const policy = (p, step) => {
+      const first = (type, re) => p.actions.find((a) => a.type === type && (!re || re.test(a.label)))
+      if (step > 450) return null
+      const assign = p.player === 0 ? p.actions.find((a) => a.type === 'assign' && /\(par défaut\)/.test(a.label)) : null
+      if (assign) {
+        const block = doubleBlockOf(assign.label)
+        if (block) {
+          found = { block }
+          return 'stop'
+        }
+        return assign // un autre combat (un seul bloqueur, piétinement) : répartition par défaut, la partie continue
+      }
+      const discard = first('discard')
+      if (discard) return discard
+      if (!attacked) {
+        for (const name of BIG) {
+          const atk = first('attack', new RegExp(`Attaquer J[123] avec ${name}`))
+          if (atk) {
+            attacked = true
+            return atk
+          }
+        }
+      }
+      const next = first('done') ?? first('land') ?? first('cast', CAST)
+      if (next) return next
+      attacked = false
+      return first('pass') ?? null
+    }
+    const r = await api.drive(sim.id, policy)
+    if (!r.stopped) {
+      found = null
+      continue
+    }
+    found = { ...found, seed, id: sim.id }
+    break
+  }
+  if (!found) return problem(`recette double blocage : aucune graine 1..300 où un siège IA bloque l'attaquant de J0 avec deux créatures (essayées : ${tried.length})`)
+  const { attacker, seat: aiSeat, blockers } = found.block
+  log('23 graine retenue :', found.seed, '(#' + found.id + ', essayées :', tried.length, ') | J' + aiSeat, 'bloque', attacker, 'avec', blockers.join(' + '))
+  await openGame(found.id)
+  const options = page.locator('.actions h4:has-text("Répartir les dégâts de combat") ~ button:not([disabled])')
+  const optionTexts = (await options.allTextContents()).map(flat)
+  const lines = (await page.locator(`text=/J${aiSeat} bloque ${attacker} avec/`).allTextContents()).map(flat)
+  log('23 répartitions proposées :', optionTexts.join(' | '))
+  log('23 journal des blocages :', lines.join(' ; '))
+  await page
+    .locator(`text=/J${aiSeat} bloque ${attacker} avec/`)
+    .first()
+    .scrollIntoViewIfNeeded()
+    .catch(() => {})
+  await shot('23-double-blocage')
+  for (const b of blockers) {
+    if (!lines.some((l) => l.includes(`J${aiSeat} bloque ${attacker} avec ${b}`))) problem(`recette double blocage : « J${aiSeat} bloque ${attacker} avec ${b} » absent du journal`)
+  }
+  if (!blockers.every((b) => optionTexts.some((t) => t.includes(b)))) problem(`recette double blocage : les deux bloqueurs ${blockers.join(', ')} ne figurent pas dans les répartitions proposées`)
+  const def = page.locator('.actions h4:has-text("Répartir les dégâts de combat") ~ button:not([disabled]):has-text("(par défaut)")').first()
+  const hurtBefore = (await page.locator('text=/subit \\d+ dégâts/').allTextContents()).length
+  if (!(await tryClick(def))) return problem('recette double blocage : impossible de choisir la répartition par défaut')
+  // Le journal gagne une ligne « <id> subit N dégâts » par bloqueur blessé : on attend les nouvelles lignes (celles des combats précédents ne comptent pas).
+  await page.waitForFunction((n) => (document.body.innerText.match(/subit \d+ dégâts/g) ?? []).length > n, hurtBefore, { timeout: 10_000 }).catch(() => {})
+  const hurt = (await page.locator('text=/subit \\d+ dégâts/').allTextContents()).map(flat).slice(hurtBefore)
+  log('23 dégâts subis après répartition :', hurt.join(' ; '))
+  if (!hurt.some((t) => blockers.some((x) => t.includes(`${x} subit`)))) problem('recette double blocage : aucun bloqueur ne subit de dégâts dans le journal après la répartition')
 }

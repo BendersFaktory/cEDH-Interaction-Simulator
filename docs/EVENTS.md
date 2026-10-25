@@ -29,7 +29,7 @@ Chaque événement : `{ seq, type, payload, verbose }`. `seq` est croissant et u
 | `SpellResolved` | non | `stackId`, `card`, `controller`, `destination` (`battlefield`\|`graveyard`\|`command`) | Pile → destination |
 | `SpellCountered` | non | `stackId`, `card`, `controller`, `by` (stackId du contresort), `destination` (`graveyard`\|`command`) | Pile → cimetière, ou zone de commandement si c'est un commandant |
 | `SpellFizzled` | non | `target` | Aucun (cible devenue illégale) |
-| `TokenCreated` | non | `player`, `card` (public, `token: true`) | Ajoute le jeton au champ de bataille du joueur (ex. Treasure créé par Strike It Rich) |
+| `TokenCreated` | non | `player`, `card` (public, `token: true`), `copyOf` (id de la source, seulement pour un jeton copie : effet `copy`, CR 707.2 ; la copie garde le nom et les supertypes, donc légendaire) | Ajoute le jeton au champ de bataille du joueur (ex. Treasure créé par Strike It Rich) |
 | `PermanentSacrificed` | non | `player`, `card`, `destination` (`graveyard`\|`command`\|`none`) | Champ de bataille → destination ; `none` = jeton, il cesse d'exister. Émis juste après l'événement dont il paie le coût (`SpellCast`, `ManaAbilityActivated`, `AbilityActivated`) |
 | `CardDiscarded` | non | `player`, `card`, `destination` (`graveyard`\|`command`), `hand` (taille de main résultante) | Main → cimetière (défausse à 7 au cleanup, ou coût de capacité : Wild Mongrel) |
 | `AttackerDeclared` | non | `player`, `card` (id), `defender` (joueur attaqué), `tapped` (`true`, sauf avec vigilance : `false`) | La créature attaque `defender` ; elle s'engage (`tapped`) sauf si elle a la vigilance |

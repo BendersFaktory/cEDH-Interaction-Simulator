@@ -135,6 +135,8 @@ final class Decks
         $library[] = $make('Cendrier des Regrets', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DISCARD, 'damage', 1)]);
         // Carte factice à coût hybride.
         $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, "{{$a}/{$b}}{1}");
+        // Carte factice (type Cackling Counterpart sans flashback) : jeton copie d'une créature qu'on contrôle, y compris le commandant (règle des légendes).
+        $library[] = $make('Reflet de Légende', CardInstance::INSTANT, 3, 'copy', 0, false, 0, 0, '{3}');
 
         if ($hasRed) {
             // Kher Keep : terrain {T} : {C} ; {1}{R}, {T} : créer un jeton Kobold 0/1.

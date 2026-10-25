@@ -204,6 +204,19 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
   })
 
+  it('LegendRuleApplied retire les légendes non gardées (cimetière, ou rien pour un jeton)', () => {
+    const v = start()
+    const legend = { id: 'g1', name: 'Isamaru', type: 'creature' as const, cost: 1, effect: null, amount: 0 }
+    const copy = { ...legend, id: 'p0_t1', token: true }
+    v.players[0].battlefield.push({ ...legend, tapped: true }, { ...copy, tapped: false })
+    applyEvent(v, ev(4, 'LegendRuleApplied', { player: 0, kept: 'p0_t1', removed: [{ card: legend, destination: 'graveyard' }] }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1', 'p0_t1'])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['g1'])
+    applyEvent(v, ev(5, 'LegendRuleApplied', { player: 0, kept: 'g2', removed: [{ card: copy, destination: 'none' }] }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1'])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['g1'])
+  })
+
   it("CardExiled met la carte en exil (un jeton disparaît) ; CommanderReturned depuis l'exil la vide", () => {
     const v = start()
     expect(v.players[0].exile).toEqual([])

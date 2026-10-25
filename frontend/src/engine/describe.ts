@@ -101,7 +101,9 @@ export function describeEvent(e: GameEvent): string {
     case 'CreatureBoosted':
       return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
     case 'TokenCreated':
-      return `J${p.player} crée un jeton ${p.card.name}`
+      return `J${p.player} crée un jeton ${p.copyOf ? 'copie de ' : ''}${p.card.name}`
+    case 'LegendRuleApplied':
+      return `Règle des légendes : J${p.player} garde ${p.kept}, ${p.removed.map((r: { card: { id: string } }) => r.card.id).join(', ')} part au cimetière`
     case 'PermanentSacrificed':
       return `J${p.player} sacrifie ${p.card.name}${p.destination === 'command' ? ' (retour en zone de commandement)' : ''}`
     case 'CombatEnded':

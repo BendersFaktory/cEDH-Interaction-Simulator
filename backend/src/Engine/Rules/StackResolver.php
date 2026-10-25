@@ -64,7 +64,7 @@ final class StackResolver
         $targets = $this->targetsOfEffects($card, $item->targets);
         $anyLegal = $targets === [];
         foreach ($targets as $i => $target) {
-            if ($this->targetLegal($s, $card->effects[$i], $target)) {
+            if ($this->targetLegal($s, $card->effects[$i], $target, $item->controller)) {
                 $anyLegal = true;
             }
         }
@@ -83,6 +83,7 @@ final class StackResolver
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
                 'exile' => $this->exileTarget($s, $target, $effect, $card->name),
                 'tutor' => $this->tutor($s, $item->controller, $target),
+                'copy' => $this->copy($s, $item->controller, $target),
                 'scry' => null, // rangement déjà décidé avant la résolution (PriorityManager::scry)
             };
         }
@@ -109,12 +110,13 @@ final class StackResolver
     }
 
     /** La cible est-elle encore légale pour son effet à la résolution (CR 608.2b) ? Aucun événement émis. */
-    private function targetLegal(GameState $s, SpellEffect $effect, string $target): bool
+    private function targetLegal(GameState $s, SpellEffect $effect, string $target, int $controller): bool
     {
         return match ($effect->effect) {
             'damage' => str_starts_with($target, 'player:') && !$s->player((int) substr($target, 7))->lost,
             'counter' => $this->counterVictim($s, $target) !== null,
             'exile' => $this->targetPermanent($s, $target, $effect) !== null,
+            'copy' => $this->copyTarget($s, $target, $controller) !== null,
             default => true, // recherche de bibliothèque : une cible absente ne fait simplement rien
         };
     }
@@ -164,6 +166,26 @@ final class StackResolver
         if ($effect->powerLife) {
             $s->gainLife($owner, $power, $source); // Swords to Plowshares : la force est celle d'avant l'exil
         }
+    }
+
+    /** La créature ciblée (`permanent:<id>`) si elle est encore sur le champ de bataille sous le contrôle du lanceur (CR 608.2b). */
+    private function copyTarget(GameState $s, string $target, int $controller): ?CardInstance
+    {
+        $card = str_starts_with($target, 'permanent:') ? $s->player($controller)->findOnBattlefield(substr($target, 10)) : null;
+
+        return $card !== null && $card->isCreature() ? $card : null;
+    }
+
+    /** Crée un jeton copie de la créature ciblée (CR 707.2) ; si elle a disparu, `SpellFizzled`. */
+    private function copy(GameState $s, int $controller, string $target): void
+    {
+        $source = $this->copyTarget($s, $target, $controller);
+        if ($source === null) {
+            $s->emit('SpellFizzled', ['target' => $target]);
+
+            return;
+        }
+        $s->createTokenCopy($controller, $source);
     }
 
     /** Rituel : le mana arrive dans la réserve du contrôleur (il disparaît à la fin de l'étape). */

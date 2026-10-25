@@ -504,6 +504,8 @@ final class LegalActionGenerator
             'tutor' => self::libraryTargets($s->player($playerId)),
             // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`).
             'exile' => self::permanentTargets($s, $effect),
+            // Copie : une créature que le lanceur contrôle (`permanent:<id>`).
+            'copy' => array_map(static fn (CardInstance $c) => 'permanent:' . $c->id, array_values(array_filter($s->player($playerId)->battlefield, static fn (CardInstance $c) => $c->isCreature()))),
             'damage' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
             // Un contresort ne cible que des sorts, pas des capacités activées ; Dispel seulement les instants (`SpellEffect::canCounter()`).
             'counter' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && $effect->canCounter($item->card)))),

@@ -312,6 +312,16 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'LegendRuleApplied': {
+      // CR 704.5j : les légendes non gardées quittent le champ de bataille (cimetière, ou rien pour un jeton).
+      const pl = v.players[p.player]
+      for (const r of p.removed) {
+        removeCard(pl.battlefield, r.card.id)
+        zoneOf(pl, r.destination)?.push(board(r.card))
+      }
+      break
+    }
+
     case 'CombatEnded':
       for (const pl of Object.values(v.players)) {
         for (const c of pl.battlefield) {

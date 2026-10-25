@@ -287,6 +287,25 @@ final class GameState
     }
 
     /**
+     * Crée un jeton qui est une copie de `$source` (CR 707.2) : valeurs copiables seulement (nom, types, supertypes dont légendaire,
+     * sous-types, force / endurance de base, mots-clés, capacités et triggers) ; ni marqueurs, ni bonus, ni dégâts, ni statut de
+     * commandant (CR 903.3 : le commandant est une carte). `TokenCreated` porte `copyOf` (id de la source).
+     */
+    public function createTokenCopy(int $playerId, CardInstance $source): CardInstance
+    {
+        $token = new CardInstance(
+            sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $source->name, $source->types, $source->cost,
+            power: $source->power, toughness: $source->toughness, manaCost: $source->manaCost, produces: $source->produces,
+            abilities: $source->abilities, token: true, triggers: $source->triggers, subtypes: $source->subtypes,
+            keywords: $source->keywords, supertypes: $source->supertypes,
+        );
+        $this->enterBattlefield($playerId, $token);
+        $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic(), 'copyOf' => $source->id]);
+
+        return $token;
+    }
+
+    /**
      * Seul chemin d'entrée sur le champ de bataille (sort résolu, terrain joué, jeton créé) : note le tour d'arrivée (mal
      * d'invocation) et met en file les triggers `etb` de la carte. L'appelant journalise.
      */

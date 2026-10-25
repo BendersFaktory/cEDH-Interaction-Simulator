@@ -12,12 +12,13 @@ use App\Engine\Game\CardInstance;
  * `damage` (`amount`, ou X du coût), `counter` (`target` = `instant` : seulement un sort instantané, Dispel), `mana` (`adds`, rituel), `treasure`, `draw` (`amount` cartes),
  * `exile` (exile le permanent ciblé ; `target` = `creature` ou `permanent`, défaut `permanent` ; `powerLife` : son contrôleur gagne
  * autant de PV que sa force avant l'exil, Swords to Plowshares).
+ * `copy` (cible une créature que le lanceur contrôle : il crée un jeton qui en est une copie, CR 707.2 ; les supertypes, dont légendaire, sont copiés).
  * Plusieurs effets ciblés possibles : une cible par effet ciblé, dans l'ordre du texte (CR 608.2b, `StackResolver`).
  */
 final class SpellEffect
 {
-    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry'];
-    public const TARGETED = ['damage', 'counter', 'exile', 'tutor'];
+    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry', 'copy'];
+    public const TARGETED = ['damage', 'counter', 'exile', 'tutor', 'copy'];
     /** Genres de permanents qu'un effet `exile` peut cibler. */
     public const PERMANENT_TARGETS = ['creature', 'permanent'];
     /** Types de sorts qu'un effet `counter` peut viser (`target`, alternatives séparées par `|`) ; null = tout sort (Counterspell). */
