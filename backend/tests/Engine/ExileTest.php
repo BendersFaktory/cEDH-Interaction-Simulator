@@ -117,6 +117,34 @@ final class ExileTest extends TestCase
         $this->assertSame('stp', $s->player(0)->graveyard[0]->id);
     }
 
+    public function testPowerLifeGivesTheTargetsControllerItsPowerBeforeExile(): void
+    {
+        $bear = new CardInstance('bear', 'Test Bear', CardInstance::CREATURE, 2, null, 0, true, false, 2, 2);
+        $bear->powerBonus = 3;
+        $s = (new ScenarioBuilder())->permanent(1, $bear)->build(self::PASS);
+        $before = $s->player(1)->life;
+        $stp = new CardInstance('stp', 'Swords to Plowshares', CardInstance::INSTANT, 1, effects: [new SpellEffect('exile', target: 'creature', powerLife: true)]);
+        $s->stack[] = new StackItem('s1', $stp, 0, ['permanent:bear']);
+
+        (new StackResolver())->resolveTop($s);
+        $events = $s->drainEvents();
+        $this->assertSame(['SpellResolved', 'CardExiled', 'LifeGained'], array_map(static fn (GameEvent $e) => $e->type, $events));
+        $this->assertSame(['player' => 1, 'amount' => 5, 'life' => $before + 5, 'source' => 'Swords to Plowshares'], $events[2]->payload);
+        $this->assertSame($before + 5, $s->player(1)->life);
+        $this->assertSame(CardInstance::fromArray($stp->toArray())->effects[0]->powerLife, true, 'aller-retour de la sérialisation');
+    }
+
+    public function testPowerLifeFizzlesWithoutGain(): void
+    {
+        $s = (new ScenarioBuilder())->permanent(1, self::artifact('a1'))->build(self::PASS);
+        $before = $s->player(1)->life;
+        $stp = new CardInstance('stp', 'Swords to Plowshares', CardInstance::INSTANT, 1, effects: [new SpellEffect('exile', target: 'creature', powerLife: true)]);
+        $s->stack[] = new StackItem('s1', $stp, 0, ['permanent:a1']);
+        (new StackResolver())->resolveTop($s);
+        $this->assertSame([], $this->of($s->drainEvents(), 'LifeGained'));
+        $this->assertSame($before, $s->player(1)->life);
+    }
+
     public function testTargetGoneOrNoLongerLegalFizzles(): void
     {
         $s = (new ScenarioBuilder())->permanent(1, self::artifact('a1'))->build(self::PASS);

@@ -299,6 +299,17 @@ final class GameState
         $this->emit('LifePaid', ['player' => $playerId, 'amount' => $amount, 'life' => $p->life, 'source' => $source]);
     }
 
+    /** Gagner des PV hors combat (Swords to Plowshares) : `LifeGained` avec les PV résultants ; un gain nul ne fait rien (CR 119.3). */
+    public function gainLife(int $playerId, int $amount, string $source): void
+    {
+        if ($amount <= 0) {
+            return;
+        }
+        $p = $this->player($playerId);
+        $p->life += $amount;
+        $this->emit('LifeGained', ['player' => $playerId, 'amount' => $amount, 'life' => $p->life, 'source' => $source]);
+    }
+
     /** Dégâts qu'une source inflige à son propre contrôleur (Ancient Tomb, Talismans) : `DamageDealt` vers lui. */
     public function damageSelf(int $playerId, int $amount, string $source): void
     {

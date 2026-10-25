@@ -9,7 +9,8 @@ use App\Engine\Game\CardInstance;
 /**
  * Un effet d'un sort à sa résolution (dans l'ordre de la liste `CardInstance::$effects`, CR 608.2c) :
  * `damage` (`amount`, ou X du coût), `counter`, `mana` (`adds`, rituel), `treasure`, `draw` (`amount` cartes),
- * `exile` (exile le permanent ciblé ; `target` = `creature` ou `permanent`, défaut `permanent`).
+ * `exile` (exile le permanent ciblé ; `target` = `creature` ou `permanent`, défaut `permanent` ; `powerLife` : son contrôleur gagne
+ * autant de PV que sa force avant l'exil, Swords to Plowshares).
  * Au plus un effet ciblé par carte (`damage`, `counter` ou `exile`) : la carte a une seule cible (voir la case CR 608.2b de la roadmap).
  */
 final class SpellEffect
@@ -24,12 +25,16 @@ final class SpellEffect
         public readonly int $amount = 0,
         public readonly ?string $adds = null, // mana ajouté par un effet `mana`, ex. `{R}{R}`
         public readonly ?string $target = null, // effet `exile` : `creature` | `permanent` (null = `permanent`)
+        public readonly bool $powerLife = false, // effet `exile` : le contrôleur de la cible gagne PV = sa force (Swords to Plowshares)
     ) {
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
         }
         if ($target !== null && ($effect !== 'exile' || !in_array($target, self::PERMANENT_TARGETS, true))) {
             throw new \InvalidArgumentException("Cible « $target » invalide pour l'effet « $effect »");
+        }
+        if ($powerLife && $effect !== 'exile') {
+            throw new \InvalidArgumentException("« powerLife » n'a de sens que pour l'effet « exile »");
         }
     }
 
@@ -59,15 +64,21 @@ final class SpellEffect
         return array_values($effects);
     }
 
+    /** Porte-t-il une précision absente des clés historiques (`effect`, `amount`, `adds`) ? Alors `CardInstance::toArray()` sérialise `effects`. */
+    public function isPrecise(): bool
+    {
+        return $this->target !== null || $this->powerLife;
+    }
+
     /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …, 'target' => …]`, `amount`, `adds` et `target` omis à leur défaut. */
     public function toArray(): array
     {
         return ['effect' => $this->effect] + ($this->amount !== 0 ? ['amount' => $this->amount] : []) + ($this->adds !== null ? ['adds' => $this->adds] : [])
-            + ($this->target !== null ? ['target' => $this->target] : []);
+            + ($this->target !== null ? ['target' => $this->target] : []) + ($this->powerLife ? ['powerLife' => true] : []);
     }
 
     public static function fromArray(array $d): self
     {
-        return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null);
+        return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null, (bool) ($d['powerLife'] ?? false));
     }
 }

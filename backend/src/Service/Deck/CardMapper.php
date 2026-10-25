@@ -77,6 +77,7 @@ final class CardMapper
         $produces = [];
         $abilities = [];
         $triggers = [];
+        $tapPain = 0; // « Whenever ~ becomes tapped, it deals N damage to you. » (City of Brass)
         $hasX = str_contains($manaCost, '{X}');
 
         foreach ($this->oracleLines((string) ($card['oracle_text'] ?? ''), $name) as $line) {
@@ -91,6 +92,10 @@ final class CardMapper
                 $effects[] = new SpellEffect('damage', $m[1] === 'X' ? 0 : (int) $m[1]);
             } elseif ($isSpell && $line === 'Counter target spell.') {
                 $effects[] = new SpellEffect('counter');
+            } elseif ($isSpell && $line === 'Exile target creature. Its controller gains life equal to its power.') {
+                $effects[] = new SpellEffect('exile', 0, null, 'creature', true); // Swords to Plowshares
+            } elseif ($isLand && preg_match('/^Whenever ~ becomes tapped, it deals (\d+) damage to you\.$/', $line, $m)) {
+                $tapPain = (int) $m[1]; // City of Brass : équivaut à des dégâts à soi sur sa capacité de mana (elle seule l'engage)
             } elseif ($isSpell && preg_match('/^Add ((?:\{[WUBRG]\})+)\.$/', $line, $m)) {
                 $effects[] = new SpellEffect('mana', 0, $m[1]);
             } elseif ($isSpell && preg_match('/^Draw (a card|one card|two cards|three cards|four cards)\.$/', $line, $m)) {
@@ -117,6 +122,15 @@ final class CardMapper
 
         if ($isSpell && $effects === []) {
             throw $fail('sort sans effet modélisé');
+        }
+        if ($tapPain > 0) {
+            // Le seul moyen d'engager le terrain est sa capacité de mana : le trigger devient un `selfDamage` (sans pile, CR 605.3b
+            // le laisse en réalité sur la pile, mais rien ne peut y répondre entre l'engagement et les dégâts ici).
+            if ($produces === [] || $abilities !== []) {
+                throw $fail('trigger « devient engagé » sans production de mana simple');
+            }
+            $abilities[] = ActivatedAbility::mana(implode('|', array_map(static fn (string $c): string => '{' . $c . '}', $produces)), null, $tapPain);
+            $produces = [];
         }
         if ($isLand && $produces === [] && $abilities === []) {
             // Types de terrain de base (CR 305.6) : `{T}: Add` implicite par type, basique ou non (Underground Sea : Island Swamp).

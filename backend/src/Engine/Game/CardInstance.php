@@ -332,8 +332,8 @@ final class CardInstance
             + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]) // idem
             + ($this->keywords === [] ? [] : ['keywords' => $this->keywords]) // idem
             + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]) // idem
-            // `effects` à partir de deux, ou quand le premier porte une précision absente des clés historiques (`target` d'un exil).
-            + (count($this->effects) > 1 || ($this->effects[0] ?? null)?->target !== null ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []) // idem
+            // `effects` à partir de deux, ou quand le premier porte une précision absente des clés historiques (`target`, `powerLife` d'un exil).
+            + (count($this->effects) > 1 || ($this->effects[0] ?? null)?->isPrecise() === true ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []) // idem
             + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []); // idem
     }
 

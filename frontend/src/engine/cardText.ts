@@ -100,6 +100,10 @@ export function spellText(card: PublicCard): string | null {
   const effects = card.effects ?? (card.effect ? [{ effect: card.effect, amount: card.amount, adds: card.adds }] : [])
   if (!effects.length) return null
   return effects
-    .map((e) => (e.effect === 'mana' ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}` : effectText(e.effect, e.amount, 'target' in e ? e.target : undefined)))
+    .map((e) =>
+      e.effect === 'mana'
+        ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}`
+        : effectText(e.effect, e.amount, 'target' in e ? e.target : undefined) + ('powerLife' in e && e.powerLife ? ' (son contrôleur gagne autant de PV que sa force)' : ''),
+    )
     .join(', puis ')
 }

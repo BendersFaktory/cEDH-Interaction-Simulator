@@ -112,6 +112,19 @@ final class DeckLoaderTest extends TestCase
         self::assertCount(5, $petal->options);
     }
 
+    public function testMapsSwordsToPlowsharesAndCityOfBrass(): void
+    {
+        $swords = self::map('Swords to Plowshares');
+        self::assertSame([['effect' => 'exile', 'target' => 'creature', 'powerLife' => true]], array_map(static fn ($e) => $e->toArray(), $swords->effects));
+        self::assertSame('exile', $swords->instantiate('s')->effects[0]->effect);
+
+        $city = self::map('City of Brass');
+        self::assertSame([], $city->produces);
+        self::assertCount(1, $city->abilities);
+        self::assertSame([1, 5, true], [$city->abilities[0]->selfDamage, count($city->abilities[0]->options), $city->abilities[0]->isManaAbility]);
+        self::assertCount(1, $city->instantiate('c')->abilities(), 'pas de {C} implicite');
+    }
+
     public function testMapsPainSourcesShocksAndFetches(): void
     {
         $tomb = self::map('Ancient Tomb');
@@ -172,6 +185,7 @@ final class DeckLoaderTest extends TestCase
     public static function unsupported(): array
     {
         return [
+            'Path to Exile : recherche de terrain pour l\'adversaire' => ['Path to Exile', 'texte non modélisé'],
             'texte inconnu' => ['Rhystic Study', 'texte non modélisé'],
             'planeswalker' => ['Jace, the Mind Sculptor', 'type non modélisé (Planeswalker)'],
             'deux faces' => ['Delver of Secrets // Insectile Aberration', 'plusieurs faces'],

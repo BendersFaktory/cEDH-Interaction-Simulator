@@ -81,7 +81,11 @@ final class StackResolver
         foreach ($s->players as $p) {
             $card = $id === null || $p->lost ? null : $p->findOnBattlefield($id);
             if ($card !== null && $effect->canTargetPermanent($card)) {
+                $power = $card->currentPower();
                 $s->exilePermanent($p->id, $id, $source);
+                if ($effect->powerLife) {
+                    $s->gainLife($p->id, $power, $source); // Swords to Plowshares : la force est celle d'avant l'exil
+                }
 
                 return;
             }
