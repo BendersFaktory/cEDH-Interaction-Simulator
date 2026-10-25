@@ -68,6 +68,8 @@ const DECK_21 = `CMDR: Recette, Azorius Envoy
 1 Perilous Myr
 44 Plains
 44 Island`
+// Même deck que le scénario 21, avec Mystical Tutor à la place de Divination (scénario 30).
+const DECK_TUTOR = DECK_21.replace('1 Divination', '1 Mystical Tutor')
 const T0 = Date.now()
 try {
   await start('API', 'http://127.0.0.1:8000/api/simulations/0', 'php', ['-d', 'memory_limit=512M', '-d', 'variables_order=EGPCS', '-S', '127.0.0.1:8000', '-t', 'public'], BACK, {
@@ -224,6 +226,7 @@ async function run() {
     ['27', (b) => scenario(b, '27', s27)],
     ['28', (b) => scenario(b, '28', s28)],
     ['29', (b) => scenario(b, '29', s29)],
+    ['30', (b) => scenario(b, '30', s30)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1513,4 +1516,44 @@ async function s29({ page, log, shot, problem, openGame }) {
   )
   if (!texts.length || !texts.every((t) => /Tour \d+ —/.test(t))) problem('recette journal : le filtre de type laisse passer d’autres événements')
   await shot('29b-journal-filtre')
+}
+
+// 30 : TUTEUR SUR LE DESSUS. Une graine où J0 lance Mystical Tutor (instant ou rituel, choisi parmi les cartes de sa bibliothèque) :
+// la carte est mise sur le dessus de la bibliothèque (`CardTutored.to` = top), le journal le dit.
+async function s30({ page, log, shot, problem, openGame }) {
+  let found = null
+  for (let seed = 1; seed <= 300 && !found; seed++) {
+    let sim = await api.createHumanWithDeck(seed, DECK_TUTOR)
+    // Seules les graines où le tuteur est en main de départ de J0 sont jouées (sinon la partie part sans lui).
+    if (!(await api.handOf(sim.id)).names.includes('Mystical Tutor')) continue
+    for (let i = 0; i < 200 && sim.status === 'waiting' && !found; i++) {
+      const acts = sim.pending?.actions ?? []
+      const cast = acts.find((a) => a.type === 'cast' && a.label.includes('Mystical Tutor'))
+      if (cast) {
+        sim = await api.decide(sim.id, cast.id)
+        const tutored = (await api.events(sim.id)).filter((e) => e.type === 'CardTutored').at(-1)
+        if (tutored?.payload.to === 'top') found = { seed, id: sim.id, card: tutored.payload.card.name }
+        break
+      }
+      const next = acts.find((a) => a.type === 'land') ?? acts.find((a) => a.type === 'pass') ?? acts.find((a) => a.type === 'done') ?? acts[0]
+      if (!next) break
+      sim = await api.decide(sim.id, next.id)
+    }
+  }
+  if (!found) return problem('recette tuteur : aucune graine 1..300 où J0 lance Mystical Tutor et voit la carte remise sur le dessus')
+  log('30 graine retenue :', found.seed, '(#' + found.id + ') | carte cherchée :', found.card)
+  await openGame(found.id)
+  const line =
+    (
+      await page
+        .locator('.log ol li', { hasText: 'sur le dessus de sa bibliothèque' })
+        .last()
+        .textContent()
+        .catch(() => '')
+    )
+      ?.replace(/\s+/g, ' ')
+      .trim() ?? ''
+  log('30 journal :', line)
+  await shot('30-tuteur-dessus')
+  if (!line.includes(found.card)) problem(`recette tuteur : le journal ne mentionne pas « ${found.card} » mise sur le dessus (« ${line} »)`)
 }

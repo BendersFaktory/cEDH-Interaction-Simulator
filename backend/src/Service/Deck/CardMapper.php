@@ -106,13 +106,18 @@ final class CardMapper
                 $effects[] = new SpellEffect('draw', 1);
             } elseif ($isSpell && $line === 'Search your library for a card, put that card into your hand, then shuffle.') {
                 $effects[] = new SpellEffect('tutor'); // Demonic Tutor
+            } elseif ($isSpell && preg_match('/^Search your library for (?:a card|an? (creature|artifact or enchantment|instant or sorcery) card)(?:, reveal it)?, then shuffle and put (?:that card|the card) on top\.( You lose 2 life\.)?$/', $line, $m)) {
+                // Vampiric / Imperial Seal (toute carte, 2 PV), Mystical / Worldly / Enlightened Tutor (par type)
+                $filter = ['creature' => 'creature', 'artifact or enchantment' => 'artifact|enchantment', 'instant or sorcery' => 'instant|sorcery'][$m[1] ?? ''] ?? null;
+                $effects[] = new SpellEffect('tutor', tutorTop: true, tutorFilter: $filter, lifeLoss: ($m[2] ?? '') !== '' ? 2 : 0);
             } elseif ($isSpell && $line === 'Create a Treasure token.') {
                 $effects[] = new SpellEffect('treasure');
             } elseif ($isSpell && $line === 'Counter target spell.') {
                 $effects[] = new SpellEffect('counter');
             } elseif ($isSpell && $line === 'Counter target instant spell.') {
                 $effects[] = new SpellEffect('counter', 0, null, CardInstance::INSTANT); // Dispel
-            } elseif ($isSpell && $line === 'Counter target enchantment, instant, or sorcery spell. If that spell is countered this way, its controller creates a 2/2 blue Bird creature token with flying.') {
+            } elseif ($isSpell && ($line === 'Counter target enchantment, instant, or sorcery spell. Its controller creates a 2/2 blue Bird creature token with flying.'
+                || $line === 'Counter target enchantment, instant, or sorcery spell. If that spell is countered this way, its controller creates a 2/2 blue Bird creature token with flying.')) {
                 $effects[] = new SpellEffect('counter', 0, null, implode('|', [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY]), false, 'Bird:2/2', [CardInstance::FLYING]); // Swan Song
             } elseif ($isSpell && $line === 'Exile target creature. Its controller gains life equal to its power.') {
                 $effects[] = new SpellEffect('exile', 0, null, 'creature', true); // Swords to Plowshares

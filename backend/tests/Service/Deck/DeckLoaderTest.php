@@ -104,6 +104,24 @@ final class DeckLoaderTest extends TestCase
         ]], array_map(static fn ($e) => $e->toArray(), $swanSong->effects));
     }
 
+    public function testMapsTheTutorsByTypeAndLifeLoss(): void
+    {
+        $vampiric = array_map(static fn ($e) => $e->toArray(), self::map('Vampiric Tutor')->effects);
+        $this->assertSame([['effect' => 'tutor', 'tutorTop' => true, 'lifeLoss' => 2]], $vampiric, 'Vampiric Tutor : toute carte, sur le dessus, 2 PV');
+
+        $worldly = array_map(static fn ($e) => $e->toArray(), self::map('Worldly Tutor')->effects);
+        $this->assertSame([['effect' => 'tutor', 'tutorTop' => true, 'tutorFilter' => 'creature']], $worldly);
+
+        $enlightened = array_map(static fn ($e) => $e->toArray(), self::map('Enlightened Tutor')->effects);
+        $this->assertSame([['effect' => 'tutor', 'tutorTop' => true, 'tutorFilter' => 'artifact|enchantment']], $enlightened);
+
+        $mystical = array_map(static fn ($e) => $e->toArray(), self::map('Mystical Tutor')->effects);
+        $this->assertSame([['effect' => 'tutor', 'tutorTop' => true, 'tutorFilter' => 'instant|sorcery']], $mystical);
+
+        $seal = array_map(static fn ($e) => $e->toArray(), self::map('Imperial Seal')->effects);
+        $this->assertSame([['effect' => 'tutor', 'tutorTop' => true, 'lifeLoss' => 2]], $seal, 'Imperial Seal : comme Vampiric Tutor');
+    }
+
     public function testParserHandlesCommonFormats(): void
     {
         $parsed = DecklistParser::parse("// commentaire\nCommander\n1 Isamaru, Hound of Konda\n\nDeck\n1x Sol Ring (C21) 263 *F*\n10 Plains\nLlanowar Elves\n2 Plains\n\nSideboard\n1 Forest\n");

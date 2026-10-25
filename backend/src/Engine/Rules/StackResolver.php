@@ -82,7 +82,7 @@ final class StackResolver
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
                 'exile' => $this->exileTarget($s, $target, $effect, $card->name),
-                'tutor' => $this->tutor($s, $item->controller, $target),
+                'tutor' => $this->tutor($s, $item->controller, $target, $effect, $card->name),
                 'copy' => $this->copy($s, $item->controller, $target),
                 'scry' => null, // rangement déjà décidé avant la résolution (PriorityManager::scry)
             };
@@ -221,22 +221,29 @@ final class StackResolver
         $s->emit('LibraryShuffled', ['player' => $player, 'library' => count($p->library)]);
     }
 
-    /** Tuteur (CR 701.19) : la carte cherchée va en main, la bibliothèque est mélangée (`CardTutored`, `LibraryShuffled`). */
-    private function tutor(GameState $s, int $player, string $target): void
+    /**
+     * Tuteur (CR 701.19) : la carte cherchée va en main, ou sur le dessus de la bibliothèque après un mélange (`tutorTop`).
+     * La bibliothèque est mélangée (`CardTutored` avec `to`, `LibraryShuffled`). Les PV du tuteur (`lifeLoss`) se perdent même si rien n'est trouvé.
+     */
+    private function tutor(GameState $s, int $player, string $target, SpellEffect $effect, string $source): void
     {
         $p = $s->player($player);
         $id = substr($target, strlen('library:'));
         foreach ($p->library as $i => $card) {
             if ($card->id === $id) {
                 array_splice($p->library, $i, 1);
-                $p->hand[] = $card;
                 $p->library = $s->rng->shuffle($p->library);
-                $s->emit('CardTutored', ['player' => $player, 'card' => $card->toPublic(), 'library' => count($p->library)]);
+                if ($effect->tutorTop) {
+                    array_unshift($p->library, $card);
+                } else {
+                    $p->hand[] = $card;
+                }
+                $s->emit('CardTutored', ['player' => $player, 'card' => $card->toPublic(), 'library' => count($p->library), 'to' => $effect->tutorTop ? 'top' : 'hand']);
                 $s->emit('LibraryShuffled', ['player' => $player, 'library' => count($p->library)]);
-
-                return;
+                break;
             }
         }
+        $s->loseLife($player, $effect->lifeLoss, $source);
     }
 
     /** Pioche : une bibliothèque vide fait perdre le joueur à la prochaine vérification des SBA (CR 704.5b). */

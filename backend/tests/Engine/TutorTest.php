@@ -77,4 +77,84 @@ final class TutorTest extends TestCase
 
         $this->assertSame([['library:none']], array_values($targets));
     }
+
+    private static function vampiric(): CardInstance
+    {
+        return new CardInstance('vt', 'Vampiric Tutor', CardInstance::SORCERY, 1, effects: [new SpellEffect('tutor', tutorTop: true, lifeLoss: 2)]);
+    }
+
+    public function testTutorOnTopShufflesThenPutsTheCardOnTopAndLosesLife(): void
+    {
+        $s = (new ScenarioBuilder())->build(self::PASS);
+        $s->player(0)->library = [self::libraryCard('a', 'Bear'), self::libraryCard('b', 'Elk'), self::libraryCard('c', 'Owl')];
+        $life = $s->player(0)->life;
+        $s->stack[] = new StackItem('vt', self::vampiric(), 0, ['library:c']);
+
+        (new StackResolver())->resolveTop($s);
+
+        $this->assertSame('c', $s->player(0)->library[0]->id, 'La carte cherchée est sur le dessus');
+        $this->assertCount(3, $s->player(0)->library, 'Aucune carte perdue');
+        $this->assertSame([], $s->player(0)->hand, 'Rien ne va en main');
+        $this->assertSame($life - 2, $s->player(0)->life, 'Vampiric Tutor fait perdre 2 PV');
+    }
+
+    public function testTutorFilterOffersOnlyTheAcceptedTypes(): void
+    {
+        $mystical = new CardInstance('mt', 'Mystical Tutor', CardInstance::SORCERY, 1, effects: [new SpellEffect('tutor', tutorTop: true, tutorFilter: 'instant|sorcery')]);
+        $s = (new ScenarioBuilder())->hand(0, $mystical)->untappedLands(0, 1)->build(self::PASS);
+        $s->player(0)->library = [
+            self::libraryCard('a', 'Bear'),
+            new CardInstance('b', 'Bolt', CardInstance::INSTANT, 1),
+            new CardInstance('c', 'Ritual', CardInstance::SORCERY, 1),
+        ];
+        $s->priority = new \App\Engine\Game\PriorityState(0);
+        $s->phase = \App\Engine\Game\Phase::Main1;
+
+        $targets = array_values(array_map(static fn ($a) => $a->targets, array_filter(
+            (new LegalActionGenerator())->for($s, 0), static fn ($a) => $a instanceof CastSpell && $a->cardId === 'mt',
+        )));
+
+        $this->assertSame([['library:b'], ['library:c']], $targets, 'Seuls les instants et rituels sont proposés');
+    }
+
+    public function testTutorFilterWithoutAMatchingCardOffersNoRealTarget(): void
+    {
+        $mystical = new CardInstance('mt', 'Mystical Tutor', CardInstance::SORCERY, 1, effects: [new SpellEffect('tutor', tutorTop: true, tutorFilter: 'instant|sorcery')]);
+        $s = (new ScenarioBuilder())->hand(0, $mystical)->untappedLands(0, 1)->build(self::PASS);
+        $s->player(0)->library = [self::libraryCard('a', 'Bear')];
+        $s->priority = new \App\Engine\Game\PriorityState(0);
+        $s->phase = \App\Engine\Game\Phase::Main1;
+
+        $targets = array_values(array_map(static fn ($a) => $a->targets, array_filter(
+            (new LegalActionGenerator())->for($s, 0), static fn ($a) => $a instanceof CastSpell && $a->cardId === 'mt',
+        )));
+
+        $this->assertSame([['library:none']], $targets);
+    }
+
+    public function testTheOptionsSurviveASerialisationRoundTrip(): void
+    {
+        $effect = new SpellEffect('tutor', tutorTop: true, tutorFilter: 'creature|artifact', lifeLoss: 2);
+        $back = SpellEffect::fromArray($effect->toArray());
+
+        $this->assertSame($effect->toArray(), $back->toArray());
+        $this->assertTrue($back->tutorTop);
+        $this->assertSame('creature|artifact', $back->tutorFilter);
+        $this->assertSame(2, $back->lifeLoss);
+    }
+
+    public function testTheOptionsSurviveACardStateRoundTrip(): void
+    {
+        $card = new CardInstance('mt', 'Mystical Tutor', CardInstance::SORCERY, 1, effects: [new SpellEffect('tutor', tutorTop: true, tutorFilter: 'instant|sorcery')]);
+        $back = CardInstance::fromArray($card->toArray());
+
+        $this->assertSame('instant|sorcery', $back->effects[0]->tutorFilter, 'Un checkpoint ne doit pas perdre le filtre du tuteur');
+        $this->assertTrue($back->effects[0]->tutorTop);
+    }
+
+    public function testTutorOptionsAreRejectedOnOtherEffects(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new SpellEffect('draw', 1, lifeLoss: 2);
+    }
 }

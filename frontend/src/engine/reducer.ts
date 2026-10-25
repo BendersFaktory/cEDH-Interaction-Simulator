@@ -140,7 +140,8 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
     case 'CardTutored': {
       const pl = v.players[p.player]
-      pl.hand.push(board(p.card))
+      // Tuteur vers la main, ou sur le dessus de la bibliothèque (`to` = 'top', Vampiric Tutor) : seule la taille compte côté bibliothèque.
+      if (p.to !== 'top') pl.hand.push(board(p.card))
       pl.library = p.library
       break
     }
@@ -224,7 +225,8 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
-    case 'LifeGained': {
+    case 'LifeGained':
+    case 'LifeLost': {
       v.players[p.player].life = p.life
       break
     }

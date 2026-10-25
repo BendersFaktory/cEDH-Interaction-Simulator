@@ -456,7 +456,7 @@
         "type_line": "Instant",
         "mana_cost": "{U}",
         "cmc": 1,
-        "oracle_text": "Counter target enchantment, instant, or sorcery spell. If that spell is countered this way, its controller creates a 2/2 blue Bird creature token with flying.",
+        "oracle_text": "Counter target enchantment, instant, or sorcery spell. Its controller creates a 2/2 blue Bird creature token with flying.",
         "keywords": []
     },
     {
@@ -539,5 +539,50 @@
         "keywords": [],
         "power": "1",
         "toughness": "1"
+    },
+    {
+        "name": "Vampiric Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{B}",
+        "cmc": 1,
+        "oracle_text": "Search your library for a card, then shuffle and put that card on top. You lose 2 life.",
+        "keywords": []
+    },
+    {
+        "name": "Mystical Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}",
+        "cmc": 1,
+        "oracle_text": "Search your library for an instant or sorcery card, reveal it, then shuffle and put that card on top.",
+        "keywords": []
+    },
+    {
+        "name": "Worldly Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{G}",
+        "cmc": 1,
+        "oracle_text": "Search your library for a creature card, reveal it, then shuffle and put the card on top.",
+        "keywords": []
+    },
+    {
+        "name": "Enlightened Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{W}",
+        "cmc": 1,
+        "oracle_text": "Search your library for an artifact or enchantment card, reveal it, then shuffle and put that card on top.",
+        "keywords": []
+    },
+    {
+        "name": "Imperial Seal",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{B}",
+        "cmc": 1,
+        "oracle_text": "Search your library for a card, then shuffle and put that card on top. You lose 2 life.",
+        "keywords": []
     }
 ]

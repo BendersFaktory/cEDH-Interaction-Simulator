@@ -71,6 +71,19 @@ final class CastSpell implements Action
             return 'permanent ' . $id;
         }
 
+        if (str_starts_with($t, 'library:')) {
+            $id = substr($t, 8);
+            foreach ($state->players as $p) {
+                foreach ($p->library as $card) {
+                    if ($card->id === $id) {
+                        return $card->name . ' (bibliothèque)';
+                    }
+                }
+            }
+
+            return 'aucune carte';
+        }
+
         return str_starts_with($t, 'player:') ? 'joueur ' . substr($t, 7) : 'sort ' . substr($t, 6);
     }
 

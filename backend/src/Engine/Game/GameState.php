@@ -346,6 +346,17 @@ final class GameState
         $this->emit('LifeGained', ['player' => $playerId, 'amount' => $amount, 'life' => $p->life, 'source' => $source]);
     }
 
+    /** Perte de PV hors dégâts (Vampiric Tutor) : `LifeLost`. Les PV peuvent passer sous 0 : les SBA font perdre le joueur. */
+    public function loseLife(int $playerId, int $amount, string $source): void
+    {
+        if ($amount <= 0) {
+            return;
+        }
+        $p = $this->player($playerId);
+        $p->life -= $amount;
+        $this->emit('LifeLost', ['player' => $playerId, 'amount' => $amount, 'life' => $p->life, 'source' => $source]);
+    }
+
     /** Dégâts qu'une source inflige à son propre contrôleur (Ancient Tomb, Talismans) : `DamageDealt` vers lui. */
     public function damageSelf(int $playerId, int $amount, string $source): void
     {

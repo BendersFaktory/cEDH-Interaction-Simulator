@@ -13,6 +13,8 @@ use App\Engine\Game\CardInstance;
  * `exile` (exile le permanent ciblé ; `target` = `creature` ou `permanent`, défaut `permanent` ; `powerLife` : son contrôleur gagne
  * autant de PV que sa force avant l'exil, Swords to Plowshares).
  * `copy` (cible une créature que le lanceur contrôle : il crée un jeton qui en est une copie, CR 707.2 ; les supertypes, dont légendaire, sont copiés).
+ * `tutor` (cible `library:<id>`) : la carte cherchée va en main, ou sur le dessus de la bibliothèque après un mélange (`tutorTop`, Vampiric Tutor) ;
+ * `tutorFilter` = types acceptés (alternatives séparées par `|`, null = toute carte) ; `lifeLoss` = PV perdus par le lanceur, même si rien n'est trouvé.
  * Plusieurs effets ciblés possibles : une cible par effet ciblé, dans l'ordre du texte (CR 608.2b, `StackResolver`).
  */
 final class SpellEffect
@@ -25,6 +27,8 @@ final class SpellEffect
     public const COUNTER_TARGETS = [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY, 'noncreature'];
     /** Mots-clés qu'un jeton créé par un contresort peut recevoir (Swan Song : Bird 2/2 volant). */
     public const TOKEN_KEYWORDS = [CardInstance::FLYING];
+    /** Types qu'un filtre de tuteur peut accepter. */
+    public const TUTOR_TYPES = [CardInstance::CREATURE, CardInstance::ARTIFACT, CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY];
 
     public function __construct(
         public readonly string $effect,
@@ -34,6 +38,9 @@ final class SpellEffect
         public readonly bool $powerLife = false, // effet `exile` : le contrôleur de la cible gagne PV = sa force (Swords to Plowshares)
         public readonly ?string $token = null, // effet `counter` : jeton `Nom:F/E` créé pour le contrôleur du sort contré (Swan Song)
         public readonly array $tokenKeywords = [], // mots-clés du jeton (`TOKEN_KEYWORDS`)
+        public readonly bool $tutorTop = false, // effet `tutor` : carte remise sur le dessus de la bibliothèque (après mélange)
+        public readonly ?string $tutorFilter = null, // effet `tutor` : types acceptés, alternatives séparées par `|`
+        public readonly int $lifeLoss = 0, // effet `tutor` : PV perdus par le lanceur (Vampiric Tutor)
     ) {
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
@@ -45,6 +52,15 @@ final class SpellEffect
         };
         if ($target !== null && !$validTarget) {
             throw new \InvalidArgumentException("Cible « $target » invalide pour l'effet « $effect »");
+        }
+        if (($tutorTop || $tutorFilter !== null || $lifeLoss !== 0) && $effect !== 'tutor') {
+            throw new \InvalidArgumentException("Options de tuteur sur l'effet « $effect »");
+        }
+        if ($tutorFilter !== null && array_diff(explode('|', $tutorFilter), self::TUTOR_TYPES) !== []) {
+            throw new \InvalidArgumentException("Filtre de tuteur « $tutorFilter » invalide");
+        }
+        if ($lifeLoss < 0) {
+            throw new \InvalidArgumentException('Perte de PV négative');
         }
         if ($powerLife && $effect !== 'exile') {
             throw new \InvalidArgumentException("« powerLife » n'a de sens que pour l'effet « exile »");
@@ -90,7 +106,7 @@ final class SpellEffect
     /** Porte-t-il une précision absente des clés historiques (`effect`, `amount`, `adds`) ? Alors `CardInstance::toArray()` sérialise `effects`. */
     public function isPrecise(): bool
     {
-        return $this->target !== null || $this->powerLife || $this->token !== null;
+        return $this->target !== null || $this->powerLife || $this->token !== null || $this->tutorTop || $this->tutorFilter !== null || $this->lifeLoss !== 0;
     }
 
     /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …, 'target' => …]`, `amount`, `adds` et `target` omis à leur défaut. */
@@ -98,12 +114,14 @@ final class SpellEffect
     {
         return ['effect' => $this->effect] + ($this->amount !== 0 ? ['amount' => $this->amount] : []) + ($this->adds !== null ? ['adds' => $this->adds] : [])
             + ($this->target !== null ? ['target' => $this->target] : []) + ($this->powerLife ? ['powerLife' => true] : [])
-            + ($this->token !== null ? ['token' => $this->token] : []) + ($this->tokenKeywords !== [] ? ['tokenKeywords' => $this->tokenKeywords] : []);
+            + ($this->token !== null ? ['token' => $this->token] : []) + ($this->tokenKeywords !== [] ? ['tokenKeywords' => $this->tokenKeywords] : [])
+            + ($this->tutorTop ? ['tutorTop' => true] : []) + ($this->tutorFilter !== null ? ['tutorFilter' => $this->tutorFilter] : [])
+            + ($this->lifeLoss !== 0 ? ['lifeLoss' => $this->lifeLoss] : []);
     }
 
     public static function fromArray(array $d): self
     {
         return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null, (bool) ($d['powerLife'] ?? false),
-            $d['token'] ?? null, $d['tokenKeywords'] ?? []);
+            $d['token'] ?? null, $d['tokenKeywords'] ?? [], (bool) ($d['tutorTop'] ?? false), $d['tutorFilter'] ?? null, (int) ($d['lifeLoss'] ?? 0));
     }
 }

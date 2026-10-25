@@ -501,7 +501,7 @@ final class LegalActionGenerator
     {
         return match ($effect->effect) {
             // Tuteur : une carte de sa bibliothèque par nom (`library:<id>`), comme une fetchland.
-            'tutor' => self::libraryTargets($s->player($playerId)),
+            'tutor' => self::libraryTargets($s->player($playerId), $effect->tutorFilter),
             // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`).
             'exile' => self::permanentTargets($s, $effect),
             // Copie : une créature que le lanceur contrôle (`permanent:<id>`).
@@ -513,12 +513,19 @@ final class LegalActionGenerator
         };
     }
 
-    /** @return list<string> une cible `library:<id>` par nom de carte de la bibliothèque (`library:none` si elle est vide) */
-    private static function libraryTargets(PlayerState $p): array
+    /**
+     * @return list<string> une cible `library:<id>` par nom de carte de la bibliothèque (`library:none` si aucune ne convient)
+     * @param ?string $filter types acceptés, alternatives séparées par `|` (null = toute carte)
+     */
+    private static function libraryTargets(PlayerState $p, ?string $filter = null): array
     {
+        $types = $filter === null ? null : explode('|', $filter);
         $out = [];
         $seen = [];
         foreach ($p->library as $card) {
+            if ($types !== null && !array_filter($types, static fn (string $t) => $card->hasType($t))) {
+                continue;
+            }
             if (!isset($seen[$card->name])) {
                 $seen[$card->name] = true;
                 $out[] = 'library:' . $card->id;

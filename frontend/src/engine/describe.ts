@@ -36,7 +36,7 @@ export function describeEvent(e: GameEvent): string {
     case 'Scried':
       return `J${p.player} range ${p.top + p.bottom} cartes du dessus (${p.top} dessus, ${p.bottom} dessous)`
     case 'CardTutored':
-      return `J${p.player} cherche ${p.card.name} dans sa bibliothèque`
+      return p.to === 'top' ? `J${p.player} cherche ${p.card.name} et la met sur le dessus de sa bibliothèque` : `J${p.player} cherche ${p.card.name} dans sa bibliothèque`
     case 'LibraryShuffled':
       return `J${p.player} mélange sa bibliothèque (${p.library} cartes)`
     case 'LifePaid':
@@ -78,6 +78,8 @@ export function describeEvent(e: GameEvent): string {
       return `${p.source} inflige ${p.amount} à ${target(p.target)} (${p.life} PV)${p.commanderDamage ? ` — dégâts de commandant : ${p.commanderDamage.total}/21` : ''}`
     case 'LifeGained':
       return `J${p.player} gagne ${p.amount} PV (${p.source}) → ${p.life}`
+    case 'LifeLost':
+      return `J${p.player} perd ${p.amount} PV (${p.source}) → ${p.life}`
     case 'CardDiscarded':
       return `J${p.player} défausse ${p.card.name} (main : ${p.hand})`
     case 'MulliganTaken':
