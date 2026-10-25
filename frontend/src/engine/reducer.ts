@@ -29,6 +29,8 @@ function zoneOf(pl: PlayerView, destination: string): BoardCard[] | null {
       return pl.battlefield
     case 'command':
       return pl.command
+    case 'exile':
+      return pl.exile
     case 'none':
       return null
     default:
@@ -77,6 +79,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
           hand: [],
           battlefield: [],
           graveyard: [],
+          exile: [],
           command: (pl.command ?? []).map(board),
           lost: false,
           controller: pl.controller,
@@ -260,10 +263,18 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
-    case 'CommanderReturned': {
-      // SBA (CR 903.9a) : le commandant quitte le cimetière pour la zone de commandement.
+    case 'CardExiled': {
+      // Champ de bataille → exil (`none` : un jeton cesse d'exister).
       const pl = v.players[p.player]
-      removeCard(pl.graveyard, p.card.id)
+      removeCard(pl.battlefield, p.card.id)
+      zoneOf(pl, p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'CommanderReturned': {
+      // SBA (CR 903.9a) : le commandant quitte le cimetière ou l'exil pour la zone de commandement.
+      const pl = v.players[p.player]
+      removeCard(p.from === 'exile' ? pl.exile : pl.graveyard, p.card.id)
       pl.command.push(board(p.card))
       break
     }

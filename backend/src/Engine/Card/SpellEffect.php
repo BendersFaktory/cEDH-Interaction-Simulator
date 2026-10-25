@@ -4,29 +4,44 @@ declare(strict_types=1);
 
 namespace App\Engine\Card;
 
+use App\Engine\Game\CardInstance;
+
 /**
  * Un effet d'un sort à sa résolution (dans l'ordre de la liste `CardInstance::$effects`, CR 608.2c) :
- * `damage` (`amount`, ou X du coût), `counter`, `mana` (`adds`, rituel), `treasure`, `draw` (`amount` cartes).
- * Au plus un effet ciblé par carte (`damage` ou `counter`) : la carte a une seule cible (voir la case CR 608.2b de la roadmap).
+ * `damage` (`amount`, ou X du coût), `counter`, `mana` (`adds`, rituel), `treasure`, `draw` (`amount` cartes),
+ * `exile` (exile le permanent ciblé ; `target` = `creature` ou `permanent`, défaut `permanent`).
+ * Au plus un effet ciblé par carte (`damage`, `counter` ou `exile`) : la carte a une seule cible (voir la case CR 608.2b de la roadmap).
  */
 final class SpellEffect
 {
-    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw'];
-    public const TARGETED = ['damage', 'counter'];
+    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile'];
+    public const TARGETED = ['damage', 'counter', 'exile'];
+    /** Genres de permanents qu'un effet `exile` peut cibler. */
+    public const PERMANENT_TARGETS = ['creature', 'permanent'];
 
     public function __construct(
         public readonly string $effect,
         public readonly int $amount = 0,
         public readonly ?string $adds = null, // mana ajouté par un effet `mana`, ex. `{R}{R}`
+        public readonly ?string $target = null, // effet `exile` : `creature` | `permanent` (null = `permanent`)
     ) {
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
+        }
+        if ($target !== null && ($effect !== 'exile' || !in_array($target, self::PERMANENT_TARGETS, true))) {
+            throw new \InvalidArgumentException("Cible « $target » invalide pour l'effet « $effect »");
         }
     }
 
     public function isTargeted(): bool
     {
         return in_array($this->effect, self::TARGETED, true);
+    }
+
+    /** Le permanent `$card` est-il une cible légale de cet effet `exile` (créature seulement si `target` = `creature`) ? */
+    public function canTargetPermanent(CardInstance $card): bool
+    {
+        return $this->target !== 'creature' || $card->isCreature();
     }
 
     /**
@@ -44,14 +59,15 @@ final class SpellEffect
         return array_values($effects);
     }
 
-    /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …]`, `amount` et `adds` omis à leur défaut. */
+    /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …, 'target' => …]`, `amount`, `adds` et `target` omis à leur défaut. */
     public function toArray(): array
     {
-        return ['effect' => $this->effect] + ($this->amount !== 0 ? ['amount' => $this->amount] : []) + ($this->adds !== null ? ['adds' => $this->adds] : []);
+        return ['effect' => $this->effect] + ($this->amount !== 0 ? ['amount' => $this->amount] : []) + ($this->adds !== null ? ['adds' => $this->adds] : [])
+            + ($this->target !== null ? ['target' => $this->target] : []);
     }
 
     public static function fromArray(array $d): self
     {
-        return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null);
+        return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null);
     }
 }

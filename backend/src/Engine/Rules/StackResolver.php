@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Engine\Rules;
 
 use App\Engine\Ability\ActivatedAbility;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Mana\Color;
@@ -65,8 +66,27 @@ final class StackResolver
                 'mana' => $this->addMana($s, $item->controller, $effect->adds ?? '', $item->id),
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
+                'exile' => $this->exileTarget($s, $item->targets[0] ?? '', $effect, $card->name),
             };
         }
+    }
+
+    /**
+     * Exile le permanent ciblé (`permanent:<id>`) s'il est encore sur le champ de bataille et toujours une cible légale
+     * (créature pour `target: creature`) ; sinon `SpellFizzled`.
+     */
+    private function exileTarget(GameState $s, string $target, SpellEffect $effect, string $source): void
+    {
+        $id = str_starts_with($target, 'permanent:') ? substr($target, 10) : null;
+        foreach ($s->players as $p) {
+            $card = $id === null || $p->lost ? null : $p->findOnBattlefield($id);
+            if ($card !== null && $effect->canTargetPermanent($card)) {
+                $s->exilePermanent($p->id, $id, $source);
+
+                return;
+            }
+        }
+        $s->emit('SpellFizzled', ['target' => $target]);
     }
 
     /** Rituel : le mana arrive dans la réserve du contrôleur (il disparaît à la fin de l'étape). */

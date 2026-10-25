@@ -25,6 +25,13 @@ final class PlayerState
      * (CR 704.5b). Sérialisé sous `drewFromEmpty`, omis à faux.
      */
     public bool $drewFromEmpty = false;
+    /**
+     * Zone d'exil du joueur (cartes dont il est le propriétaire), dans l'ordre d'arrivée. Seul chemin d'entrée :
+     * `GameState::exile()`. Sérialisée sous `exile`, omise quand vide (empreintes inchangées tant que rien n'exile).
+     *
+     * @var list<CardInstance>
+     */
+    public array $exile = [];
 
     /**
      * @param list<CardInstance> $library    index 0 = dessus de la bibliothèque
@@ -280,7 +287,8 @@ final class PlayerState
             'commanderDamage' => $this->commanderDamage,
             'pool' => $this->pool->toArray(),
         ] + ($this->pool->restrictedToArray() === [] ? [] : ['poolRestricted' => $this->pool->restrictedToArray()])
-            + ($this->drewFromEmpty ? ['drewFromEmpty' => true] : []);
+            + ($this->drewFromEmpty ? ['drewFromEmpty' => true] : [])
+            + ($this->exile === [] ? [] : ['exile' => $map($this->exile)]);
     }
 
     public static function fromArray(array $d): self
@@ -300,6 +308,7 @@ final class PlayerState
         );
         $p->lost = (bool) $d['lost'];
         $p->drewFromEmpty = (bool) ($d['drewFromEmpty'] ?? false);
+        $p->exile = $map($d['exile'] ?? []);
 
         return $p;
     }

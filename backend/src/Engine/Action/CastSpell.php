@@ -40,14 +40,25 @@ final class CastSpell implements Action
             $label .= sprintf(' (X=%d)', $this->x);
         }
         if ($this->targets !== []) {
-            $label .= ' → ' . implode(', ', array_map(self::targetLabel(...), $this->targets));
+            $label .= ' → ' . implode(', ', array_map(static fn (string $t) => self::targetLabel($state, $t), $this->targets));
         }
 
         return $label;
     }
 
-    private static function targetLabel(string $t): string
+    private static function targetLabel(GameState $state, string $t): string
     {
+        if (str_starts_with($t, 'permanent:')) {
+            $id = substr($t, 10);
+            foreach ($state->players as $p) {
+                if (($card = $p->findOnBattlefield($id)) !== null) {
+                    return sprintf('%s (joueur %d)', $card->name, $p->id);
+                }
+            }
+
+            return 'permanent ' . $id;
+        }
+
         return str_starts_with($t, 'player:') ? 'joueur ' . substr($t, 7) : 'sort ' . substr($t, 6);
     }
 

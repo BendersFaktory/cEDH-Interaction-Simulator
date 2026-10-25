@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { target } from '../engine/describe'
 import type { StackItemView } from '../types/engine'
 
 const props = defineProps<{ stack: StackItemView[] }>()
@@ -12,8 +13,6 @@ const abilityLabel = (item: StackItemView): string => {
   if (!a) return ''
   return a.effect === 'damage' && a.amount !== undefined ? `Capacité : ${a.amount} dégât${a.amount > 1 ? 's' : ''}` : `Capacité (${a.effect})`
 }
-
-const target = (t: string): string => (t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`)
 </script>
 
 <template>

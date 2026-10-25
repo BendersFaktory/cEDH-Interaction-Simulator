@@ -20,6 +20,7 @@ use App\Engine\Action\Mulligan;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
 use App\Engine\Action\PutTrigger;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\CombatState;
@@ -419,12 +420,31 @@ final class LegalActionGenerator
     /** @return list<list<string>> */
     private function targetSets(GameState $s, CardInstance $card): array
     {
-        return match ($card->targetedEffect()?->effect) {
+        $effect = $card->targetedEffect();
+
+        return match ($effect?->effect) {
+            // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`).
+            'exile' => self::permanentTargets($s, $effect),
             'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
             // Un contresort ne cible que des sorts, pas des capacités activées.
             'counter' => array_map(static fn ($item) => ['stack:' . $item->id], array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility()))),
             default => [[]],
         };
+    }
+
+    /** @return list<list<string>> une cible `permanent:<id>` par permanent légal, joueurs dans l'ordre du tour */
+    private static function permanentTargets(GameState $s, SpellEffect $effect): array
+    {
+        $out = [];
+        foreach ($s->alivePlayerIds() as $id) {
+            foreach ($s->player($id)->battlefield as $permanent) {
+                if ($effect->canTargetPermanent($permanent)) {
+                    $out[] = ['permanent:' . $permanent->id];
+                }
+            }
+        }
+
+        return $out;
     }
 
     /**

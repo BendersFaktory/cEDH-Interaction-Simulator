@@ -89,6 +89,13 @@ const commanderDamage = computed(() => Object.entries(props.player.commanderDama
         </div>
       </details>
       <span v-else>Cimetière : 0</span>
+      <details v-if="player.exile.length" class="graveyard exile">
+        <summary>Exil : {{ player.exile.length }}</summary>
+        <div class="cards">
+          <CardView v-for="c in player.exile" :key="c.id" :card="c" compact />
+        </div>
+      </details>
+      <span v-else>Exil : 0</span>
     </footer>
   </section>
 </template>

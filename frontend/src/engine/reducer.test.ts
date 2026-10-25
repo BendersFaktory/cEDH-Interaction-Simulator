@@ -204,6 +204,25 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
   })
 
+  it("CardExiled met la carte en exil (un jeton disparaît) ; CommanderReturned depuis l'exil la vide", () => {
+    const v = start()
+    expect(v.players[0].exile).toEqual([])
+    const spirit = { id: 'p0_t1', name: 'Spirit', type: 'creature' as const, cost: 0, effect: null, amount: 0, token: true }
+    applyEvent(v, ev(4, 'TokenCreated', { player: 0, card: spirit }))
+    applyEvent(v, ev(5, 'CardExiled', { player: 0, card: spirit, from: 'battlefield', destination: 'none', source: 'Path', exile: 0 }))
+    applyEvent(v, ev(6, 'CardExiled', { player: 0, card: pinger, from: 'battlefield', destination: 'exile', source: 'Path', exile: 1 }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1'])
+    expect(v.players[0].exile.map((c) => c.id)).toEqual(['a1'])
+    expect(v.players[0].graveyard).toEqual([])
+    const cmd = { id: 'cmd', name: 'Commandant', type: 'creature' as const, cost: 3, effect: null, amount: 0, commander: true }
+    v.players[1].battlefield.push({ ...cmd, tapped: true })
+    applyEvent(v, ev(7, 'CardExiled', { player: 1, card: cmd, from: 'battlefield', destination: 'exile', source: 'Swords', exile: 1 }))
+    expect(v.players[1].exile.map((c) => c.tapped)).toEqual([false])
+    applyEvent(v, ev(8, 'CommanderReturned', { player: 1, card: cmd, from: 'exile' }))
+    expect(v.players[1].exile).toEqual([])
+    expect(v.players[1].command.map((c) => c.id)).toContain('cmd')
+  })
+
   it("CreatureBoosted fixe la force et l'endurance (valeurs absolues)", () => {
     const v = start()
     const bear = { id: 'c1', name: 'Wild Mongrel', type: 'creature' as const, cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }

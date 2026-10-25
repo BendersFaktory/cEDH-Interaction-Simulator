@@ -182,6 +182,50 @@ final class GameState
     }
 
     /**
+     * Met une carte dans la zone d'exil de son propriétaire, SAUF un jeton qui cesse d'exister (règles 111.7 et 704.5d).
+     * Un commandant va bien en exil ; les SBA le renvoient ensuite en zone de commandement (CR 903.9a, voir
+     * StateBasedActions), comme depuis le cimetière. Seul chemin d'entrée en exil. Retourne 'exile' | 'none'.
+     */
+    public function exile(int $ownerId, CardInstance $card): string
+    {
+        if ($card->token) {
+            return 'none';
+        }
+        $this->player($ownerId)->exile[] = $card;
+
+        return 'exile';
+    }
+
+    /**
+     * Exile un permanent du champ de bataille de `$playerId` (Swords to Plowshares, Path to Exile) : il redevient un objet
+     * neuf (dégagé, sans dégâts ni bonus), passe par `exile()` et `CardExiled` est journalisé. Aucun trigger « meurt ».
+     * Retourne false si le permanent n'est plus là.
+     */
+    public function exilePermanent(int $playerId, string $cardId, string $source): bool
+    {
+        $card = $this->player($playerId)->takeFromBattlefield($cardId);
+        if ($card === null) {
+            return false;
+        }
+        $card->tapped = false;
+        $card->damage = 0;
+        $card->deathtouchDamage = false;
+        $card->powerBonus = 0;
+        $card->toughnessBonus = 0;
+        $destination = $this->exile($playerId, $card);
+        $this->emit('CardExiled', [
+            'player' => $playerId,
+            'card' => $card->toPublic(),
+            'from' => 'battlefield',
+            'destination' => $destination,
+            'source' => $source,
+            'exile' => count($this->player($playerId)->exile),
+        ]);
+
+        return true;
+    }
+
+    /**
      * Sacrifie des permanents du joueur (coût déjà payé : ex. Treasure engagé par `payWithPlan`) : champ de bataille ->
      * cimetière via `sendToGraveyard()`, un événement `PermanentSacrificed` par permanent. Seul chemin du sacrifice.
      *

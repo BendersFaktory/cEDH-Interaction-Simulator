@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Tests\Engine;
 
 use App\Engine\Agent\AgentRegistry;
+use App\Engine\Card\Decks;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Event\GameEvent;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameEngine;
@@ -23,7 +25,7 @@ use PHPUnit\Framework\TestCase;
  * des invariants observés sur le flux d'événements et sur l'état à chaque checkpoint (`PriorityGranted` avec
  * `checkpoint: true`, seul point où l'état est cohérent) :
  *
- * - conservation des cartes : par propriétaire, bibliothèque + main + champ de bataille + cimetière + zone de commandement
+ * - conservation des cartes : par propriétaire, bibliothèque + main + champ de bataille + cimetière + exil + zone de commandement
  *   + sorts sur la pile + objets sortis de la partie (`PlayerLeftGame`, CR 800.4a) = taille du deck ; jetons exclus ;
  *   chaque carte n'est que dans une zone, et dans les zones de son propriétaire (le contrôle ne change jamais ici) ;
  * - aucun trigger en attente à un checkpoint ; réserves de mana vides au premier checkpoint de chaque étape, et un
@@ -89,6 +91,22 @@ final class InvariantsTest extends TestCase
         // La couverture visée est bien exercée : au moins un terrain cherché et un mélange de bibliothèque.
         self::assertContains('LandFetched', $types, "graine $seed : aucun terrain cherché");
         self::assertContains('LibraryShuffled', $types, "graine $seed : aucun mélange");
+    }
+
+    /** @return iterable<string, array{int}> */
+    public static function exileSeeds(): iterable
+    {
+        foreach ([1, 2, 3, 4, 5, 6] as $seed) {
+            yield "graine $seed" => [$seed];
+        }
+    }
+
+    /** Decks de démo avec des sorts d'exil : l'exil compte dans la conservation des cartes. */
+    #[DataProvider('exileSeeds')]
+    public function testInvariantsWithExileSpells(int $seed): void
+    {
+        $types = $this->checkSeed($seed, self::exileDecks());
+        self::assertContains('CardExiled', $types, "graine $seed : aucune carte exilée");
     }
 
     /** Déterminisme : même graine, mêmes événements ; aller-retour sérialisé à un checkpoint, même suite. */
@@ -349,7 +367,7 @@ final class InvariantsTest extends TestCase
         $poolsEmpty = true;
         $life = [];
         foreach ($s->players as $p) {
-            foreach (['library', 'hand', 'battlefield', 'graveyard', 'command'] as $zone) {
+            foreach (['library', 'hand', 'battlefield', 'graveyard', 'exile', 'command'] as $zone) {
                 foreach ($p->{$zone} as $card) {
                     $count($card, $p->id, $zone);
                 }
@@ -397,6 +415,26 @@ final class InvariantsTest extends TestCase
         }
 
         return hash_final($hash);
+    }
+
+    /**
+     * Decks de démo dont les 8 derniers terrains de base sont remplacés par des éphémères incolores à {1} qui exilent une
+     * créature (4) ou un permanent (4), sous le même id (noms distincts : singleton).
+     *
+     * @return callable(int): array{commander: CardInstance, library: list<CardInstance>}
+     */
+    private static function exileDecks(): callable
+    {
+        return static function (int $id): array {
+            $deck = Decks::commanderDemo($id);
+            for ($k = 0; $k < 8; $k++) {
+                $i = count($deck['library']) - 1 - $k;
+                $target = $k < 4 ? 'creature' : 'permanent';
+                $deck['library'][$i] = new CardInstance($deck['library'][$i]->id, "Exil test $k", CardInstance::INSTANT, 1, effects: [new SpellEffect('exile', target: $target)]);
+            }
+
+            return $deck;
+        };
     }
 
     /**

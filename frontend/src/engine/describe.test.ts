@@ -59,6 +59,13 @@ describe('describeEvent — capacités', () => {
   it('bonus de force/endurance', () => {
     expect(describeEvent(e('CreatureBoosted', { player: 0, card: 'p0_c3', power: 3, toughness: 3 }))).toBe('p0_c3 (J0) passe à 3/3')
   })
+  it('exil', () => {
+    expect(describeEvent(e('CardExiled', { player: 1, card: { name: 'Goblin Guide' }, destination: 'exile', source: 'Swords to Plowshares' }))).toBe(
+      'Goblin Guide (J1) est exilé par Swords to Plowshares',
+    )
+    expect(describeEvent(e('CardExiled', { player: 1, card: { name: 'Spirit' }, destination: 'none', source: 'Path' }))).toBe("Spirit (J1) est exilé par Path (le jeton cesse d'exister)")
+    expect(describeEvent(spell({ card: { name: 'Swords to Plowshares' }, targets: ['permanent:p1_c4'] }))).toBe('J1 lance Swords to Plowshares → permanent p1_c4')
+  })
 })
 
 describe('describeEvent — mulligan de Londres', () => {

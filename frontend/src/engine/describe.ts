@@ -2,7 +2,8 @@ import type { GameEvent } from '../types/engine'
 
 import { phaseLabel } from './phases'
 
-const target = (t: string): string => (t.startsWith('player:') ? `J${t.slice(7)}` : `sort ${t.slice(6)}`)
+/** Cible lisible : `player:N` → `JN`, `permanent:<id>` → `permanent <id>`, `stack:<id>` → `sort <id>`. */
+export const target = (t: string): string => (t.startsWith('player:') ? `J${t.slice(7)}` : t.startsWith('permanent:') ? `permanent ${t.slice(10)}` : `sort ${t.slice(6)}`)
 
 const manaStr = (m: Record<string, number> | undefined): string =>
   Object.entries(m ?? {})
@@ -89,6 +90,8 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
     case 'CreatureDied':
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'CardExiled':
+      return `${p.card.name} (J${p.player}) est exilé par ${p.source}${p.destination === 'none' ? " (le jeton cesse d'exister)" : ''}`
     case 'CommanderReturned':
       return `${p.card.name} (J${p.player}) retourne en zone de commandement`
     case 'CreatureBoosted':

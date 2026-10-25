@@ -57,6 +57,8 @@ function effectText(effect: string, amount: number | undefined, spec?: string): 
       return `inflige ${n} dégâts`
     case 'counter':
       return 'contrecarre le sort ciblé'
+    case 'exile':
+      return spec === 'creature' ? 'exile la créature ciblée' : 'exile le permanent ciblé'
     case 'draw':
       return `pioche ${n}`
     case 'token':
@@ -97,5 +99,7 @@ export function triggerText(t: TriggerView): string {
 export function spellText(card: PublicCard): string | null {
   const effects = card.effects ?? (card.effect ? [{ effect: card.effect, amount: card.amount, adds: card.adds }] : [])
   if (!effects.length) return null
-  return effects.map((e) => (e.effect === 'mana' ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}` : effectText(e.effect, e.amount))).join(', puis ')
+  return effects
+    .map((e) => (e.effect === 'mana' ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}` : effectText(e.effect, e.amount, 'target' in e ? e.target : undefined)))
+    .join(', puis ')
 }

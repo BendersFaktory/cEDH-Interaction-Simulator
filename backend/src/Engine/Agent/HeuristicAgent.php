@@ -170,6 +170,7 @@ final class HeuristicAgent implements PlayerAgent
                     return $c;
                 }
             }
+            $casts = $this->bestExileTargets($state, $playerId, $casts);
             $casts = array_values(array_filter($casts, fn (CastSpell $c) => $this->worthCasting($state, $playerId, $c)));
             $casts = $this->keepCounterMana($state, $playerId, $casts);
             if ($casts !== []) {
@@ -277,6 +278,47 @@ final class HeuristicAgent implements PlayerAgent
         return array_keys($out);
     }
 
+    /**
+     * Sort d'exil (Swords to Plowshares) : une seule action par carte, sur le permanent adverse le plus menaçant (valeur de
+     * `cardValue` + force ; égalité : premier dans l'ordre des cibles) ; jamais sur un des miens. Les autres sorts sont
+     * rendus tels quels, dans le même ordre.
+     *
+     * @param list<CastSpell> $casts
+     * @return list<CastSpell>
+     */
+    private function bestExileTargets(GameState $state, int $playerId, array $casts): array
+    {
+        $isExile = static fn (CastSpell $c) => $state->player($playerId)->findCastable($c->cardId)?->hasEffect('exile') === true;
+        $best = [];
+        foreach ($casts as $c) {
+            $target = $isExile($c) ? $this->targetPermanent($state, $c->targets[0] ?? '') : null;
+            if ($target === null || $target[0] === $playerId) {
+                continue;
+            }
+            $score = $this->cardValue($target[1], 0) + $target[1]->currentPower();
+            if (!isset($best[$c->cardId]) || $score > $best[$c->cardId][1]) {
+                $best[$c->cardId] = [$c, $score];
+            }
+        }
+
+        return array_values(array_filter($casts, static fn (CastSpell $c) => !$isExile($c) || ($best[$c->cardId][0] ?? null) === $c));
+    }
+
+    /** @return array{0: int, 1: CardInstance}|null contrôleur et permanent visés par `permanent:<id>` */
+    private function targetPermanent(GameState $state, string $target): ?array
+    {
+        if (!str_starts_with($target, 'permanent:')) {
+            return null;
+        }
+        foreach ($state->players as $p) {
+            if (($card = $p->findOnBattlefield(substr($target, 10))) !== null) {
+                return [$p->id, $card];
+            }
+        }
+
+        return null;
+    }
+
     private function ability(GameState $state, ActivateAbility $a): ?ActivatedAbility
     {
         return $this->battlefieldCard($state, $a->player(), $a->cardId)?->abilities()[$a->abilityIndex] ?? null;
@@ -301,6 +343,10 @@ final class HeuristicAgent implements PlayerAgent
         }
         if (in_array('player:' . $playerId, $item->targets, true)) {
             return 10;
+        }
+        // Un sort qui exile un de mes permanents : le contrer le sauve.
+        if (($this->targetPermanent($state, $item->targets[0] ?? '')[0] ?? null) === $playerId) {
+            return 8;
         }
         $card = $item->card;
         if ($card->hasEffect('counter')) {

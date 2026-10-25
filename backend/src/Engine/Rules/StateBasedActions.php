@@ -19,8 +19,8 @@ use App\Engine\Game\PriorityState;
  * qui doit être fait sur l'état courant puis l'applique ; les passages se répètent tant qu'une SBA a agi (CR 704.3).
  *
  * Dans un passage :
- * - commandant au cimetière depuis la dernière vérification : retour en zone de commandement (CR 903.9a, toujours
- *   appliqué) ; un commandant qui meurt dans ce passage revient donc au passage suivant, après que ses triggers « meurt »
+ * - commandant au cimetière ou en exil depuis la dernière vérification : retour en zone de commandement (CR 903.9a,
+ *   toujours appliqué) ; un commandant qui meurt dans ce passage revient donc au passage suivant, après que ses triggers « meurt »
  *   ont été mis en file ;
  * - joueur à 0 PV ou moins (704.5a), qui a pioché dans une bibliothèque vide (704.5b), ou à 21 dégâts d'un même
  *   commandant (704.6c) : éliminé, et ses objets quittent la partie (800.4a, voir eliminate()) ;
@@ -75,9 +75,11 @@ final class StateBasedActions
             if ($p->lost) {
                 continue;
             }
-            foreach ($p->graveyard as $card) {
-                if ($card->commander) {
-                    $commanders[] = [$p, $card];
+            foreach (['graveyard', 'exile'] as $zone) {
+                foreach ($p->$zone as $card) {
+                    if ($card->commander) {
+                        $commanders[] = [$p, $card, $zone];
+                    }
                 }
             }
             if ($p->life <= 0) {
@@ -94,10 +96,10 @@ final class StateBasedActions
             }
         }
 
-        foreach ($commanders as [$p, $card]) {
-            $p->graveyard = array_values(array_filter($p->graveyard, static fn (CardInstance $c) => $c !== $card));
+        foreach ($commanders as [$p, $card, $zone]) {
+            $p->$zone = array_values(array_filter($p->$zone, static fn (CardInstance $c) => $c !== $card));
             $p->command[] = $card;
-            $s->emit('CommanderReturned', ['player' => $p->id, 'card' => $card->toPublic(), 'from' => 'graveyard']);
+            $s->emit('CommanderReturned', ['player' => $p->id, 'card' => $card->toPublic(), 'from' => $zone]);
         }
         foreach ($losers as $id => $reason) {
             $this->eliminate($s, $id, $reason);
