@@ -137,7 +137,7 @@ final class ManaContext
                     continue;
                 }
                 $withCost = $ability->manaCost !== null;
-                if ($withCost && ($ability->manaCost->hybrid !== [] || $ability->manaCost->x > 0)) {
+                if ($withCost && ($ability->manaCost->hybrid !== [] || $ability->manaCost->phyrexian !== [] || $ability->manaCost->x > 0)) {
                     continue;
                 }
                 foreach ($ability->options as $oi => $_) {

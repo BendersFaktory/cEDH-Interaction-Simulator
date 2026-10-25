@@ -15,7 +15,7 @@ use App\Engine\Game\CardInstance;
  * priorité ; `TriggerManager` la met alors sur la pile (ordre APNAP).
  *
  * Effets (même vocabulaire que `ActivatedAbility`) : `damage` (`amount` dégâts à un joueur ciblé), `draw` (piocher
- * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`).
+ * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`) ou `treasure` (`amount` jetons Treasure).
  *
  * Filtre (`filter`, seulement pour `cast`) : `''` = tout sort, `instant_sorcery` = éphémère ou rituel.
  *
@@ -35,7 +35,7 @@ final class TriggeredAbility
     public const INSTANT_SORCERY = 'instant_sorcery';
 
     private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::DISCARD];
-    private const EFFECTS = ['damage', 'draw', 'token'];
+    private const EFFECTS = ['damage', 'draw', 'token', 'treasure'];
     private const FILTERS = ['', self::INSTANT_SORCERY];
 
     public function __construct(
@@ -90,6 +90,7 @@ final class TriggeredAbility
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
+            'treasure' => sprintf('%d Treasure', $this->amount),
         };
 
         return "$when : $what";

@@ -61,7 +61,7 @@ export interface PublicCard {
   power?: number
   toughness?: number
   abilities?: AbilityView[]
-  /** Mots-clés (absent si vide) : flying, reach, haste, vigilance, defender, menace, first_strike, double_strike, trample, deathtouch, lifelink. */
+  /** Mots-clés (absent si vide) : flying, reach, haste, vigilance, defender, menace, first_strike, double_strike, trample, deathtouch, lifelink, flash. */
   keywords?: string[]
   /** Mana ajouté par un rituel (effet 'mana'). */
   adds?: string[] | string

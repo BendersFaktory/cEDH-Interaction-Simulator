@@ -13,6 +13,7 @@ export const keywordLabels: Record<string, string> = {
   trample: 'piétinement',
   deathtouch: 'contact mortel',
   lifelink: 'lien de vie',
+  flash: 'flash',
 }
 
 export const keywordsText = (card: PublicCard): string => (card.keywords ?? []).map((k) => keywordLabels[k] ?? k).join(', ')

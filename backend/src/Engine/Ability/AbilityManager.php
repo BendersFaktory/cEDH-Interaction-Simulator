@@ -144,6 +144,9 @@ final class AbilityManager
         if ($ability->manaCost !== null) {
             $plan = self::costPlan($s, $p, $card, $ability) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
             ['tapped' => $payers, 'sacrifice' => $sacrifice, 'pain' => $pain] = $p->payWithPlan($plan);
+            if ($plan->lifeCost > 0) {
+                $pain[] = ['source' => $card->name, 'lifeCost' => $plan->lifeCost, 'selfDamage' => 0];
+            }
         }
         // PV payés à l'activation (fetchland, Mana Confluence), et dégâts d'une capacité de mana à elle-même (Ancient Tomb).
         if ($ability->lifeCost > 0 || ($ability->isManaAbility && $ability->selfDamage > 0)) {

@@ -37,6 +37,7 @@ final class CardInstance
     public const TRAMPLE = 'trample';
     public const DEATHTOUCH = 'deathtouch';
     public const LIFELINK = 'lifelink';
+    public const FLASH = 'flash';
 
     // Supertypes (CR 205.4).
     public const LEGENDARY = 'legendary';
@@ -168,7 +169,7 @@ final class CardInstance
     {
         $cost = $this->manaCost();
 
-        return $cost->hybrid === [] && array_diff(array_keys($cost->colored), ['C']) === [];
+        return $cost->hybrid === [] && $cost->phyrexian === [] && array_diff(array_keys($cost->colored), ['C']) === [];
     }
 
 
@@ -198,6 +199,9 @@ final class CardInstance
             foreach ($cost->hybrid as [$a, $b]) {
                 $found[$a->symbol()] = true;
                 $found[$b->symbol()] = true;
+            }
+            foreach ($cost->phyrexian as $color) {
+                $found[$color->symbol()] = true; // {U/P} est bleu (CR 903.4 : le symbole phyrexian compte)
             }
         };
         if (!$this->isLand()) {
@@ -303,9 +307,10 @@ final class CardInstance
         return $this->hasType(self::CREATURE);
     }
 
+    /** Lançable à tout moment où l'on a la priorité : éphémère ou carte avec flash. */
     public function isInstantSpeed(): bool
     {
-        return $this->hasType(self::INSTANT);
+        return $this->hasType(self::INSTANT) || in_array(self::FLASH, $this->keywords, true);
     }
 
     /** Représentation exposée dans les événements (tout est public dans ce simulateur). */

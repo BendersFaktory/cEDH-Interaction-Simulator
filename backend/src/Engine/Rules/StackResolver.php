@@ -35,6 +35,7 @@ final class StackResolver
                 'damage' => $this->damage($s, $item->targets[0] ?? '', $ability->amount, $card->name),
                 'draw' => $this->draw($s, $item->controller, $ability->amount),
                 'token' => $this->tokens($s, $item->controller, $ability->spec, $ability->amount),
+                'treasure' => $this->treasures($s, $item->controller, $ability->amount),
                 'pump' => $this->pump($s, $item->controller, $card->id, $item->ability),
                 'fetch' => $this->fetch($s, $item->controller, $item->ability, $item->targets),
                 default => null,
@@ -141,6 +142,13 @@ final class StackResolver
         ['name' => $name, 'power' => $power, 'toughness' => $toughness] = ActivatedAbility::parseTokenSpec($spec);
         for ($i = 0; $i < $amount; $i++) {
             $s->createToken($player, $name, CardInstance::CREATURE, $power, $toughness);
+        }
+    }
+
+    private function treasures(GameState $s, int $player, int $amount): void
+    {
+        for ($i = 0; $i < $amount; $i++) {
+            $s->createTreasure($player);
         }
     }
 

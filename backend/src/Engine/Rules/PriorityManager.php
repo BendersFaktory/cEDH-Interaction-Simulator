@@ -169,6 +169,9 @@ final class PriorityManager
             $fromCommand = true;
         }
         ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain] = $p->payWithPlan($plan);
+        if ($plan->lifeCost > 0) {
+            $pain[] = ['source' => $card->name, 'lifeCost' => $plan->lifeCost, 'selfDamage' => 0]; // symboles phyrexian payés en PV
+        }
         if ($fromCommand) {
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }

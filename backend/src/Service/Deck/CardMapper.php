@@ -23,6 +23,7 @@ final class CardMapper
         'vigilance' => CardInstance::VIGILANCE, 'defender' => CardInstance::DEFENDER, 'menace' => CardInstance::MENACE,
         'first strike' => CardInstance::FIRST_STRIKE, 'double strike' => CardInstance::DOUBLE_STRIKE,
         'trample' => CardInstance::TRAMPLE, 'deathtouch' => CardInstance::DEATHTOUCH, 'lifelink' => CardInstance::LIFELINK,
+        'flash' => CardInstance::FLASH,
     ];
     private const TYPES = [
         'land' => CardInstance::LAND, 'instant' => CardInstance::INSTANT, 'sorcery' => CardInstance::SORCERY,
@@ -51,7 +52,7 @@ final class CardMapper
         $subtypes = $subtypeNames === [] ? [] : [($isCreature ? CardInstance::CREATURE : $types[0]) => $subtypeNames];
 
         $manaCost = (string) ($card['mana_cost'] ?? '');
-        if ($manaCost !== '' && !preg_match('/^(\{(?:\d+|X|[WUBRGC](?:\/[WUBRG])?)\})+$/', $manaCost)) {
+        if ($manaCost !== '' && !preg_match('/^(\{(?:\d+|X|[WUBRGC](?:\/[WUBRG])?|[WUBRG]\/P)\})+$/', $manaCost)) {
             throw $fail("coût de mana non modélisé ($manaCost)");
         }
         $power = $toughness = 0;
@@ -90,6 +91,8 @@ final class CardMapper
                     throw $fail('dégâts X sans {X} dans le coût');
                 }
                 $effects[] = new SpellEffect('damage', $m[1] === 'X' ? 0 : (int) $m[1]);
+            } elseif ($isSpell && $line === 'Create a Treasure token.') {
+                $effects[] = new SpellEffect('treasure');
             } elseif ($isSpell && $line === 'Counter target spell.') {
                 $effects[] = new SpellEffect('counter');
             } elseif ($isSpell && $line === 'Exile target creature. Its controller gains life equal to its power.') {
@@ -279,6 +282,9 @@ final class CardMapper
         }
         if (preg_match('/^At the beginning of your upkeep' . $draw, $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::UPKEEP, 'draw', self::DRAW_COUNT[$m[1]]);
+        }
+        if (preg_match('/^When ~ enters, create (a|one|two|three) Treasure tokens?\.$/', $line, $m)) {
+            return new TriggeredAbility(TriggeredAbility::ETB, 'treasure', ['a' => 1, 'one' => 1, 'two' => 2, 'three' => 3][$m[1]]);
         }
         if ($isCreature && preg_match('/^When ~ dies' . $draw, $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::DIES, 'draw', self::DRAW_COUNT[$m[1]]);

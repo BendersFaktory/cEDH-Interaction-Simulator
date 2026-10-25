@@ -431,5 +431,48 @@
         "cmc": 0,
         "oracle_text": "Whenever City of Brass becomes tapped, it deals 1 damage to you.\n{T}: Add one mana of any color.",
         "keywords": []
+    },
+    {
+        "name": "Gut Shot",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{R/P}",
+        "cmc": 1,
+        "oracle_text": "({R/P} can be paid with either {R} or 2 life.)\nGut Shot deals 1 damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Ambush Viper",
+        "layout": "normal",
+        "type_line": "Creature — Snake",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "oracle_text": "Flash (You may cast this spell any time you could cast an instant.)\nDeathtouch",
+        "keywords": [
+            "Flash",
+            "Deathtouch"
+        ],
+        "power": "2",
+        "toughness": "1"
+    },
+    {
+        "name": "Test Treasure Spell",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{R}",
+        "cmc": 1,
+        "oracle_text": "Create a Treasure token.",
+        "keywords": []
+    },
+    {
+        "name": "Test Treasure Goblin",
+        "layout": "normal",
+        "type_line": "Creature — Goblin",
+        "mana_cost": "{1}{R}",
+        "cmc": 2,
+        "oracle_text": "When Test Treasure Goblin enters the battlefield, create a Treasure token.",
+        "keywords": [],
+        "power": "1",
+        "toughness": "1"
     }
 ]

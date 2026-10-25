@@ -44,6 +44,21 @@ final class DeckLoaderTest extends TestCase
         return (new CardMapper())->map(ScryfallFixtures::all()[$key]);
     }
 
+    public function testMapsPhyrexianFlashAndTreasure(): void
+    {
+        $gutShot = self::map('Gut Shot');
+        self::assertSame('{R/P}', $gutShot->manaCost);
+        self::assertSame([['effect' => 'damage', 'amount' => 1]], array_map(static fn ($e) => $e->toArray(), $gutShot->effects));
+
+        $viper = self::map('Ambush Viper');
+        self::assertContains(CardInstance::FLASH, $viper->keywords);
+        self::assertContains(CardInstance::DEATHTOUCH, $viper->keywords);
+
+        self::assertSame('treasure', self::map('Test Treasure Spell')->effects[0]->effect);
+        $goblin = self::map('Test Treasure Goblin');
+        self::assertSame([TriggeredAbility::ETB, 'treasure', 1], [$goblin->triggers[0]->event, $goblin->triggers[0]->effect, $goblin->triggers[0]->amount]);
+    }
+
     public function testParserHandlesCommonFormats(): void
     {
         $parsed = DecklistParser::parse("// commentaire\nCommander\n1 Isamaru, Hound of Konda\n\nDeck\n1x Sol Ring (C21) 263 *F*\n10 Plains\nLlanowar Elves\n2 Plains\n\nSideboard\n1 Forest\n");

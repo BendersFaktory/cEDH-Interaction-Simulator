@@ -48,9 +48,30 @@ final class ManaPayment
     public static function plan(PlayerState $p, ManaCost $cost, int $x = 0, ?int $turn = null, ?string $exclude = null, ?CardInstance $for = null, ?ManaContext $ctx = null): ?ManaPlan
     {
         $ctx ??= new ManaContext($p, $turn);
-        $state = ['nodes' => 0];
+        $sources = $ctx->sources($exclude, $for);
+        $converters = $ctx->converters($exclude, self::MAX_CONVERTERS);
+        $pool = $ctx->pool();
+        $restricted = $ctx->restrictedPool($for);
 
-        return self::solve($ctx->sources($exclude, $for), $ctx->converters($exclude, self::MAX_CONVERTERS), $ctx->pool(), $ctx->restrictedPool($for), $cost, $x, $state);
+        if ($cost->phyrexian === []) {
+            $state = ['nodes' => 0];
+
+            return self::solve($sources, $converters, $pool, $restricted, $cost, $x, $state);
+        }
+        // Symboles phyrexian (CR 107.4f) : le plus de mana possible, le reste en PV (2 par symbole, jamais sous 1 PV : CR 119.4).
+        $n = count($cost->phyrexian);
+        for ($life = 0; $life <= $n; $life++) {
+            if ($life > 0 && $p->life - 2 * $life < 1) {
+                return null;
+            }
+            $state = ['nodes' => 0];
+            $plan = self::solve($sources, $converters, $pool, $restricted, $cost->withPhyrexianAsMana($n - $life), $x, $state);
+            if ($plan !== null) {
+                return $life === 0 ? $plan : $plan->withLifeCost(2 * $life);
+            }
+        }
+
+        return null;
     }
 
     /** Photo du mana de `$p` à passer à `plan()`/`maxX()` pour scanner le champ de bataille une seule fois (état inchangé). */
@@ -64,6 +85,11 @@ final class ManaPayment
     {
         if (!$cost->hasX()) {
             return 0;
+        }
+        // Symboles phyrexian : payés en PV autant que les PV le permettent (jamais sous 1 PV), le reste en mana.
+        if ($cost->phyrexian !== []) {
+            $byLife = min(count($cost->phyrexian), intdiv(max(0, $p->life - 1), 2));
+            $cost = $cost->withPhyrexianAsMana(count($cost->phyrexian) - $byLife);
         }
         $ctx ??= new ManaContext($p, $turn);
         $sources = $ctx->sources(null, $for);
