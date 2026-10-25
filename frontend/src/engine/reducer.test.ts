@@ -352,7 +352,7 @@ describe('reducer — shocklands, fetchlands et PV payés', () => {
     v = applyEvent(v, ev(++seq, 'LifePaid', { player: 0, amount: 1, life: 39, source: 'Polluted Delta' }))
     v = applyEvent(v, ev(++seq, 'LandFetched', { player: 0, card: card('grave', 'Watery Grave'), library: 80 }))
     v = applyEvent(v, ev(++seq, 'LifePaid', { player: 0, amount: 2, life: 37, source: 'Watery Grave' }))
-    v = applyEvent(v, ev(++seq, 'LibraryShuffled', { player: 0, library: 80 }))
+    v = applyEvent(v, ev(seq + 1, 'LibraryShuffled', { player: 0, library: 80 }))
     const after = v.players[0]
     expect(after.life).toBe(37)
     expect(after.library).toBe(80)

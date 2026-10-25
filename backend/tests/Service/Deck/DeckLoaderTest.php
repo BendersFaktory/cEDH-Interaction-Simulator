@@ -158,7 +158,6 @@ final class DeckLoaderTest extends TestCase
         self::assertSame([CardInstance::CREATURE => ['Angel']], $deck->instantiate(0)['library'][0]->subtypes);
     }
 
-    /** @dataProvider unsupported */
     #[\PHPUnit\Framework\Attributes\DataProvider('unsupported')]
     public function testRefusesUnmodelledCards(string $key, string $reason): void
     {
@@ -230,7 +229,6 @@ final class DeckLoaderTest extends TestCase
         self::assertTrue($this->loader(true)->load("CMDR: Isamaru, Hound of Konda\n1 Sol Ring\n98 Plains")->degraded);
     }
 
-    /** @dataProvider invalidDecks */
     #[\PHPUnit\Framework\Attributes\DataProvider('invalidDecks')]
     public function testCommanderRulesAreValidated(string $list, string $message): void
     {
