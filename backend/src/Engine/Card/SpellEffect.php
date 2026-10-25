@@ -12,7 +12,7 @@ use App\Engine\Game\CardInstance;
  * `damage` (`amount`, ou X du coût), `counter` (`target` = `instant` : seulement un sort instantané, Dispel), `mana` (`adds`, rituel), `treasure`, `draw` (`amount` cartes),
  * `exile` (exile le permanent ciblé ; `target` = `creature` ou `permanent`, défaut `permanent` ; `powerLife` : son contrôleur gagne
  * autant de PV que sa force avant l'exil, Swords to Plowshares).
- * Au plus un effet ciblé par carte (`damage`, `counter` ou `exile`) : la carte a une seule cible (voir la case CR 608.2b de la roadmap).
+ * Plusieurs effets ciblés possibles : une cible par effet ciblé, dans l'ordre du texte (CR 608.2b, `StackResolver`).
  */
 final class SpellEffect
 {
@@ -84,21 +84,6 @@ final class SpellEffect
         }
 
         return false;
-    }
-
-    /**
-     * Liste d'effets valide : au plus un effet ciblé.
-     *
-     * @param list<self> $effects
-     * @return list<self>
-     */
-    public static function assertList(array $effects, string $cardName): array
-    {
-        if (count(array_filter($effects, static fn (self $e) => $e->isTargeted())) > 1) {
-            throw new \InvalidArgumentException("$cardName : au plus un effet ciblé par sort");
-        }
-
-        return array_values($effects);
     }
 
     /** Porte-t-il une précision absente des clés historiques (`effect`, `amount`, `adds`) ? Alors `CardInstance::toArray()` sérialise `effects`. */

@@ -59,19 +59,91 @@ final class StackResolver
             'destination' => $destination,
         ]);
 
-        // Effets dans l'ordre du texte (CR 608.2c) ; la cible unique sert l'effet ciblé.
-        foreach ($card->effects as $effect) {
+        // CR 608.2b : une cible par effet ciblé, dans l'ordre du texte. Si TOUTES les cibles sont devenues illégales, le sort ne
+        // fait rien (ses effets non ciblés compris) ; si seulement une partie l'est, les autres effets se résolvent quand même.
+        $targets = $this->targetsOfEffects($card, $item->targets);
+        $anyLegal = $targets === [];
+        foreach ($targets as $i => $target) {
+            if ($this->targetLegal($s, $card->effects[$i], $target)) {
+                $anyLegal = true;
+            }
+        }
+
+        // Effets dans l'ordre du texte (CR 608.2c).
+        foreach ($card->effects as $i => $effect) {
+            if (!$anyLegal && !$effect->isTargeted()) {
+                continue;
+            }
+            $target = $targets[$i] ?? '';
             match ($effect->effect) {
-                'damage' => $this->damage($s, $item->targets[0] ?? '', $card->manaCost()->hasX() ? $item->x : $effect->amount, $card->name),
-                'counter' => $this->counter($s, $item->targets[0] ?? '', $item->id, $effect),
+                'damage' => $this->damage($s, $target, $card->manaCost()->hasX() ? $item->x : $effect->amount, $card->name),
+                'counter' => $this->counter($s, $target, $item->id, $effect),
                 'mana' => $this->addMana($s, $item->controller, $effect->adds ?? '', $item->id),
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
-                'exile' => $this->exileTarget($s, $item->targets[0] ?? '', $effect, $card->name),
-                'tutor' => $this->tutor($s, $item->controller, $item->targets[0] ?? ''),
+                'exile' => $this->exileTarget($s, $target, $effect, $card->name),
+                'tutor' => $this->tutor($s, $item->controller, $target),
                 'scry' => null, // rangement déjà décidé avant la résolution (PriorityManager::scry)
             };
         }
+    }
+
+    /**
+     * Cible de chaque effet ciblé, indexée par la position de l'effet dans `$card->effects` (les cibles sont données dans
+     * l'ordre des effets ciblés, voir `LegalActionGenerator::targetSets()`).
+     *
+     * @param list<string> $targets
+     * @return array<int, string>
+     */
+    private function targetsOfEffects(CardInstance $card, array $targets): array
+    {
+        $out = [];
+        $k = 0;
+        foreach ($card->effects as $i => $effect) {
+            if ($effect->isTargeted()) {
+                $out[$i] = $targets[$k++] ?? '';
+            }
+        }
+
+        return $out;
+    }
+
+    /** La cible est-elle encore légale pour son effet à la résolution (CR 608.2b) ? Aucun événement émis. */
+    private function targetLegal(GameState $s, SpellEffect $effect, string $target): bool
+    {
+        return match ($effect->effect) {
+            'damage' => str_starts_with($target, 'player:') && !$s->player((int) substr($target, 7))->lost,
+            'counter' => $this->counterVictim($s, $target) !== null,
+            'exile' => $this->targetPermanent($s, $target, $effect) !== null,
+            default => true, // recherche de bibliothèque : une cible absente ne fait simplement rien
+        };
+    }
+
+    /** Le sort visé par un contresort (`stack:<id>`), s'il est encore sur la pile et n'est pas une capacité. */
+    private function counterVictim(GameState $s, string $target): ?\App\Engine\Game\StackItem
+    {
+        $victim = str_starts_with($target, 'stack:') ? $s->findStackItem(substr($target, 6)) : null;
+
+        return $victim === null || $victim->isAbility() ? null : $victim;
+    }
+
+    /**
+     * Le contrôleur et le permanent ciblés (`permanent:<id>`), s'ils sont encore sur le champ de bataille et légaux pour `$effect`
+     * (créature seulement si `target` = `creature`).
+     *
+     * @return array{int, CardInstance}|null
+     */
+    private function targetPermanent(GameState $s, string $target, SpellEffect $effect): ?array
+    {
+        $id = str_starts_with($target, 'permanent:') ? substr($target, 10) : null;
+        foreach ($s->players as $p) {
+            $card = $id === null || $p->lost ? null : $p->findOnBattlefield($id);
+            if ($card !== null && $effect->canTargetPermanent($card)) {
+                return [$p->id, $card];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -80,20 +152,18 @@ final class StackResolver
      */
     private function exileTarget(GameState $s, string $target, SpellEffect $effect, string $source): void
     {
-        $id = str_starts_with($target, 'permanent:') ? substr($target, 10) : null;
-        foreach ($s->players as $p) {
-            $card = $id === null || $p->lost ? null : $p->findOnBattlefield($id);
-            if ($card !== null && $effect->canTargetPermanent($card)) {
-                $power = $card->currentPower();
-                $s->exilePermanent($p->id, $id, $source);
-                if ($effect->powerLife) {
-                    $s->gainLife($p->id, $power, $source); // Swords to Plowshares : la force est celle d'avant l'exil
-                }
+        $hit = $this->targetPermanent($s, $target, $effect);
+        if ($hit === null) {
+            $s->emit('SpellFizzled', ['target' => $target]);
 
-                return;
-            }
+            return;
         }
-        $s->emit('SpellFizzled', ['target' => $target]);
+        [$owner, $card] = $hit;
+        $power = $card->currentPower();
+        $s->exilePermanent($owner, $card->id, $source);
+        if ($effect->powerLife) {
+            $s->gainLife($owner, $power, $source); // Swords to Plowshares : la force est celle d'avant l'exil
+        }
     }
 
     /** Rituel : le mana arrive dans la réserve du contrôleur (il disparaît à la fin de l'étape). */
@@ -202,8 +272,8 @@ final class StackResolver
 
     private function counter(GameState $s, string $target, string $byStackId, SpellEffect $effect): void
     {
-        $victim = str_starts_with($target, 'stack:') ? $s->findStackItem(substr($target, 6)) : null;
-        if ($victim === null || $victim->isAbility()) {
+        $victim = $this->counterVictim($s, $target);
+        if ($victim === null) {
             $s->emit('SpellFizzled', ['target' => $target]);
 
             return;

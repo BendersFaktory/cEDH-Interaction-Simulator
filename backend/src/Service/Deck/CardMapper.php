@@ -271,12 +271,12 @@ final class CardMapper
     /**
      * @param list<SpellEffect> $effects
      * @return list<SpellEffect>
-     * @throws UnsupportedCard plus d'un effet ciblé (une seule cible par sort aujourd'hui)
+     * @throws UnsupportedCard plus d'un effet ciblé (le moteur les gère, mais aucun motif multi-cibles n'est mappé)
      */
     private function effectList(array $effects, callable $fail): array
     {
         if (count(array_filter($effects, static fn (SpellEffect $e) => $e->isTargeted())) > 1) {
-            throw $fail('plusieurs effets ciblés (une seule cible par sort modélisée)');
+            throw $fail('plusieurs effets ciblés (motif multi-cibles non mappé)');
         }
 
         return $effects;

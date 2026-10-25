@@ -102,7 +102,7 @@ final class CardInstance
         public readonly int $untappedLifeCost = 0,
         public readonly ?string $altCost = null, // coût alternatif (ALT_PITCH_BLUE | ALT_COMMANDER), null = coût de mana seul
     ) {
-        $this->effects = SpellEffect::assertList($effects !== [] ? $effects : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]), $name);
+        $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
         $this->types = is_array($type) ? array_values($type) : [$type];
         if ($this->types === []) {
             throw new \InvalidArgumentException("$name : une carte a au moins un type");
@@ -134,16 +134,14 @@ final class CardInstance
         return $this->effect($effect) !== null;
     }
 
-    /** L'effet ciblé du sort (au plus un, voir `SpellEffect`), ou null. */
-    public function targetedEffect(): ?SpellEffect
+    /**
+     * Les effets ciblés du sort, dans l'ordre du texte : une cible par effet (CR 115.1, 608.2b). Vide si aucun.
+     *
+     * @return list<SpellEffect>
+     */
+    public function targetedEffects(): array
     {
-        foreach ($this->effects as $e) {
-            if ($e->isTargeted()) {
-                return $e;
-            }
-        }
-
-        return null;
+        return array_values(array_filter($this->effects, static fn (SpellEffect $e) => $e->isTargeted()));
     }
 
     /** Sous-type porté par la carte, sous le type `$type` s'il est donné (sinon sous n'importe lequel de ses types). */

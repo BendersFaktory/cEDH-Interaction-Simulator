@@ -58,10 +58,11 @@ final class CardDefinitionTest extends TestCase
         $this->assertArrayNotHasKey('effects', CardDefinition::fromArray(['name' => 'Bolt', 'type' => 'instant', 'spell' => ['effect' => 'damage', 'amount' => 3]])->instantiate('c2')->toArray());
     }
 
-    public function testTwoTargetedEffectsAreRefused(): void
+    public function testTwoTargetedEffectsAreKeptInTextOrder(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        CardDefinition::fromArray(['name' => 'Double', 'type' => 'instant', 'effects' => [['effect' => 'damage', 'amount' => 1], ['effect' => 'counter']]]);
+        $card = CardDefinition::fromArray(['name' => 'Double', 'type' => 'instant', 'effects' => [['effect' => 'damage', 'amount' => 1], ['effect' => 'counter']]])->instantiate('d1');
+
+        $this->assertSame(['damage', 'counter'], array_map(static fn ($e) => $e->effect, $card->targetedEffects()), 'Une cible par effet ciblé (CR 608.2b)');
     }
 
     private function definitionOf(\App\Engine\Game\CardInstance $c): array

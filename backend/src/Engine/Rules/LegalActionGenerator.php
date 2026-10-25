@@ -472,24 +472,46 @@ final class LegalActionGenerator
         throw new IllegalActionException(sprintf('Action illégale pour le joueur %d : %s', $holder, $injected->id()));
     }
 
-    /** @return list<list<string>> */
+    /**
+     * Cibles d'un sort : une liste par combinaison de cibles, une cible par effet ciblé dans l'ordre du texte (CR 115.1).
+     * Chaque effet ciblé choisit sa cible indépendamment des autres (deux « cible joueur » peuvent viser le même joueur,
+     * comme deux mots « cible » distincts, CR 115.3). Sans effet ciblé : une seule liste vide. Un effet sans cible légale
+     * annule toutes les combinaisons.
+     *
+     * @return list<list<string>>
+     */
     private function targetSets(GameState $s, CardInstance $card, int $playerId): array
     {
-        $effect = $card->targetedEffect();
+        $sets = [[]];
+        foreach ($card->targetedEffects() as $effect) {
+            $next = [];
+            foreach ($sets as $set) {
+                foreach ($this->targetCandidates($s, $effect, $playerId) as $target) {
+                    $next[] = [...$set, $target];
+                }
+            }
+            $sets = $next;
+        }
 
-        return match ($effect?->effect) {
+        return $sets;
+    }
+
+    /** @return list<string> les cibles légales d'un effet ciblé */
+    private function targetCandidates(GameState $s, SpellEffect $effect, int $playerId): array
+    {
+        return match ($effect->effect) {
             // Tuteur : une carte de sa bibliothèque par nom (`library:<id>`), comme une fetchland.
             'tutor' => self::libraryTargets($s->player($playerId)),
             // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`).
             'exile' => self::permanentTargets($s, $effect),
-            'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
+            'damage' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
             // Un contresort ne cible que des sorts, pas des capacités activées ; Dispel seulement les instants (`SpellEffect::canCounter()`).
-            'counter' => array_map(static fn ($item) => ['stack:' . $item->id], array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && ($effect?->canCounter($item->card) ?? false)))),
-            default => [[]],
+            'counter' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && $effect->canCounter($item->card)))),
+            default => [],
         };
     }
 
-    /** @return list<list<string>> une cible `library:<id>` par nom de carte de la bibliothèque (`library:none` si elle est vide) */
+    /** @return list<string> une cible `library:<id>` par nom de carte de la bibliothèque (`library:none` si elle est vide) */
     private static function libraryTargets(PlayerState $p): array
     {
         $out = [];
@@ -497,21 +519,21 @@ final class LegalActionGenerator
         foreach ($p->library as $card) {
             if (!isset($seen[$card->name])) {
                 $seen[$card->name] = true;
-                $out[] = ['library:' . $card->id];
+                $out[] = 'library:' . $card->id;
             }
         }
 
-        return $out === [] ? [['library:none']] : $out;
+        return $out === [] ? ['library:none'] : $out;
     }
 
-    /** @return list<list<string>> une cible `permanent:<id>` par permanent légal, joueurs dans l'ordre du tour */
+    /** @return list<string> une cible `permanent:<id>` par permanent légal, joueurs dans l'ordre du tour */
     private static function permanentTargets(GameState $s, SpellEffect $effect): array
     {
         $out = [];
         foreach ($s->alivePlayerIds() as $id) {
             foreach ($s->player($id)->battlefield as $permanent) {
                 if ($effect->canTargetPermanent($permanent)) {
-                    $out[] = ['permanent:' . $permanent->id];
+                    $out[] = 'permanent:' . $permanent->id;
                 }
             }
         }

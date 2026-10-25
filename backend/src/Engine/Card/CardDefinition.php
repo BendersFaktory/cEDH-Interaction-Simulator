@@ -52,11 +52,7 @@ final class CardDefinition
         public readonly int $untappedLifeCost = 0,
         public readonly ?string $altCost = null,
     ) {
-        try {
-            $this->effects = SpellEffect::assertList($effects !== [] ? $effects : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]), $name);
-        } catch (\InvalidArgumentException $e) {
-            throw new \InvalidArgumentException("$name : " . $e->getMessage(), 0, $e);
-        }
+        $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
     }
 
     public function instantiate(string $id, bool $commander = false): CardInstance
