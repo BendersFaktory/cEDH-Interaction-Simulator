@@ -451,6 +451,15 @@
         "keywords": []
     },
     {
+        "name": "Swan Song",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}",
+        "cmc": 1,
+        "oracle_text": "Counter target enchantment, instant, or sorcery spell. If that spell is countered this way, its controller creates a 2/2 blue Bird creature token with flying.",
+        "keywords": []
+    },
+    {
         "name": "Ambush Viper",
         "layout": "normal",
         "type_line": "Creature — Snake",

@@ -63,7 +63,7 @@ final class StackResolver
         foreach ($card->effects as $effect) {
             match ($effect->effect) {
                 'damage' => $this->damage($s, $item->targets[0] ?? '', $card->manaCost()->hasX() ? $item->x : $effect->amount, $card->name),
-                'counter' => $this->counter($s, $item->targets[0] ?? '', $item->id),
+                'counter' => $this->counter($s, $item->targets[0] ?? '', $item->id, $effect),
                 'mana' => $this->addMana($s, $item->controller, $effect->adds ?? '', $item->id),
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
@@ -180,7 +180,7 @@ final class StackResolver
         $s->emit('DamageDealt', ['source' => $source, 'target' => $target, 'amount' => $amount, 'life' => $victim->life]);
     }
 
-    private function counter(GameState $s, string $target, string $byStackId): void
+    private function counter(GameState $s, string $target, string $byStackId, SpellEffect $effect): void
     {
         $victim = str_starts_with($target, 'stack:') ? $s->findStackItem(substr($target, 6)) : null;
         if ($victim === null || $victim->isAbility()) {
@@ -197,5 +197,10 @@ final class StackResolver
             'by' => $byStackId,
             'destination' => $destination, // 'graveyard' (un commandant y passe avant les SBA, CR 903.9a)
         ]);
+        if ($effect->token !== null) {
+            // Swan Song : « si ce sort est contré ainsi, son contrôleur crée un jeton » (le sort contré, pas le contresort).
+            ['name' => $name, 'power' => $power, 'toughness' => $toughness] = ActivatedAbility::parseTokenSpec($effect->token);
+            $s->createToken($victim->controller, $name, CardInstance::CREATURE, $power, $toughness, keywords: $effect->tokenKeywords);
+        }
     }
 }

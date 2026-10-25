@@ -96,6 +96,14 @@ export function triggerText(t: TriggerView): string {
   return `${when} : ${effectText(t.effect, t.amount, t.spec)}`
 }
 
+/** Jeton créé pour le contrôleur du sort contré (Swan Song : « son contrôleur crée un jeton Bird 2/2 volant »). */
+function counterTokenText(e: { effect: string; token?: string; tokenKeywords?: string[] }): string {
+  if (e.effect !== 'counter' || !e.token) return ''
+  const [name, stats] = e.token.split(':')
+  const flying = e.tokenKeywords?.includes('flying') ? ' volant' : ''
+  return ` ; son contrôleur crée un jeton ${name} ${stats}${flying}`
+}
+
 /** Effet d'un sort (dégâts, contre, pioche...), tel que le moteur le décrit. */
 export function spellText(card: PublicCard): string | null {
   const effects = card.effects ?? (card.effect ? [{ effect: card.effect, amount: card.amount, adds: card.adds }] : [])
@@ -104,7 +112,7 @@ export function spellText(card: PublicCard): string | null {
     .map((e) =>
       e.effect === 'mana'
         ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}`
-        : effectText(e.effect, e.amount, 'target' in e ? e.target : undefined) + ('powerLife' in e && e.powerLife ? ' (son contrôleur gagne autant de PV que sa force)' : ''),
+        : effectText(e.effect, e.amount, 'target' in e ? e.target : undefined) + ('powerLife' in e && e.powerLife ? ' (son contrôleur gagne autant de PV que sa force)' : '') + counterTokenText(e),
     )
     .join(', puis ')
 }

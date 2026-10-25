@@ -97,6 +97,8 @@ final class CardMapper
                 $effects[] = new SpellEffect('counter');
             } elseif ($isSpell && $line === 'Counter target instant spell.') {
                 $effects[] = new SpellEffect('counter', 0, null, CardInstance::INSTANT); // Dispel
+            } elseif ($isSpell && $line === 'Counter target enchantment, instant, or sorcery spell. If that spell is countered this way, its controller creates a 2/2 blue Bird creature token with flying.') {
+                $effects[] = new SpellEffect('counter', 0, null, implode('|', [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY]), false, 'Bird:2/2', [CardInstance::FLYING]); // Swan Song
             } elseif ($isSpell && $line === 'Exile target creature. Its controller gains life equal to its power.') {
                 $effects[] = new SpellEffect('exile', 0, null, 'creature', true); // Swords to Plowshares
             } elseif ($isLand && preg_match('/^Whenever ~ becomes tapped, it deals (\d+) damage to you\.$/', $line, $m)) {

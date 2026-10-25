@@ -66,6 +66,14 @@ final class DeckLoaderTest extends TestCase
         self::assertSame([['effect' => 'counter']], array_map(static fn ($e) => $e->toArray(), self::map('Counterspell')->effects));
     }
 
+    public function testMapsSwanSongWithItsBirdToken(): void
+    {
+        $swanSong = self::map('Swan Song');
+        self::assertSame([[
+            'effect' => 'counter', 'target' => 'enchantment|instant|sorcery', 'token' => 'Bird:2/2', 'tokenKeywords' => [CardInstance::FLYING],
+        ]], array_map(static fn ($e) => $e->toArray(), $swanSong->effects));
+    }
+
     public function testParserHandlesCommonFormats(): void
     {
         $parsed = DecklistParser::parse("// commentaire\nCommander\n1 Isamaru, Hound of Konda\n\nDeck\n1x Sol Ring (C21) 263 *F*\n10 Plains\nLlanowar Elves\n2 Plains\n\nSideboard\n1 Forest\n");

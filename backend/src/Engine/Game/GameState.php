@@ -257,11 +257,11 @@ final class GameState
      * @param list<ActivatedAbility>      $abilities
      * @param array<string, list<string>> $subtypes
      */
-    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = [], array $subtypes = []): CardInstance
+    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = [], array $subtypes = [], array $keywords = []): CardInstance
     {
         $token = new CardInstance(
             sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $type,
-            power: $power, toughness: $toughness, abilities: $abilities, token: true, subtypes: $subtypes,
+            power: $power, toughness: $toughness, abilities: $abilities, token: true, subtypes: $subtypes, keywords: $keywords,
         );
         $this->enterBattlefield($playerId, $token);
         $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()]);

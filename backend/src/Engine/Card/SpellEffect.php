@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Card;
 
+use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Game\CardInstance;
 
 /**
@@ -19,8 +20,10 @@ final class SpellEffect
     public const TARGETED = ['damage', 'counter', 'exile'];
     /** Genres de permanents qu'un effet `exile` peut cibler. */
     public const PERMANENT_TARGETS = ['creature', 'permanent'];
-    /** Types de sorts qu'un effet `counter` peut viser (`target`) ; null = tout sort (Counterspell). */
-    public const COUNTER_TARGETS = [CardInstance::INSTANT];
+    /** Types de sorts qu'un effet `counter` peut viser (`target`, alternatives séparées par `|`) ; null = tout sort (Counterspell). */
+    public const COUNTER_TARGETS = [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY];
+    /** Mots-clés qu'un jeton créé par un contresort peut recevoir (Swan Song : Bird 2/2 volant). */
+    public const TOKEN_KEYWORDS = [CardInstance::FLYING];
 
     public function __construct(
         public readonly string $effect,
@@ -28,13 +31,15 @@ final class SpellEffect
         public readonly ?string $adds = null, // mana ajouté par un effet `mana`, ex. `{R}{R}`
         public readonly ?string $target = null, // effet `exile` : `creature` | `permanent` (null = `permanent`)
         public readonly bool $powerLife = false, // effet `exile` : le contrôleur de la cible gagne PV = sa force (Swords to Plowshares)
+        public readonly ?string $token = null, // effet `counter` : jeton `Nom:F/E` créé pour le contrôleur du sort contré (Swan Song)
+        public readonly array $tokenKeywords = [], // mots-clés du jeton (`TOKEN_KEYWORDS`)
     ) {
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
         }
         $validTarget = match ($effect) {
             'exile' => in_array($target, self::PERMANENT_TARGETS, true),
-            'counter' => in_array($target, self::COUNTER_TARGETS, true),
+            'counter' => $target !== null && array_diff(explode('|', $target), self::COUNTER_TARGETS) === [],
             default => false,
         };
         if ($target !== null && !$validTarget) {
@@ -42,6 +47,13 @@ final class SpellEffect
         }
         if ($powerLife && $effect !== 'exile') {
             throw new \InvalidArgumentException("« powerLife » n'a de sens que pour l'effet « exile »");
+        }
+        if ($token !== null) {
+            ActivatedAbility::parseTokenSpec($token); // lève une exception si le jeton est mal décrit
+        }
+        if (($token === null && $tokenKeywords !== []) || ($token !== null && $effect !== 'counter')
+            || array_diff($tokenKeywords, self::TOKEN_KEYWORDS) !== []) {
+            throw new \InvalidArgumentException("Jeton « $token » invalide pour l'effet « $effect »");
         }
     }
 
@@ -59,7 +71,16 @@ final class SpellEffect
     /** Le sort `$card` (sur la pile) est-il une cible légale de cet effet `counter` (Dispel : instant seulement) ? */
     public function canCounter(CardInstance $card): bool
     {
-        return $this->target === null || $card->hasType($this->target);
+        if ($this->target === null) {
+            return true;
+        }
+        foreach (explode('|', $this->target) as $type) {
+            if ($card->hasType($type)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -80,18 +101,20 @@ final class SpellEffect
     /** Porte-t-il une précision absente des clés historiques (`effect`, `amount`, `adds`) ? Alors `CardInstance::toArray()` sérialise `effects`. */
     public function isPrecise(): bool
     {
-        return $this->target !== null || $this->powerLife;
+        return $this->target !== null || $this->powerLife || $this->token !== null;
     }
 
     /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …, 'target' => …]`, `amount`, `adds` et `target` omis à leur défaut. */
     public function toArray(): array
     {
         return ['effect' => $this->effect] + ($this->amount !== 0 ? ['amount' => $this->amount] : []) + ($this->adds !== null ? ['adds' => $this->adds] : [])
-            + ($this->target !== null ? ['target' => $this->target] : []) + ($this->powerLife ? ['powerLife' => true] : []);
+            + ($this->target !== null ? ['target' => $this->target] : []) + ($this->powerLife ? ['powerLife' => true] : [])
+            + ($this->token !== null ? ['token' => $this->token] : []) + ($this->tokenKeywords !== [] ? ['tokenKeywords' => $this->tokenKeywords] : []);
     }
 
     public static function fromArray(array $d): self
     {
-        return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null, (bool) ($d['powerLife'] ?? false));
+        return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null, (bool) ($d['powerLife'] ?? false),
+            $d['token'] ?? null, $d['tokenKeywords'] ?? []);
     }
 }
