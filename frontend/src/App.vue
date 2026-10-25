@@ -1,23 +1,19 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import ActionPanel from './components/ActionPanel.vue'
+import BranchTree from './components/BranchTree.vue'
 import EventLog from './components/EventLog.vue'
 import GameBoard from './components/GameBoard.vue'
 import PauseBar from './components/PauseBar.vue'
 import StopsPanel from './components/StopsPanel.vue'
 import PlaybackControls from './components/PlaybackControls.vue'
-import { useSimulationStore } from './stores/simulation'
+import { AI_PROFILES, useSimulationStore } from './stores/simulation'
 import type { DeckInput } from './types/engine'
 
 const store = useSimulationStore()
 const seed = ref<number | undefined>(undefined)
 const loadId = ref<number | undefined>(undefined)
 const playAsJ0 = ref(true)
-const AI_PROFILES = [
-  { key: 'ai:heuristic', label: 'Équilibrée' },
-  { key: 'ai:aggro', label: 'Aggro' },
-  { key: 'ai:control', label: 'Contrôle' },
-]
 /** Decklists optionnelles par siège (texte brut) ; un siège vide garde son deck de démo. */
 const decklists = ref(['', '', '', ''])
 const commanders = ref(['', '', '', ''])
@@ -86,6 +82,7 @@ const aiProfiles = ref(['ai:heuristic', 'ai:heuristic', 'ai:heuristic', 'ai:heur
       <ActionPanel />
       <StopsPanel />
       <PauseBar />
+      <BranchTree />
       <EventLog />
     </aside>
   </main>

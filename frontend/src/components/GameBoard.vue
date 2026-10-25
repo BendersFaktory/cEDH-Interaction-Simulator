@@ -4,6 +4,7 @@ import { useSimulationStore } from '../stores/simulation'
 import PlayerArea from './PlayerArea.vue'
 import StackPanel from './StackPanel.vue'
 import CardPreview from './CardPreview.vue'
+import PhaseStrip from './PhaseStrip.vue'
 import { phaseLabel } from '../engine/phases'
 
 const store = useSimulationStore()
@@ -24,6 +25,7 @@ const seated = computed(() => {
 
 <template>
   <div class="board">
+    <PhaseStrip />
     <div class="board-header">
       <strong>Tour {{ view.turn }}</strong>
       <span>{{ phaseLabel(view.phase) }}</span>

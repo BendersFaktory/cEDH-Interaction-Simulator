@@ -153,6 +153,23 @@ export interface StopsConfig {
   onDeclareBlockers: boolean
 }
 
+/** Une branche de l'arbre (GET /simulations/{id}/branches). */
+export interface BranchNode {
+  id: number
+  parentId: number | null
+  forkEventSeq: number | null
+  status: SimulationStatus
+  eventCount: number
+  /** Sièges humains (ids) de la branche. */
+  humans: number[]
+}
+
+export interface BranchTree {
+  current: number
+  /** Racine d'abord, puis les fils en largeur. */
+  branches: BranchNode[]
+}
+
 export interface SimulationView {
   id: number
   parentId: number | null

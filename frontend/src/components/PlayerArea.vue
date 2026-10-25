@@ -2,7 +2,11 @@
 import { computed } from 'vue'
 import { hasType, type BoardCard, type PlayerView } from '../types/engine'
 import { restrictionLabel } from '../engine/describe'
+import { useSimulationStore } from '../stores/simulation'
 import CardView from './CardView.vue'
+import CardMenu from './CardMenu.vue'
+
+const store = useSimulationStore()
 
 const props = defineProps<{ player: PlayerView; isActive: boolean; hasPriority: boolean; hasPassed: boolean }>()
 
@@ -31,7 +35,7 @@ const commanderDamage = computed(() => Object.entries(props.player.commanderDama
 
 <template>
   <section class="player" :class="{ active: isActive, priority: hasPriority, passed: hasPassed && !hasPriority, lost: player.lost }">
-    <header>
+    <header :class="{ targetable: store.targetHighlights.has(`player:${player.id}`) }" @click="store.pickTarget(`player:${player.id}`)">
       <h3>
         J{{ player.id }} <small>{{ player.controller }}</small>
       </h3>
@@ -63,7 +67,14 @@ const commanderDamage = computed(() => Object.entries(props.player.commanderDama
     <div v-for="r in rows" v-show="r.cards.length" :key="r.key" class="zone" :class="`row-${r.key}`">
       <h4>{{ r.title }}</h4>
       <div class="cards">
-        <CardView v-for="c in r.cards" :key="c.id" :card="c" compact />
+        <CardView
+          v-for="c in r.cards"
+          :key="c.id"
+          :card="c"
+          compact
+          :targetable="store.targetHighlights.has(`permanent:${c.id}`)"
+          @pick="store.targetHighlights.has(`permanent:${c.id}`) ? store.pickTarget(`permanent:${c.id}`) : store.selectCard(c.id)"
+        />
       </div>
     </div>
     <p v-if="!player.battlefield.length" class="muted battlefield-empty">Aucun permanent</p>
@@ -71,8 +82,9 @@ const commanderDamage = computed(() => Object.entries(props.player.commanderDama
     <div class="zone">
       <h4>Main ({{ player.hand.length }})</h4>
       <div class="cards">
-        <CardView v-for="c in player.hand" :key="c.id" :card="c" compact />
+        <CardView v-for="c in player.hand" :key="c.id" :card="c" compact @pick="store.selectCard(c.id)" />
       </div>
+      <CardMenu v-if="store.pending?.player === player.id" />
     </div>
 
     <footer>

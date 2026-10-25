@@ -4,7 +4,8 @@ import { hasType, typesOf, type BoardCard } from '../types/engine'
 import { frameOf, keywordsText, manaSymbols, symbolClass, typeLine } from '../engine/cardText'
 import { useSimulationStore } from '../stores/simulation'
 
-const props = defineProps<{ card: BoardCard; compact?: boolean }>()
+const props = defineProps<{ card: BoardCard; compact?: boolean; targetable?: boolean }>()
+const emit = defineEmits<{ pick: [] }>()
 const store = useSimulationStore()
 
 const symbols = computed(() => manaSymbols(props.card.manaCost))
@@ -31,10 +32,12 @@ const playable = computed(() => store.playableCardIds.has(props.card.id))
         attacking: card.attacking !== undefined,
         blocking: card.blocking !== undefined,
         playable,
+        targetable: props.targetable,
       },
     ]"
     @mouseenter="store.hoveredCard = card"
     @mouseleave="store.hoveredCard = null"
+    @click="emit('pick')"
   >
     <img v-if="art && !artFailed && !compact" class="card-art" :src="art" alt="" loading="lazy" @error="artFailed = true" />
     <span class="card-name">{{ card.name }}</span>

@@ -218,6 +218,12 @@ async function run() {
     ['21', (b) => scenario(b, '21', s21)],
     ['22', (b) => scenario(b, '22', s22)],
     ['23', (b) => scenario(b, '23', s23)],
+    ['24', (b) => scenario(b, '24', s24)],
+    ['25', (b) => scenario(b, '25', s25)],
+    ['26', (b) => scenario(b, '26', s26)],
+    ['27', (b) => scenario(b, '27', s27)],
+    ['28', (b) => scenario(b, '28', s28)],
+    ['29', (b) => scenario(b, '29', s29)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1272,4 +1278,239 @@ async function s23({ page, log, shot, problem, openGame, tryClick }) {
   const hurt = (await page.locator('text=/subit \\d+ dégâts/').allTextContents()).map(flat).slice(hurtBefore)
   log('23 dégâts subis après répartition :', hurt.join(' ; '))
   if (!hurt.some((t) => blockers.some((x) => t.includes(`${x} subit`)))) problem('recette double blocage : aucun bloqueur ne subit de dégâts dans le journal après la répartition')
+}
+
+// 24 : RENDRE LA MAIN À L'IA. J0 humain (partie UI) ; on prend J1 dans une branche, puis on rend J1 à l'IA avec le profil « Contrôle » :
+// la branche créée (fork) n'a plus que J0 humain, le panneau ne propose plus de rendre J1, et la branche d'origine garde J1 humain.
+async function s24({ page, log, shot, problem, newUiGame }) {
+  await newUiGame(7)
+  await page.click('button[title="Fin"]')
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  const origin = await page.locator('.topbar .muted').textContent()
+  await page.locator('.pausebar label:has-text("J1") input').check()
+  const [takeRes] = await Promise.all([page.waitForResponse((r) => /\/fork$/.test(r.url()) && r.request().method() === 'POST'), page.click('.pausebar button:has-text("Reprendre la main ici")')])
+  if (takeRes.status() !== 201) problem(`recette rendre la main : fork « Reprendre » répond ${takeRes.status()}`)
+  await page.waitForSelector('[data-testid="handback-1"]', { timeout: TIMEOUT })
+  await page.waitForSelector('[data-testid="handback-0"]', { timeout: TIMEOUT })
+  log('24 branche humaine :', (await page.locator('.topbar .muted').textContent()).replace(/\s+/g, ' '), '| origine :', origin.replace(/\s+/g, ' '))
+  await shot('24a-rendre-la-main-panneau')
+
+  await page.selectOption('[data-testid="handback-profile-1"]', 'ai:control')
+  const [backRes] = await Promise.all([page.waitForResponse((r) => /\/fork$/.test(r.url()) && r.request().method() === 'POST'), page.click('[data-testid="handback-1"]')])
+  const backBody = await backRes.json().catch(() => ({}))
+  if (backRes.status() !== 201) problem(`recette rendre la main : fork « Rendre la main à l'IA » répond ${backRes.status()}`)
+  if (backBody.controllers?.[1] !== 'ai:control') problem(`recette rendre la main : J1 devrait être ai:control, reçu ${JSON.stringify(backBody.controllers)}`)
+  await page.waitForSelector('[data-testid="handback-1"]', { state: 'detached', timeout: TIMEOUT }).catch(() => problem('recette rendre la main : le bouton J1 est encore affiché après le fork'))
+  await page.waitForSelector('[data-testid="handback-0"]', { timeout: TIMEOUT })
+  log("24 branche rendue à l'IA :", (await page.locator('.topbar .muted').textContent()).replace(/\s+/g, ' '), '| controllers :', JSON.stringify(backBody.controllers))
+  await shot('24b-rendre-la-main-fait')
+}
+
+// 25 : ARBRE DES BRANCHES. Partie J0 (UI), une branche où J1 est pris : l'arbre liste la racine et la branche (la branche est la courante).
+// « Ouvrir » sur la racine change de simulation ; cocher deux branches affiche le tableau de comparaison.
+async function s25({ page, log, shot, problem, newUiGame }) {
+  await newUiGame(7)
+  await page.click('button[title="Fin"]')
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  await page.locator('.pausebar label:has-text("J1") input').check()
+  await Promise.all([page.waitForResponse((r) => /\/fork$/.test(r.url()) && r.request().method() === 'POST'), page.click('.pausebar button:has-text("Reprendre la main ici")')])
+  // Le fork répond avant que la page ait chargé la branche : on attend l'en-tête « fork de » (sinon on lit la racine).
+  await page.waitForFunction(() => (document.querySelector('.topbar .muted')?.textContent ?? '').includes('fork de'), null, { timeout: TIMEOUT })
+  await page.waitForSelector('.branch-list li.current', { timeout: TIMEOUT })
+  const header = (await page.locator('.topbar .muted').textContent()) ?? ''
+  const child = Number(header.match(/simulation #(\d+)/)?.[1])
+  const root = Number(header.match(/fork de #(\d+)/)?.[1])
+  // L'arbre se relit après le chargement de la branche : on attend ses deux lignes.
+  await page.waitForFunction(() => document.querySelectorAll('.branch-list li').length === 2, null, { timeout: TIMEOUT }).catch(() => {})
+  const rows = await page.locator('.branch-list li').count()
+  log('25 arbre :', rows, 'ligne(s), courante #' + child, '| racine #' + root)
+  if (rows !== 2) problem(`recette arbre : ${rows} ligne(s) au lieu de 2 (racine + branche)`)
+  if (!root || !child) problem(`recette arbre : en-tête sans ids (« ${header.trim()} »)`)
+  if (!(await page.locator(`[data-testid="branch-${child}"]`).evaluate((el) => el.classList.contains('current')))) problem('recette arbre : la branche courante n’est pas marquée')
+  await shot('25a-arbre')
+
+  await Promise.all([page.waitForResponse((r) => new RegExp(`/api/simulations/${root}/events`).test(r.url())), page.locator(`[data-testid="branch-${root}"] button:has-text("Ouvrir")`).click()])
+  await page.waitForFunction((r) => (document.querySelector('.topbar .muted')?.textContent ?? '').includes(`simulation #${r}`), root, { timeout: TIMEOUT })
+  log('25 après « Ouvrir » racine :', (await page.locator('.topbar .muted').textContent()).replace(/\s+/g, ' '))
+  if (!(await page.locator(`[data-testid="branch-${root}"]`).evaluate((el) => el.classList.contains('current')))) problem('recette arbre : après « Ouvrir », la racine n’est pas la courante')
+
+  await page.locator(`[data-testid="branch-compare-${root}"]`).check()
+  await page.locator(`[data-testid="branch-compare-${child}"]`).check()
+  await page.waitForSelector('[data-testid="branch-compare-table"]', { timeout: TIMEOUT })
+  const table = (await page.locator('[data-testid="branch-compare-table"]').innerText()).replace(/\s+/g, ' ')
+  log('25 comparaison :', table)
+  if (!/Événements/.test(table) || !table.includes(`#${root}`) || !table.includes(`#${child}`)) problem('recette arbre : tableau de comparaison incomplet')
+  await shot('25b-comparaison')
+}
+
+// 26 : CIBLE AU CLIC. J0 a Lightning Bolt en main : quand le sort est jouable, on ne clique PAS son bouton mais un adversaire
+// surligné sur le plateau. Le sort doit partir vers cet adversaire (journal « J0 lance Lightning Bolt … → Jn »), sans panneau de choix.
+async function s26({ page, log, shot, problem, openGame, enabled, tryClick }) {
+  const { seed, id } = await findHandSeed(['Lightning Bolt'], [], 2)
+  log('26 graine retenue :', seed)
+  await openGame(id)
+  let picked = null
+  for (let i = 0; i < 300 && !picked; i++) {
+    if (!(await page.locator('.actions').count())) break
+    const spell = page.locator('.actions h4:has-text("Sorts") ~ button:not([disabled]):has-text("Lightning Bolt")').first()
+    const foe = page.locator('.player:not(:has(h3:has-text("J0"))) header.targetable').first()
+    if ((await spell.count()) && (await foe.count())) {
+      await shot('26a-cibles-surlignees')
+      const seat = (await foe.locator('xpath=ancestor::section[contains(@class,"player")]//h3').textContent()).match(/J(\d+)/)[1]
+      await foe.click()
+      await page.waitForFunction(() => /lance Lightning Bolt/.test(document.querySelector('.log')?.innerText ?? ''), null, { timeout: 10_000 }).catch(() => {})
+      const line =
+        (
+          await page
+            .locator('.log li', { hasText: 'lance Lightning Bolt' })
+            .last()
+            .textContent()
+            .catch(() => '')
+        )
+          ?.replace(/\s+/g, ' ')
+          .trim() ?? ''
+      picked = { seat, line, choice: await page.locator('[data-testid="target-pick"]').count() }
+      break
+    }
+    if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
+    else if (await enabled('Terminer la déclaration').count()) await tryClick(enabled('Terminer la déclaration'))
+    else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
+    else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
+    await page.waitForTimeout(150)
+  }
+  if (!picked) return problem('recette cible au clic : aucun Lightning Bolt jouable avec un adversaire surligné')
+  log('26 cible cliquée : J' + picked.seat, '| journal :', picked.line, '| panneau de choix :', picked.choice)
+  await shot('26-cible-au-clic')
+  if (!picked.line.includes(`→ J${picked.seat}`)) problem(`recette cible au clic : le sort ne part pas vers J${picked.seat} (journal : « ${picked.line} »)`)
+  if (picked.choice) problem('recette cible au clic : le panneau de choix reste affiché pour une cible unique')
+}
+
+// 27 : CONFIRMATION AVANT DE PASSER. Une graine où J0 reçoit la priorité avec un objet sur la pile : « Passer la priorité » demande
+// un second clic (le premier ne décide rien) ; le second passe bien.
+async function s27({ page, log, shot, problem, openGame, tryClick }) {
+  let found = null
+  for (let seed = 1; seed <= 60 && !found; seed++) {
+    const sim = await api.createHuman(seed)
+    // Un sort lancé rend la priorité à son lanceur avec la pile non vide : on lance donc un sort de J0 dès qu'il peut.
+    const r = await api.drive(sim.id, (p) => {
+      if (p.stack.length && p.actions.some((a) => a.type === 'pass')) return 'stop'
+      return p.actions.find((a) => a.type === 'cast') ?? p.actions.find((a) => a.type === 'land') ?? p.actions.find((a) => a.type === 'pass') ?? p.actions[0] ?? null
+    })
+    if (r.stopped) found = { seed, id: sim.id }
+  }
+  if (!found) return problem('recette confirmation : aucune graine 1..60 où J0 a la priorité avec une pile non vide')
+  log('27 graine retenue :', found.seed, '(#' + found.id + ')')
+  await openGame(found.id)
+  const pass = page.locator('.actions h4:has-text("Priorité") ~ button:not([disabled])').first()
+  const before = await page.locator('.actions h3').textContent()
+  const label1 = (await pass.textContent())?.trim()
+  await shot('27a-passer-pile')
+  await tryClick(pass)
+  await page.waitForTimeout(400)
+  const same = (await page.locator('.actions h3').textContent()) === before
+  const label2 = (await page.locator('.actions h4:has-text("Priorité") ~ button:not([disabled])').first().textContent())?.trim()
+  log('27 premier clic : libellé «', label1, '» → «', label2, '» | décision inchangée :', same)
+  await shot('27b-confirmation')
+  if (!label2?.startsWith('Confirmer')) problem('recette confirmation : le premier clic ne demande pas de confirmation')
+  if (!same) problem('recette confirmation : le premier clic a pris une décision')
+  await tryClick(page.locator('.actions h4:has-text("Priorité") ~ button:not([disabled])').first())
+  // Le libellé « Confirmer » disparaît dès que la décision est prise (la priorité peut revenir à J0 avec le même en-tête).
+  await page
+    .waitForFunction(() => !document.body.innerText.includes('Confirmer : passer'), null, { timeout: TIMEOUT })
+    .catch(() => problem('recette confirmation : le second clic ne passe pas la priorité'))
+  log('27 après confirmation :', (await page.locator('.actions h3').textContent())?.trim(), '| pile :', (await page.locator('.stack').textContent())?.replace(/\s+/g, ' ').trim())
+}
+
+// 28 : MENU DE CARTE. J0 clique une carte jouable de sa main : ses actions légales s'affichent sous la main ; choisir l'action la joue.
+async function s28({ page, log, shot, problem, openGame, enabled, tryClick }) {
+  const { seed, id } = await findHandSeed([], [7], 1)
+  log('28 graine retenue :', seed)
+  await openGame(id)
+  let clicked = null
+  for (let i = 0; i < 300 && !clicked; i++) {
+    if (!(await page.locator('.actions').count())) break
+    const card = page.locator('.player:has(h3:has-text("J0")) .zone .card.playable').first()
+    if (await card.count()) {
+      clicked = (await card.locator('.card-name').textContent())?.trim()
+      await card.click()
+      break
+    }
+    if (await enabled('Défausser').count()) await tryClick(enabled('Défausser'))
+    else if (await enabled('Terminer la déclaration').count()) await tryClick(enabled('Terminer la déclaration'))
+    else if (await enabled('Priorité').count()) await tryClick(enabled('Priorité'))
+    await page.waitForTimeout(150)
+  }
+  if (!clicked) return problem('recette menu de carte : aucune carte jouable en main de J0')
+  await page.waitForSelector('[data-testid="card-menu"]', { timeout: TIMEOUT }).catch(() => problem('recette menu de carte : le menu ne s’ouvre pas au clic sur la carte'))
+  const items = (await page.locator('[data-testid="card-menu"] button').allTextContents()).map((t) => t.trim())
+  log('28 carte', clicked, '| menu :', items.join(' | '))
+  await shot('28a-menu-carte')
+  const action = page.locator('[data-testid="card-menu"] button').first()
+  const beforeItems = await page.locator('.actions').textContent()
+  await Promise.all([page.waitForResponse((r) => /\/decisions$/.test(r.url()) && r.request().method() === 'POST'), action.click()])
+  await page.waitForFunction((t) => !document.querySelector('[data-testid="card-menu"]') || document.querySelector('.actions')?.textContent !== t, beforeItems, { timeout: TIMEOUT }).catch(() => {})
+  log(
+    '28 après l’action : menu',
+    (await page.locator('[data-testid="card-menu"]').count()) ? 'toujours ouvert (nouvelle décision identique ?)' : 'fermé',
+    '|',
+    await page.locator('.topbar .muted').textContent(),
+  )
+  await shot('28b-menu-action')
+}
+
+// 29 : FRISE ET JOURNAL. La frise du tour liste les phases (cliquables : le curseur s'y place) ; le journal se filtre par joueur et par type.
+async function s29({ page, log, shot, problem, openGame }) {
+  const { id } = await findHandSeed([], [7], 1)
+  await openGame(id)
+  const steps = await page.locator('.frise-step').count()
+  log('29 étapes de la frise :', steps)
+  if (!steps) problem('recette frise : aucune phase affichée pour le tour courant')
+  const total = await page.locator('.log ol li').count()
+  const target = page.locator('.frise-step > button').nth(Math.max(0, steps - 2))
+  const label = (await target.textContent())?.trim()
+  await target.click()
+  await page.waitForTimeout(300)
+  const currentLabel = (
+    await page
+      .locator('.frise-step.current > button')
+      .first()
+      .textContent()
+      .catch(() => '')
+  )?.trim()
+  log('29 clic sur la phase «', label, '» → phase courante «', currentLabel, '»')
+  if (currentLabel !== label) problem('recette frise : cliquer une phase ne place pas le curseur dessus')
+  // Un point de bifurcation de la frise (petit point) place le curseur dessus : il devient le point de bifurcation courant.
+  const dot = page.locator('.frise-dot').first()
+  if (await dot.count()) {
+    await dot.click()
+    await page.waitForTimeout(300)
+    const forkNow = await page.locator('.frise-dot.fork').count()
+    log('29 point de bifurcation cliqué → points marqués « fork » :', forkNow)
+    if (forkNow !== 1) problem('recette frise : cliquer un point de bifurcation ne le place pas comme point de bifurcation')
+  } else problem('recette frise : aucun point de bifurcation affiché')
+  // Le journal : cliquer une ligne saute à cet événement (elle devient la ligne courante).
+  const line = page.locator('.log ol li').nth(2)
+  const seqText = (await line.textContent())?.match(/#(\d+)/)?.[1]
+  await line.click()
+  await page.waitForTimeout(200)
+  const curSeq = (await page.locator('.log ol li.current').first().textContent())?.match(/#(\d+)/)?.[1]
+  log('29 journal : clic sur #' + seqText + ' → ligne courante #' + curSeq)
+  if (seqText !== curSeq) problem('recette journal : cliquer une ligne ne saute pas à cet événement')
+  await shot('29a-frise')
+
+  await page.selectOption('[data-testid="log-filter-player"]', '2')
+  const byPlayer = await page.locator('.log ol li').count()
+  log('29 journal J2 :', byPlayer, '/', total)
+  if (!(byPlayer > 0 && byPlayer < total)) problem('recette journal : le filtre joueur ne réduit pas le journal')
+  await page.selectOption('[data-testid="log-filter-player"]', { label: 'tous' })
+  await page.selectOption('[data-testid="log-filter-type"]', 'PhaseChanged')
+  const texts = await page.locator('.log ol li').allTextContents()
+  log(
+    '29 journal type PhaseChanged :',
+    texts.length,
+    '| toutes des phases :',
+    texts.every((t) => /Tour \d+ —/.test(t)),
+  )
+  if (!texts.length || !texts.every((t) => /Tour \d+ —/.test(t))) problem('recette journal : le filtre de type laisse passer d’autres événements')
+  await shot('29b-journal-filtre')
 }

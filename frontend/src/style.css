@@ -186,3 +186,10 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .deck-seat textarea, .deck-seat input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; }
 .deck-problems { padding: 6px 16px; color: #e5736a; font-size: 13px; }
 .deck-problems ul { margin: 2px 0 6px; padding-left: 20px; }
+
+/* Cible possible au clic sur le plateau (TargetPicker) : contour pointillé, curseur de sélection. */
+.targetable {
+  outline: 2px dashed #f5c542;
+  outline-offset: 2px;
+  cursor: pointer;
+}

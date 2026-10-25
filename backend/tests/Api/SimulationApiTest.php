@@ -246,6 +246,46 @@ final class SimulationApiTest extends WebTestCase
         self::assertSame('human:auto', $fork['controllers'][1]);
     }
 
+    public function testForkRendLaMainALIaDansUneBranche(): void
+    {
+        $parent = $this->createGame(42, self::FOUR_AI);
+        $at = $this->checkpointSeq($this->events($parent['id']));
+        [, $human] = $this->call('POST', self::BASE . "/{$parent['id']}/fork", ['atEvent' => $at, 'controllers' => ['1' => 'human:auto']]);
+
+        [$status, $back] = $this->call('POST', self::BASE . "/{$human['id']}/fork", ['atEvent' => $human['forkEventSeq'], 'controllers' => ['1' => 'ai:aggro']]);
+
+        self::assertSame(201, $status);
+        self::assertSame($human['id'], $back['parentId']);
+        self::assertSame('ai:aggro', $back['controllers'][1]);
+        self::assertNull($back['pending'], 'Plus aucune décision humaine à attendre');
+        self::assertSame('human:auto', $human['controllers'][1], 'La branche d\'origine garde son humain');
+    }
+
+    public function testBranchesDonneLArbreEntier(): void
+    {
+        $root = $this->createGame(42, self::FOUR_AI);
+        $at = $this->checkpointSeq($this->events($root['id']));
+        [, $a] = $this->call('POST', self::BASE . "/{$root['id']}/fork", ['atEvent' => $at, 'controllers' => ['1' => 'human:auto']]);
+        [, $b] = $this->call('POST', self::BASE . "/{$root['id']}/fork", ['atEvent' => $at, 'controllers' => ['2' => 'human:auto']]);
+        [, $aa] = $this->call('POST', self::BASE . "/{$a['id']}/fork", ['atEvent' => $a['forkEventSeq'], 'controllers' => ['3' => 'ai:control']]);
+
+        [$status, $tree] = $this->call('GET', self::BASE . "/{$aa['id']}/branches");
+
+        self::assertSame(200, $status);
+        self::assertSame($aa['id'], $tree['current']);
+        $byId = [];
+        foreach ($tree['branches'] as $node) {
+            $byId[$node['id']] = $node;
+        }
+        self::assertSame([$root['id'], $a['id'], $b['id'], $aa['id']], array_keys($byId), 'Racine d\'abord, puis les fils en largeur');
+        self::assertNull($byId[$root['id']]['parentId']);
+        self::assertSame($root['id'], $byId[$a['id']]['parentId']);
+        self::assertSame($a['id'], $byId[$aa['id']]['parentId']);
+        self::assertSame([1], $byId[$a['id']]['humans']);
+        self::assertSame([], $byId[$root['id']]['humans']);
+        self::assertSame($a['forkEventSeq'], $byId[$aa['id']]['forkEventSeq']);
+    }
+
     public function testForkEchoueProprementSurEntreesInvalides(): void
     {
         $parent = $this->createGame(42, self::FOUR_AI);

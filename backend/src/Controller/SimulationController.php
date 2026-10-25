@@ -60,6 +60,22 @@ final class SimulationController extends AbstractController
         return $this->json($this->view($simulation));
     }
 
+    /** Arbre des branches auquel appartient la simulation : `current` = celle demandée, `branches` = racine d'abord. */
+    #[Route('/{id}/branches', methods: ['GET'], requirements: ['id' => '\d+'])]
+    public function branches(Simulation $simulation): JsonResponse
+    {
+        $branches = array_map(fn (Simulation $s) => [
+            'id' => $s->getId(),
+            'parentId' => $s->getParent()?->getId(),
+            'forkEventSeq' => $s->getForkEventSeq(),
+            'status' => $s->getStatus(),
+            'eventCount' => $s->getState()['eventSeq'] ?? 0,
+            'humans' => array_values(array_keys(array_filter($s->getState()['controllers'] ?? [], static fn (string $key) => str_starts_with($key, 'human')))),
+        ], $this->simulations->branches($simulation));
+
+        return $this->json(['current' => $simulation->getId(), 'branches' => $branches]);
+    }
+
     #[Route('/{id}/events', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function events(Simulation $simulation, Request $request): JsonResponse
     {

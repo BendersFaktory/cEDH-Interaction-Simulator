@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { target } from '../engine/describe'
+import { useSimulationStore } from '../stores/simulation'
 import type { StackItemView } from '../types/engine'
+
+const store = useSimulationStore()
 
 const props = defineProps<{ stack: StackItemView[] }>()
 
@@ -22,7 +25,12 @@ const abilityLabel = (item: StackItemView): string => {
       ><span v-else class="muted stack-empty-label">vide</span>
     </h3>
     <ol v-if="stack.length">
-      <li v-for="(item, i) in topFirst" :key="item.id" :class="{ 'stack-ability': item.ability || item.trigger, 'stack-top': i === 0 }">
+      <li
+        v-for="(item, i) in topFirst"
+        :key="item.id"
+        :class="{ 'stack-ability': item.ability || item.trigger, 'stack-top': i === 0, targetable: store.targetHighlights.has(`stack:${item.id}`) }"
+        @click="store.pickTarget(`stack:${item.id}`)"
+      >
         <span v-if="i === 0" class="badge stack-top-badge">Dessus</span>
         <strong>{{ item.card.name }}</strong>
         <em v-if="item.ability || item.trigger" class="ability-label">{{ abilityLabel(item) }}</em>

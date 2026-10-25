@@ -1,4 +1,4 @@
-import type { DeckInput, GameEvent, SimulationView, StopsConfig } from '../types/engine'
+import type { BranchTree, DeckInput, GameEvent, SimulationView, StopsConfig } from '../types/engine'
 
 /** Erreur d'API ; `problems` = problèmes d'une decklist refusée (422), par siège. */
 export class ApiError extends Error {
@@ -42,6 +42,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ actionId }),
     }),
+
+  /** Arbre des branches auquel appartient la simulation. */
+  branches: (id: number) => http<BranchTree>(`/simulations/${id}/branches`),
 
   /** Configure les stops d'un siège humain (`null` = comportement par défaut). */
   setStops: (id: number, player: number, stops: StopsConfig | null) =>

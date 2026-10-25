@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { useSimulationStore } from './simulation'
 import type { SimulationView, StopsConfig } from '../types/engine'
 
@@ -138,5 +139,159 @@ describe('decklists', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('decks')
     expect(store.error).toBe('Decklist refusée.')
     expect(store.deckProblems).toEqual(problems)
+  })
+})
+
+describe("rendre la main à l'IA", () => {
+  const fetchMock = vi.fn()
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const ok = (body: unknown) => ({ ok: true, json: async () => body })
+  const checkpoint = { seq: 3, type: 'PriorityGranted', payload: { holder: 1, checkpoint: true, stackSize: 0 }, verbose: false }
+
+  it('forke au point de bifurcation avec le profil choisi et ouvre la branche', async () => {
+    const store = useSimulationStore()
+    store.simulation = { ...base, controllers: { 0: 'ai:heuristic', 1: 'human:auto' } }
+    store.events = [checkpoint as never]
+    store.cursor = 3
+    const child = { ...base, id: 8, parentId: 7, forkEventSeq: 3, controllers: { 0: 'ai:heuristic', 1: 'ai:aggro' } }
+    fetchMock.mockResolvedValueOnce(ok(child)).mockResolvedValueOnce(ok(child)).mockResolvedValueOnce(ok([]))
+
+    await store.handBackToAi(1, 'ai:aggro')
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/simulations/7/fork')
+    expect(JSON.parse(init.body)).toEqual({ atEvent: 3, controllers: { 1: 'ai:aggro' } })
+    expect(store.simulation?.id).toBe(8)
+    expect(store.humanSeats).toEqual([])
+  })
+
+  it('reprend le profil de création du siège par défaut, sinon ai:heuristic', async () => {
+    const store = useSimulationStore()
+    store.simulation = { ...base, controllers: { 0: 'ai:heuristic', 1: 'human:auto' } }
+    store.events = [checkpoint as never]
+    store.cursor = 3
+    store.seatProfiles = { 0: 'ai:heuristic', 1: 'ai:control' }
+    const child = { ...base, id: 8, controllers: { 1: 'ai:control' } }
+    fetchMock.mockResolvedValue(ok(child))
+
+    await store.handBackToAi(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).controllers).toEqual({ 1: 'ai:control' })
+
+    fetchMock.mockClear()
+    store.simulation = { ...base, controllers: { 0: 'ai:heuristic', 1: 'human:auto' } }
+    store.events = [checkpoint as never]
+    store.cursor = 3
+    store.seatProfiles = {}
+    await store.handBackToAi(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).controllers).toEqual({ 1: 'ai:heuristic' })
+  })
+
+  it('ne fait rien sans point de bifurcation', async () => {
+    const store = useSimulationStore()
+    store.simulation = { ...base, controllers: { 1: 'human:auto' } }
+    await store.handBackToAi(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('arbre des branches', () => {
+  const fetchMock = vi.fn()
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const ok = (body: unknown) => ({ ok: true, json: async () => body })
+
+  it("relit l'arbre auquel appartient la simulation courante", async () => {
+    const store = useSimulationStore()
+    store.simulation = base
+    const tree = { current: 7, branches: [{ id: 7, parentId: null, forkEventSeq: null, status: 'waiting', eventCount: 0, humans: [0] }] }
+    fetchMock.mockResolvedValueOnce(ok(tree))
+
+    await store.refreshBranches()
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/simulations/7/branches')
+    expect(store.branchTree).toEqual(tree)
+  })
+
+  it("ne fait pas d'appel sans simulation", async () => {
+    const store = useSimulationStore()
+    await store.refreshBranches()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(store.branchTree).toBeNull()
+  })
+})
+
+describe('choix de cible au clic', () => {
+  const fetchMock = vi.fn()
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const ok = (body: unknown) => ({ ok: true, json: async () => body })
+  const act = (id: string, targets: string[]) => ({ id, label: id, type: 'cast', player: 0, targets })
+  /** Store à la fin du journal avec une décision en attente (la sim est « en attente » du joueur 0). */
+  async function withActions(actions: unknown[]) {
+    const store = useSimulationStore()
+    store.simulation = { ...base, pending: { player: 0, eventSeq: 1, actions } as never }
+    store.events = [{ seq: 1, type: 'PriorityGranted', payload: {}, verbose: false } as never]
+    store.cursor = 1
+    await nextTick() // le watch de la décision en attente s'applique avant le clic
+    return store
+  }
+
+  it('envoie tout de suite une action dont la seule cible est cliquée', async () => {
+    const store = await withActions([act('bolt', ['player:2'])])
+    fetchMock.mockResolvedValueOnce(ok(base)).mockResolvedValueOnce(ok([]))
+    expect(store.targetHighlights.has('player:2')).toBe(true)
+
+    await store.pickTarget('player:2')
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ actionId: 'bolt' })
+    expect(store.pickedTargets).toEqual([])
+  })
+
+  it('accumule les cibles tant qu’une action plus longue reste possible', async () => {
+    const store = await withActions([act('two', ['permanent:p1', 'player:2']), act('one', ['permanent:p1'])])
+    fetchMock.mockResolvedValueOnce(ok(base)).mockResolvedValueOnce(ok([]))
+
+    await store.pickTarget('permanent:p1')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(store.pickedTargets).toEqual(['permanent:p1'])
+    expect(store.targetHighlights.has('player:2')).toBe(true)
+
+    await store.pickTarget('player:2')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ actionId: 'two' })
+  })
+
+  it('laisse le choix à l’action quand deux actions ont les mêmes cibles', async () => {
+    const store = await withActions([act('x1', ['player:1']), act('x2', ['player:1'])])
+
+    await store.pickTarget('player:1')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(store.pickedTargets).toEqual(['player:1'])
+    expect(store.pickCandidates.map((a) => a.id)).toEqual(['x1', 'x2'])
+  })
+
+  it('ignore une cible qui ne peut pas être choisie', async () => {
+    const store = await withActions([act('bolt', ['player:2'])])
+
+    await store.pickTarget('player:9')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(store.pickedTargets).toEqual([])
   })
 })

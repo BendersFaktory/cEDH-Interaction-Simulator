@@ -1,9 +1,26 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useSimulationStore } from '../stores/simulation'
 import { phaseLabel } from '../engine/phases'
+import { target } from '../engine/describe'
+import type { ActionView } from '../types/engine'
 
 const store = useSimulationStore()
+/** Passer alors que la pile n'est pas vide demande une confirmation (deux clics). */
+const confirmPass = ref(false)
+watch(
+  () => store.pending?.eventSeq,
+  () => (confirmPass.value = false),
+)
+
+function act(a: ActionView): void {
+  if (a.type === 'pass' && store.pending?.stack.length && !confirmPass.value) {
+    confirmPass.value = true
+    return
+  }
+  confirmPass.value = false
+  store.decide(a.id)
+}
 
 const groups = computed(() => {
   const actions = store.pending?.actions ?? []
@@ -41,17 +58,22 @@ const groups = computed(() => {
       }}
       · pile : {{ store.pending.stack.length }}
     </p>
+    <div v-if="store.pickedTargets.length" class="target-pick" data-testid="target-pick">
+      <h4>Cible choisie : {{ store.pickedTargets.map(target).join(', ') }}</h4>
+      <p class="muted">Clique une autre cible sur le plateau, ou choisis l'action :</p>
+      <button v-for="a in store.pickCandidates" :key="a.id" :disabled="store.loading" @click="store.decide(a.id)">{{ a.label }}</button>
+      <button :disabled="store.loading" @click="store.cancelTarget()">Annuler</button>
+    </div>
     <div v-for="g in groups" :key="g.title">
       <h4>{{ g.title }}</h4>
-      <!-- TODO: TargetPicker — choisir la cible en cliquant sur le plateau au lieu d'une action par cible -->
       <button
         v-for="a in g.items"
         :key="a.id"
-        :class="{ 'ability-btn': a.type === 'ability', 'mana-ability': a.type === 'ability' && a.mana === true }"
+        :class="{ 'ability-btn': a.type === 'ability', 'mana-ability': a.type === 'ability' && a.mana === true, confirm: a.type === 'pass' && confirmPass }"
         :disabled="store.loading"
-        @click="store.decide(a.id)"
+        @click="act(a)"
       >
-        {{ a.label }}
+        {{ a.type === 'pass' && confirmPass ? "Confirmer : passer alors que la pile n'est pas vide" : a.label }}
       </button>
     </div>
   </section>
