@@ -235,6 +235,8 @@ final class Decks
             $library[] = $creature('Alabaster Host Sanctifier', 2, '{1}{W}', 2, 2, CardInstance::LIFELINK);
             // Angelic Skirmisher : le choix à chaque combat (première frappe, vigilance ou lien de vie) n'est pas modélisé.
             $library[] = $creature('Angelic Skirmisher', 6, '{4}{W}{W}', 4, 4, CardInstance::FLYING);
+            // Serra Angel : vol et vigilance (elle attaque sans s'engager).
+            $library[] = $creature('Serra Angel', 5, '{3}{W}{W}', 4, 4, CardInstance::FLYING, CardInstance::VIGILANCE);
             $library[] = $creature('Banehound', 1, '{B}', 1, 1, CardInstance::LIFELINK, CardInstance::HASTE);
         }
 
