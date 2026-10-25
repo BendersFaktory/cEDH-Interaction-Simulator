@@ -154,8 +154,9 @@ async function makeCtx(browser, name) {
       await page.waitForTimeout(300)
     }
   }
-  // Ouvre une partie créée par l'API (champ « Charger # » + Ouvrir), se place à la fin du journal et attend le panneau d'actions.
-  const openGame = async (id) => {
+  // Ouvre une partie créée par l'API (champ « Charger # » + Ouvrir), se place à la fin du journal et attend le panneau d'actions
+  // (sauf `actions: false`, pour une partie 4 IA qui n'en a pas).
+  const openGame = async (id, { actions = true } = {}) => {
     await page.fill('input[type=number] >> nth=1', String(id))
     await page.click('text=Ouvrir')
     await page.waitForFunction(
@@ -168,7 +169,7 @@ async function makeCtx(browser, name) {
       { timeout: TIMEOUT },
     )
     await page.click('button[title="Fin"]')
-    await page.waitForSelector('.actions', { timeout: TIMEOUT })
+    if (actions) await page.waitForSelector('.actions', { timeout: TIMEOUT })
   }
   return { page, context, problems, shot, log, info, prog, problem, enabled, tryClick, newUiGame, keepUi, openGame }
 }
@@ -228,6 +229,7 @@ async function run() {
     ['29', (b) => scenario(b, '29', s29)],
     ['30', (b) => scenario(b, '30', s30)],
     ['31', (b) => scenario(b, '31', s31)],
+    ['32', (b) => scenario(b, '32', s32)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1578,4 +1580,78 @@ async function s31({ page, log, shot, problem, keepUi }) {
   if (!(await cleanup.isChecked())) problem('recette arrêt nettoyage : la case se décoche après la réponse du serveur')
   await shot('31-arret-nettoyage')
   await Promise.all([page.waitForResponse((r) => /\/api\/simulations\/\d+\/stops$/.test(r.url()) && r.request().method() === 'PUT'), page.click('.stops button:has-text("Défaut")')])
+}
+
+// 32 : CLAVIER ET VITESSE. Partie 4 IA terminée : flèches (pas avant / arrière), espace (lecture / pause), sélecteur de vitesse 0.5x puis 4x.
+// Le focus est d'abord retiré du bouton ou du select cliqué : PlaybackControls ignore les touches dans un champ, un bouton ou un select.
+async function s32({ page, log, shot, problem, openGame }) {
+  const sim = await api.create(42, { 0: 'ai:heuristic', 1: 'ai:heuristic', 2: 'ai:heuristic', 3: 'ai:heuristic' }, { keep: false })
+  await openGame(sim.id, { actions: false })
+  const readPlayback = async () => (await page.locator('.playback small').textContent()) ?? ''
+  const pos = async () => Number((await readPlayback()).match(/événement (\d+)/)?.[1] ?? NaN)
+  const total = Number((await readPlayback()).match(/\/ (\d+)/)?.[1] ?? 0)
+  const key = async (k) => {
+    await page.evaluate(() => document.activeElement?.blur?.())
+    await page.keyboard.press(k)
+  }
+  log('32 partie 4 IA #' + sim.id + ' | événements :', total)
+  if (!total) problem('recette clavier : la partie 4 IA n’a aucun événement à rejouer')
+
+  // Début, puis flèches : droite avance, gauche recule.
+  await page.click('button[title="Début"]')
+  await page.waitForTimeout(200)
+  const p0 = await pos()
+  await key('ArrowRight')
+  await page.waitForTimeout(200)
+  const p1 = await pos()
+  await key('ArrowRight')
+  await page.waitForTimeout(200)
+  const p2 = await pos()
+  await key('ArrowLeft')
+  await page.waitForTimeout(200)
+  const p3 = await pos()
+  log('32 flèches : début', p0, '→ droite', p1, '→ droite', p2, '→ gauche', p3)
+  if (p0 !== 0) problem(`recette clavier : « Début » ne place pas à 0 (position ${p0})`)
+  if (!(p1 > p0)) problem('recette clavier : la flèche droite ne fait pas avancer la position')
+  if (!(p2 > p1)) problem('recette clavier : la deuxième flèche droite ne fait pas avancer la position')
+  if (!(p3 < p2)) problem('recette clavier : la flèche gauche ne fait pas reculer la position')
+
+  // Espace : lecture (bouton Pause, position qui avance), puis pause (position figée).
+  await key(' ')
+  await page.waitForTimeout(1000)
+  const pauseShown = await page.locator('button[title^="Pause"]').count()
+  const playStart = p3
+  const playing = await pos()
+  log('32 espace : bouton Pause affiché', pauseShown, '| position après 1 s de lecture', playing, '(depuis', playStart + ')')
+  if (!pauseShown) problem('recette clavier : espace ne lance pas la lecture (bouton Pause absent)')
+  if (!(playing > playStart)) problem('recette clavier : la position n’avance pas pendant la lecture')
+  await key(' ')
+  await page.waitForTimeout(300)
+  const paused = await pos()
+  await page.waitForTimeout(1000)
+  const stable = await pos()
+  log('32 espace à nouveau : pause, position', paused, '→', stable, 'après 1 s')
+  if (stable !== paused) problem('recette clavier : la position avance encore après espace (pause)')
+  if (!(await page.locator('button[title^="Lecture"]').count())) problem('recette clavier : après pause, le bouton Lecture n’est pas revenu')
+
+  // Vitesse : même durée (1,5 s) à 0.5x puis à 4x, depuis le début.
+  const measure = async (label) => {
+    await page.click('button[title="Début"]')
+    await page.waitForTimeout(200)
+    const start = await pos()
+    await key(' ')
+    await page.waitForTimeout(1500)
+    await key(' ')
+    await page.waitForTimeout(300)
+    const delta = (await pos()) - start
+    log('32 vitesse', label, ': événements avancés en 1,5 s =', delta, '| option affichée :', await page.locator('.playback select option:checked').textContent())
+    return delta
+  }
+  await page.selectOption('.playback select', { label: '0.5x' })
+  const slow = await measure('0.5x')
+  await page.selectOption('.playback select', { label: '4x' })
+  const fast = await measure('4x')
+  log('32 vitesses : 4x / 0.5x =', slow > 0 ? (fast / slow).toFixed(2) : 'n/a')
+  if (!(fast > slow)) problem(`recette vitesse : 4x n’avance pas plus vite que 0.5x (${fast} contre ${slow} événements en 1,5 s)`)
+  await shot('32-clavier-vitesse')
 }
