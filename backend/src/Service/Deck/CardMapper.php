@@ -95,6 +95,8 @@ final class CardMapper
                 $effects[] = new SpellEffect('treasure');
             } elseif ($isSpell && $line === 'Counter target spell.') {
                 $effects[] = new SpellEffect('counter');
+            } elseif ($isSpell && $line === 'Counter target instant spell.') {
+                $effects[] = new SpellEffect('counter', 0, null, CardInstance::INSTANT); // Dispel
             } elseif ($isSpell && $line === 'Exile target creature. Its controller gains life equal to its power.') {
                 $effects[] = new SpellEffect('exile', 0, null, 'creature', true); // Swords to Plowshares
             } elseif ($isLand && preg_match('/^Whenever ~ becomes tapped, it deals (\d+) damage to you\.$/', $line, $m)) {

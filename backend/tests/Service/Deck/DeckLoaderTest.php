@@ -59,6 +59,13 @@ final class DeckLoaderTest extends TestCase
         self::assertSame([TriggeredAbility::ETB, 'treasure', 1], [$goblin->triggers[0]->event, $goblin->triggers[0]->effect, $goblin->triggers[0]->amount]);
     }
 
+    public function testMapsDispelToCounterInstantsOnly(): void
+    {
+        $dispel = self::map('Dispel');
+        self::assertSame([['effect' => 'counter', 'target' => CardInstance::INSTANT]], array_map(static fn ($e) => $e->toArray(), $dispel->effects));
+        self::assertSame([['effect' => 'counter']], array_map(static fn ($e) => $e->toArray(), self::map('Counterspell')->effects));
+    }
+
     public function testParserHandlesCommonFormats(): void
     {
         $parsed = DecklistParser::parse("// commentaire\nCommander\n1 Isamaru, Hound of Konda\n\nDeck\n1x Sol Ring (C21) 263 *F*\n10 Plains\nLlanowar Elves\n2 Plains\n\nSideboard\n1 Forest\n");

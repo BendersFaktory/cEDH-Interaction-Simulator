@@ -8,7 +8,7 @@ use App\Engine\Game\CardInstance;
 
 /**
  * Un effet d'un sort à sa résolution (dans l'ordre de la liste `CardInstance::$effects`, CR 608.2c) :
- * `damage` (`amount`, ou X du coût), `counter`, `mana` (`adds`, rituel), `treasure`, `draw` (`amount` cartes),
+ * `damage` (`amount`, ou X du coût), `counter` (`target` = `instant` : seulement un sort instantané, Dispel), `mana` (`adds`, rituel), `treasure`, `draw` (`amount` cartes),
  * `exile` (exile le permanent ciblé ; `target` = `creature` ou `permanent`, défaut `permanent` ; `powerLife` : son contrôleur gagne
  * autant de PV que sa force avant l'exil, Swords to Plowshares).
  * Au plus un effet ciblé par carte (`damage`, `counter` ou `exile`) : la carte a une seule cible (voir la case CR 608.2b de la roadmap).
@@ -19,6 +19,8 @@ final class SpellEffect
     public const TARGETED = ['damage', 'counter', 'exile'];
     /** Genres de permanents qu'un effet `exile` peut cibler. */
     public const PERMANENT_TARGETS = ['creature', 'permanent'];
+    /** Types de sorts qu'un effet `counter` peut viser (`target`) ; null = tout sort (Counterspell). */
+    public const COUNTER_TARGETS = [CardInstance::INSTANT];
 
     public function __construct(
         public readonly string $effect,
@@ -30,7 +32,12 @@ final class SpellEffect
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
         }
-        if ($target !== null && ($effect !== 'exile' || !in_array($target, self::PERMANENT_TARGETS, true))) {
+        $validTarget = match ($effect) {
+            'exile' => in_array($target, self::PERMANENT_TARGETS, true),
+            'counter' => in_array($target, self::COUNTER_TARGETS, true),
+            default => false,
+        };
+        if ($target !== null && !$validTarget) {
             throw new \InvalidArgumentException("Cible « $target » invalide pour l'effet « $effect »");
         }
         if ($powerLife && $effect !== 'exile') {
@@ -47,6 +54,12 @@ final class SpellEffect
     public function canTargetPermanent(CardInstance $card): bool
     {
         return $this->target !== 'creature' || $card->isCreature();
+    }
+
+    /** Le sort `$card` (sur la pile) est-il une cible légale de cet effet `counter` (Dispel : instant seulement) ? */
+    public function canCounter(CardInstance $card): bool
+    {
+        return $this->target === null || $card->hasType($this->target);
     }
 
     /**

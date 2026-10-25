@@ -57,7 +57,7 @@ function effectText(effect: string, amount: number | undefined, spec?: string): 
     case 'damage':
       return `inflige ${n} dégâts`
     case 'counter':
-      return 'contrecarre le sort ciblé'
+      return spec === 'instant' ? 'contrecarre le sort instantané ciblé' : 'contrecarre le sort ciblé'
     case 'exile':
       return spec === 'creature' ? 'exile la créature ciblée' : 'exile le permanent ciblé'
     case 'draw':

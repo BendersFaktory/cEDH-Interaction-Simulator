@@ -442,6 +442,15 @@
         "keywords": []
     },
     {
+        "name": "Dispel",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}",
+        "cmc": 1,
+        "oracle_text": "Counter target instant spell.",
+        "keywords": []
+    },
+    {
         "name": "Ambush Viper",
         "layout": "normal",
         "type_line": "Creature — Snake",
