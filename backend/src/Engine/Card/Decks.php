@@ -93,7 +93,11 @@ final class Decks
         $counter = static fn (string $name, int $cost, string $manaCost): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'counter', 0, false, 0, 0, $manaCost);
         $ritual = static fn (string $name, int $cost, string $manaCost, string $adds): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'mana', 0, false, 0, 0, $manaCost, [], [], $adds);
 
-        $commander = (new CardDefinition("Commandant J$playerId", CardInstance::CREATURE, 3, "{1}{{$a}}{{$b}}", 3, 3, supertypes: [CardInstance::LEGENDARY]))
+        // J3 : R U + splash blanc et noir (quatre couleurs au commandant : cartes blanches et noires du combat, recettes).
+        $splash = $playerId === 3;
+        $identity = $splash ? [$a, $b, 'W', 'B'] : [$a, $b];
+        $pips = implode('', array_map(static fn (string $c): string => "{{$c}}", $identity));
+        $commander = (new CardDefinition("Commandant J$playerId", CardInstance::CREATURE, count($identity) + 1, "{1}$pips", 3, 3, supertypes: [CardInstance::LEGENDARY]))
             ->instantiate(sprintf('p%d_c%d', $playerId, $n++), true);
 
         // Terrains non-basiques (les basiques complètent le deck à la fin). Dégâts des pain lands, entrée engagée et
@@ -219,6 +223,19 @@ final class Decks
             $library[] = $creature('Craw Wurm', 6, '{4}{G}{G}', 6, 4);
             $library[] = $creature('Yavimaya Wurm', 6, '{4}{G}{G}', 6, 4, CardInstance::TRAMPLE);
             $library[] = $creature('Colossal Dreadmaw', 6, '{4}{G}{G}', 6, 6, CardInstance::TRAMPLE);
+        }
+        if ($splash) {
+            // Deux Plains et deux Swamp pour le splash (les coûts de Black Knight et d'Angelic Skirmisher exigent deux symboles).
+            $library[] = $land('Plains', ['W']);
+            $library[] = $land('Plains', ['W']);
+            $library[] = $land('Swamp', ['B']);
+            $library[] = $land('Swamp', ['B']);
+            // Black Knight : protection contre le blanc non modélisée (pas de cible, dégâts ni blocage blancs). Première frappe modélisée.
+            $library[] = $creature('Black Knight', 2, '{B}{B}', 2, 2, CardInstance::FIRST_STRIKE);
+            $library[] = $creature('Alabaster Host Sanctifier', 2, '{1}{W}', 2, 2, CardInstance::LIFELINK);
+            // Angelic Skirmisher : le choix à chaque combat (première frappe, vigilance ou lien de vie) n'est pas modélisé.
+            $library[] = $creature('Angelic Skirmisher', 6, '{4}{W}{W}', 4, 4, CardInstance::FLYING);
+            $library[] = $creature('Banehound', 1, '{B}', 1, 1, CardInstance::LIFELINK, CardInstance::HASTE);
         }
 
         if (count($library) > self::LIBRARY_SIZE) {

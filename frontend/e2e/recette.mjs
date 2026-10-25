@@ -227,6 +227,7 @@ async function run() {
     ['28', (b) => scenario(b, '28', s28)],
     ['29', (b) => scenario(b, '29', s29)],
     ['30', (b) => scenario(b, '30', s30)],
+    ['31', (b) => scenario(b, '31', s31)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1556,4 +1557,25 @@ async function s30({ page, log, shot, problem, openGame }) {
   log('30 journal :', line)
   await shot('30-tuteur-dessus')
   if (!line.includes(found.card)) problem(`recette tuteur : le journal ne mentionne pas « ${found.card} » mise sur le dessus (« ${line} »)`)
+}
+
+// 31 : ARRÊT SUR LE NETTOYAGE. Le panneau propose « Nettoyage » ; l'arrêt part bien dans PUT /stops (`cleanup`) et reste coché après la réponse.
+async function s31({ page, log, shot, problem, keepUi }) {
+  await page.fill('input[placeholder="aléatoire"]', '7')
+  await page.click('text=Nouvelle partie Commander')
+  await page.waitForSelector('.stops', { timeout: TIMEOUT })
+  await page.waitForSelector('.actions', { timeout: TIMEOUT })
+  await keepUi()
+  const cleanup = page.locator('.stops label:has-text("Nettoyage") input')
+  if (!(await cleanup.count())) return problem('recette arrêt nettoyage : la case « Nettoyage » est absente du panneau')
+  await cleanup.check()
+  const [res] = await Promise.all([page.waitForResponse((r) => /\/api\/simulations\/\d+\/stops$/.test(r.url()) && r.request().method() === 'PUT'), page.click('.stops button:has-text("Appliquer")')])
+  const sent = JSON.parse(res.request().postData() ?? '{}')
+  log('31 PUT /stops : HTTP', res.status(), '| étapes envoyées :', JSON.stringify(sent.stops?.steps?.slice(-2)))
+  if (res.status() !== 200) problem(`recette arrêt nettoyage : PUT /stops répond ${res.status()}`)
+  if (!sent.stops?.steps?.includes('cleanup')) problem('recette arrêt nettoyage : « cleanup » absent de la requête')
+  await page.waitForTimeout(400)
+  if (!(await cleanup.isChecked())) problem('recette arrêt nettoyage : la case se décoche après la réponse du serveur')
+  await shot('31-arret-nettoyage')
+  await Promise.all([page.waitForResponse((r) => /\/api\/simulations\/\d+\/stops$/.test(r.url()) && r.request().method() === 'PUT'), page.click('.stops button:has-text("Défaut")')])
 }
