@@ -104,3 +104,15 @@ describe('describeEvent — mulligan de Londres', () => {
     expect(describeEvent(e('CardPutOnBottom', { player: 0, card: { name: 'Forest' }, hand: 6, library: 94 }))).toBe('J0 met une carte au fond de sa bibliothèque')
   })
 })
+
+describe('describeEvent — lot H3', () => {
+  const e = (type: string, payload: Record<string, unknown>): GameEvent => ({ seq: 1, type, verbose: false, payload })
+  it('cibles composées, copies et interdictions', () => {
+    expect(describeEvent(spell({ targets: ['stack:s3>player:2'] }))).toContain('sort s3 (nouvelle cible : J2)')
+    expect(describeEvent(spell({ targets: ['stack:s3+s5'] }))).toContain('sorts s3, s5')
+    expect(describeEvent(e('SpellCopied', { player: 0, card: { name: 'Brain Freeze' }, targets: ['player:1'], source: 'Brain Freeze' }))).toBe('J0 copie Brain Freeze (Brain Freeze) → J1')
+    expect(describeEvent(e('CastLockApplied', { players: [1, 2], source: 'Silence' }))).toBe('Silence : J1, J2 ne peuvent pas lancer de sort ce tour')
+    expect(describeEvent(e('CardsMilled', { player: 1, cards: [{}, {}, {}], library: 7, source: 'Brain Freeze' }))).toBe('J1 meule 3 cartes (Brain Freeze)')
+    expect(describeEvent(e('TokenCreated', { player: 0, card: { name: 'Warrior' }, tapped: true, attacking: 2 }))).toBe('J0 crée un jeton Warrior engagé qui attaque J2')
+  })
+})

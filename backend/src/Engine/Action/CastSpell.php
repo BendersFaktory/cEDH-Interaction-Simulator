@@ -11,7 +11,8 @@ final class CastSpell implements Action
 {
     /**
      * `alt` : coût alternatif choisi. Gratuit (commandant, Fierce Guardianship) ; `pitch:<id>` : exil de la carte bleue `<id>`
-     * (+ 1 PV pour Force of Will, sans PV pour Force of Negation) ; `return:<id>[,<id>]` : renvoi en main des Îles `<id>` (Daze, Gush).
+     * (+ 1 PV pour Force of Will, sans PV pour Force of Negation ; `pitch:<id>,<id>` : deux cartes bleues, Commandeer) ;
+     * `return:<id>[,<id>]` : renvoi en main des Îles `<id>` (Daze, Gush). Gratuit aussi pour Mindbreak Trap (trois sorts d'un adversaire).
      */
     public const ALT_FREE = 'free';
     public const ALT_PITCH = 'pitch:';
@@ -26,6 +27,7 @@ final class CastSpell implements Action
         public readonly ?string $alt = null, // coût alternatif (ALT_FREE | ALT_PITCH . id | ALT_RETURN . ids) ; null = coût de mana
         public readonly int $mode = 0, // mode choisi d'un sort modal (Pyroblast) ; 0 = sort non modal
         public readonly ?string $sacrifice = null, // créature sacrifiée en coût additionnel (Culling the Weak, Diabolic Intent)
+        public readonly bool $kicked = false, // kicker payé en plus du coût (Orim's Chant)
     ) {
     }
 
@@ -38,7 +40,7 @@ final class CastSpell implements Action
     {
         return sprintf('cast:%d:%s:%s', $this->player, $this->cardId, implode(',', $this->targets)) . ($this->x > 0 ? ':x=' . $this->x : '')
             . ($this->alt === null ? '' : ':alt=' . $this->alt) . ($this->mode > 0 ? ':mode=' . $this->mode : '')
-            . ($this->sacrifice === null ? '' : ':sac=' . $this->sacrifice);
+            . ($this->sacrifice === null ? '' : ':sac=' . $this->sacrifice) . ($this->kicked ? ':kicked' : '');
     }
 
     public function describe(GameState $state): string
@@ -62,9 +64,12 @@ final class CastSpell implements Action
             }, explode(',', substr($this->alt, strlen(self::ALT_RETURN))));
             $label .= ' (coût alternatif : renvoyer en main ' . implode(', ', $names) . ')';
         } elseif ($this->alt !== null) {
-            $pitched = $player->findHand(substr($this->alt, strlen(self::ALT_PITCH)));
+            $pitched = array_map(static fn (string $id) => $player->findHand($id)?->name ?? 'une carte bleue', explode(',', substr($this->alt, strlen(self::ALT_PITCH))));
             $life = $card?->altCost === \App\Engine\Game\CardInstance::ALT_PITCH_BLUE ? '1 PV et ' : '';
-            $label .= ' (coût alternatif : ' . $life . 'exil de ' . ($pitched?->name ?? 'une carte bleue') . ')';
+            $label .= ' (coût alternatif : ' . $life . 'exil de ' . implode(' et ', $pitched) . ')';
+        }
+        if ($this->kicked) {
+            $label .= ' (avec kicker ' . $card?->kicker . ')';
         }
         if ($this->mode > 0) {
             $label .= ' (mode ' . $this->mode . ' : ' . implode(', ', array_map(static fn (\App\Engine\Card\SpellEffect $e) => $e->effect, $card?->effectsForMode($this->mode) ?? [])) . ')';
@@ -92,6 +97,13 @@ final class CastSpell implements Action
             return 'permanent ' . $id;
         }
 
+        if (str_contains($t, '>')) {
+            [$victim, $new] = explode('>', $t, 2); // Deflecting Swat, Misdirection : objet de pile visé > nouvelle cible
+            return self::targetLabel($state, $victim) . ' (nouvelle cible : ' . self::targetLabel($state, $new) . ')';
+        }
+        if (str_starts_with($t, 'stack:') && str_contains($t, '+')) {
+            return 'sorts ' . str_replace('+', ', ', substr($t, 6)); // Mindbreak Trap
+        }
         if (str_starts_with($t, 'library:')) {
             $id = substr($t, 8);
             foreach ($state->players as $p) {
@@ -112,6 +124,6 @@ final class CastSpell implements Action
     {
         return ['type' => 'cast', 'player' => $this->player, 'cardId' => $this->cardId, 'targets' => $this->targets, 'x' => $this->x]
             + ($this->alt === null ? [] : ['alt' => $this->alt]) + ($this->mode > 0 ? ['mode' => $this->mode] : [])
-            + ($this->sacrifice === null ? [] : ['sacrifice' => $this->sacrifice]);
+            + ($this->sacrifice === null ? [] : ['sacrifice' => $this->sacrifice]) + ($this->kicked ? ['kicked' => true] : []);
     }
 }

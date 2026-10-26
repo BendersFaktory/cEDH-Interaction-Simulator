@@ -31,15 +31,29 @@ use App\Engine\Game\CardInstance;
  * `amount` cartes de sa main sur le dessus de sa bibliothèque, dans l'ordre de son choix : Brainstorm, après `draw` 3) et
  * `arrange` (regarder les `amount` cartes du dessus, les remettre dans l'ordre de son choix, mélange permis : Ponder). Seuls des
  * effets `draw` peuvent suivre un effet de sélection (ils se résolvent après la décision).
+ * Lot H3 (pile et restrictions) : `redirect` (cible un objet de pile à une seule cible et lui en donne une nouvelle, choisie au
+ * lancement et encodée dans la cible : `stack:<id>><nouvelle cible>` ; `target` = `spell` : un sort seulement, Misdirection ;
+ * `any` : sort ou capacité, Deflecting Swat), `steal` (prend le contrôle du sort non-créature ciblé, Commandeer), `exile_spells`
+ * (exile les sorts ciblés, `stack:<id>+<id>…`, Mindbreak Trap), `mill` (le joueur ciblé meule `amount` cartes, Brain Freeze),
+ * `silence` (non ciblé : les adversaires du lanceur ne peuvent pas lancer de sorts ce tour), `silence_target` (le joueur ciblé
+ * ne peut pas lancer de sorts ce tour), `no_attacks` (non ciblé : les créatures ne peuvent pas attaquer ce tour), `flash_grant`
+ * (non ciblé : le lanceur lance ses sorts comme s'ils avaient le flash ce tour), `gift` (Gift, CR 702.174 : l'adversaire ciblé
+ * reçoit le jeton `token`, engagé, avant les autres effets ; ce n'est pas une cible au sens de CR 608.2b). `bounce` accepte aussi
+ * `nonland`, `opponent_creature` et `opponent_nonland` ; `chain` (Chain of Vapor) : le contrôleur du permanent renvoyé peut
+ * sacrifier un terrain pour copier le sort (`GameState::$selection`, kind `chain`). `kicked` : l'effet n'a lieu que si le kicker
+ * a été payé (Orim's Chant).
  */
 final class SpellEffect
 {
-    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry', 'copy', 'pact', 'put_back', 'arrange', 'bounce', 'destroy', 'grant_sac_mana'];
+    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry', 'copy', 'pact', 'put_back', 'arrange', 'bounce', 'destroy', 'grant_sac_mana',
+        'redirect', 'steal', 'exile_spells', 'mill', 'silence', 'silence_target', 'no_attacks', 'flash_grant', 'gift'];
     /** Effets qui demandent une décision de sélection au milieu de la résolution (voir l'en-tête). */
     public const SELECTION = ['put_back', 'arrange'];
-    public const TARGETED = ['damage', 'counter', 'exile', 'tutor', 'copy', 'bounce', 'destroy'];
-    /** Genres de permanents qu'un effet `exile` peut cibler. */
-    public const PERMANENT_TARGETS = ['creature', 'permanent'];
+    public const TARGETED = ['damage', 'counter', 'exile', 'tutor', 'copy', 'bounce', 'destroy', 'redirect', 'steal', 'exile_spells', 'mill', 'silence_target', 'gift'];
+    /** Genres de permanents qu'un effet `exile` / `bounce` / `destroy` peut cibler (`opponent_…` : contrôlé par un adversaire du lanceur). */
+    public const PERMANENT_TARGETS = ['creature', 'permanent', 'nonland', 'opponent_creature', 'opponent_nonland'];
+    /** Objets de pile qu'un effet `redirect` peut viser : un sort, ou un sort ou une capacité. */
+    public const REDIRECT_TARGETS = ['spell', 'any'];
     /** Types de sorts qu'un effet `counter` peut viser (`target`, alternatives séparées par `|`) ; null = tout sort (Counterspell). */
     public const COUNTER_TARGETS = [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY, 'noncreature'];
     /** Mots-clés qu'un jeton créé par un contresort peut recevoir (Swan Song : Bird 2/2 volant). */
@@ -73,13 +87,16 @@ final class SpellEffect
         public readonly bool $discardRandom = false, // `tutor` : défausse d'une carte au hasard de sa main après la recherche (Gamble)
         public readonly ?string $blue = null, // BLUE_TARGET | BLUE_IF (`counter`, `destroy`)
         public readonly int $mode = 0, // 0 = sort non modal ; N >= 1 : l'effet appartient au mode N (« choisissez un mode », Pyroblast)
+        public readonly bool $chain = false, // `bounce` : Chain of Vapor (voir l'en-tête)
+        public readonly bool $kicked = false, // l'effet n'a lieu que si le kicker a été payé
     ) {
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
         }
         $validTarget = match ($effect) {
             'exile', 'bounce', 'destroy' => in_array($target, self::PERMANENT_TARGETS, true),
-            'counter' => $target !== null && array_diff(explode('|', $target), self::COUNTER_TARGETS) === [],
+            'counter', 'steal' => $target !== null && array_diff(explode('|', $target), self::COUNTER_TARGETS) === [],
+            'redirect' => in_array($target, self::REDIRECT_TARGETS, true),
             default => false,
         };
         if ($target !== null && !$validTarget) {
@@ -124,10 +141,19 @@ final class SpellEffect
         if ($powerLife && $effect !== 'exile') {
             throw new \InvalidArgumentException("« powerLife » n'a de sens que pour l'effet « exile »");
         }
+        if ($effect === 'redirect' && $target === null) {
+            throw new \InvalidArgumentException('Effet « redirect » sans genre de cible');
+        }
+        if ($chain && $effect !== 'bounce') {
+            throw new \InvalidArgumentException("« chain » n'a de sens que pour l'effet « bounce »");
+        }
         if ($token !== null) {
             ActivatedAbility::parseTokenSpec($token); // lève une exception si le jeton est mal décrit
         }
-        if (($token === null && $tokenKeywords !== []) || ($token !== null && $effect !== 'counter')
+        if ($effect === 'gift' && $token === null) {
+            throw new \InvalidArgumentException('Effet « gift » sans jeton');
+        }
+        if (($token === null && $tokenKeywords !== []) || ($token !== null && !in_array($effect, ['counter', 'gift'], true))
             || array_diff($tokenKeywords, self::TOKEN_KEYWORDS) !== []) {
             throw new \InvalidArgumentException("Jeton « $token » invalide pour l'effet « $effect »");
         }
@@ -144,10 +170,22 @@ final class SpellEffect
         return in_array($this->effect, self::TARGETED, true);
     }
 
-    /** Le permanent `$card` est-il une cible légale de cet effet `exile` (créature seulement si `target` = `creature`) ? */
-    public function canTargetPermanent(CardInstance $card): bool
+    /**
+     * Le permanent `$card`, contrôlé par `$controller`, est-il une cible légale de cet effet pour le lanceur `$caster` (créature
+     * seulement si `target` = `creature`, non-terrain pour `nonland`, adversaire du lanceur pour `opponent_…`) ?
+     */
+    public function canTargetPermanent(CardInstance $card, ?int $controller = null, ?int $caster = null): bool
     {
-        return ($this->target !== 'creature' || $card->isCreature()) && ($this->blue !== self::BLUE_TARGET || $card->isBlueColored());
+        $kind = $this->target;
+        if ($kind !== null && str_starts_with($kind, 'opponent_')) {
+            if ($controller === null || $controller === $caster) {
+                return false;
+            }
+            $kind = substr($kind, 9);
+        }
+
+        return ($kind !== 'creature' || $card->isCreature()) && ($kind !== 'nonland' || !$card->isLand())
+            && ($this->blue !== self::BLUE_TARGET || $card->isBlueColored());
     }
 
     /** Le sort `$card` (sur la pile, `$x` choisi) est-il une cible légale de cet effet `counter` (Dispel : instant seulement ; Mental Misstep : valeur de mana 1) ? */
@@ -179,7 +217,7 @@ final class SpellEffect
     {
         return $this->target !== null || $this->powerLife || $this->token !== null || $this->tutorTop || $this->tutorFilter !== null || $this->lifeLoss !== 0
             || $this->payCost !== null || $this->manaValue !== null || $this->counterTo !== null || $this->drainMana
-            || $this->thresholdAdds !== null || $this->perGraveyardNamed || $this->discardRandom || $this->blue !== null || $this->mode !== 0;
+            || $this->thresholdAdds !== null || $this->perGraveyardNamed || $this->discardRandom || $this->blue !== null || $this->mode !== 0 || $this->chain || $this->kicked;
     }
 
     /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …, 'target' => …]`, `amount`, `adds` et `target` omis à leur défaut. */
@@ -193,7 +231,8 @@ final class SpellEffect
             + ($this->payCost !== null ? ['payCost' => $this->payCost] : []) + ($this->manaValue !== null ? ['manaValue' => $this->manaValue] : [])
             + ($this->counterTo !== null ? ['counterTo' => $this->counterTo] : []) + ($this->drainMana ? ['drainMana' => true] : [])
             + ($this->thresholdAdds !== null ? ['thresholdAdds' => $this->thresholdAdds] : []) + ($this->perGraveyardNamed ? ['perGraveyardNamed' => true] : [])
-            + ($this->discardRandom ? ['discardRandom' => true] : []) + ($this->blue !== null ? ['blue' => $this->blue] : []) + ($this->mode !== 0 ? ['mode' => $this->mode] : []);
+            + ($this->discardRandom ? ['discardRandom' => true] : []) + ($this->blue !== null ? ['blue' => $this->blue] : []) + ($this->mode !== 0 ? ['mode' => $this->mode] : [])
+            + ($this->chain ? ['chain' => true] : []) + ($this->kicked ? ['kicked' => true] : []);
     }
 
     public static function fromArray(array $d): self
@@ -201,6 +240,7 @@ final class SpellEffect
         return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null, (bool) ($d['powerLife'] ?? false),
             $d['token'] ?? null, $d['tokenKeywords'] ?? [], (bool) ($d['tutorTop'] ?? false), $d['tutorFilter'] ?? null, (int) ($d['lifeLoss'] ?? 0),
             $d['payCost'] ?? null, isset($d['manaValue']) ? (int) $d['manaValue'] : null, $d['counterTo'] ?? null, (bool) ($d['drainMana'] ?? false),
-            $d['thresholdAdds'] ?? null, (bool) ($d['perGraveyardNamed'] ?? false), (bool) ($d['discardRandom'] ?? false), $d['blue'] ?? null, (int) ($d['mode'] ?? 0));
+            $d['thresholdAdds'] ?? null, (bool) ($d['perGraveyardNamed'] ?? false), (bool) ($d['discardRandom'] ?? false), $d['blue'] ?? null, (int) ($d['mode'] ?? 0),
+            (bool) ($d['chain'] ?? false), (bool) ($d['kicked'] ?? false));
     }
 }

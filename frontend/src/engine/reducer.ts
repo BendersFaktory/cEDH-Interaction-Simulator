@@ -207,7 +207,38 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
     case 'SpellResolved': {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
-      zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
+      // Une copie cesse d'exister (`none`) ; un sort volé (Commandeer) va chez son propriétaire (`owner`).
+      zoneOf(v.players[p.owner ?? p.controller], p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'SpellCopied':
+      // Storm, Chain of Vapor : la copie rejoint la pile (elle n'est pas lancée).
+      v.stack.push({ id: p.stackId, card: p.card, controller: p.player, targets: p.targets })
+      v.priority.passed = []
+      break
+
+    case 'TargetChanged': {
+      const item = v.stack.find((i) => i.id === p.stackId)
+      if (item) item.targets = [...p.targets]
+      break
+    }
+
+    case 'SpellControlChanged': {
+      const item = v.stack.find((i) => i.id === p.stackId)
+      if (item) item.controller = p.controller
+      break
+    }
+
+    case 'SpellExiled':
+      v.stack = v.stack.filter((i) => i.id !== p.stackId)
+      zoneOf(v.players[p.owner ?? p.controller], p.destination)?.push(board(p.card))
+      break
+
+    case 'CardsMilled': {
+      const pl = v.players[p.player]
+      pl.library = p.library
+      for (const c of p.cards as PublicCard[]) pl.graveyard.push(board(c))
       break
     }
 
@@ -215,7 +246,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
       // Cimetière, exil (Force of Negation), zone de commandement, ou dessus de la bibliothèque (Memory Lapse : seule la taille est publique).
       if (p.destination === 'library') v.players[p.controller].library = p.library
-      else zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
+      else zoneOf(v.players[p.owner ?? p.controller], p.destination)?.push(board(p.card))
       break
     }
 
@@ -348,7 +379,8 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     }
 
     case 'TokenCreated':
-      v.players[p.player].battlefield.push(board(p.card))
+      // Gift (Fish engagé), Mobilize (Warrior engagés et attaquants).
+      v.players[p.player].battlefield.push({ ...board(p.card), tapped: p.tapped === true, ...(p.attacking !== undefined ? { attacking: p.attacking } : {}) })
       break
 
     case 'PermanentSacrificed': {
@@ -394,7 +426,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.winner = p.winner
       break
 
-    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled', 'CostNotPaid', 'DelayedTriggerCreated', 'NoncreatureLockApplied' et autres : pas d'effet sur l'état affiché.
+    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled', 'CostNotPaid', 'DelayedTriggerCreated', 'NoncreatureLockApplied', 'CastLockApplied', 'AttacksLocked', 'FlashGranted' et autres : pas d'effet sur l'état affiché.
   }
 
   return v

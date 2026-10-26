@@ -441,3 +441,64 @@ describe('reducer — shocklands, fetchlands et PV payés', () => {
     expect(after.battlefield.find((c) => c.id === 'grave')?.tapped).toBe(false)
   })
 })
+
+describe('reducer — pile et restrictions (lot H3)', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const bolt: PublicCard = { id: 'b1', name: 'Lightning Bolt', type: 'instant', cost: 1, effect: 'damage', amount: 3 }
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 10, controller: 'h' },
+          { id: 1, life: 40, library: 10, controller: 'ai' },
+        ],
+      }),
+    ])
+
+  it('copie, nouvelle cible, contrôle pris : la pile suit ; la copie disparaît, le sort volé va chez son propriétaire', () => {
+    const v = start()
+    v.stack.push({ id: 's1', card: bolt, controller: 1, targets: ['player:0'] })
+    v.priority.passed = [0]
+    applyEvent(v, ev(2, 'SpellCopied', { player: 1, card: bolt, stackId: 's3', targets: ['player:0'], source: 'Storm', copyOf: 's1' }))
+    expect(v.stack.map((i) => i.id)).toEqual(['s1', 's3'])
+    expect(v.priority.passed).toEqual([])
+    applyEvent(v, ev(3, 'TargetChanged', { stackId: 's1', targets: ['player:1'], by: 's4', source: 'Deflecting Swat' }))
+    expect(v.stack[0].targets).toEqual(['player:1'])
+    applyEvent(v, ev(4, 'SpellControlChanged', { stackId: 's1', controller: 0, previous: 1, source: 'Commandeer' }))
+    expect(v.stack[0].controller).toBe(0)
+    applyEvent(v, ev(5, 'SpellResolved', { stackId: 's3', card: bolt, controller: 1, destination: 'none' }))
+    applyEvent(v, ev(6, 'SpellResolved', { stackId: 's1', card: bolt, controller: 0, owner: 1, destination: 'graveyard' }))
+    expect(v.stack).toEqual([])
+    expect(v.players[0].graveyard).toEqual([])
+    expect(v.players[1].graveyard.map((c) => c.id)).toEqual(['b1'])
+  })
+
+  it('SpellExiled exile chez le propriétaire ; CardsMilled ; jetons engagés et attaquants', () => {
+    const v = start()
+    v.stack.push({ id: 's1', card: bolt, controller: 1, targets: [] })
+    applyEvent(v, ev(2, 'SpellExiled', { stackId: 's1', card: bolt, controller: 1, owner: 1, by: 's2', destination: 'exile' }))
+    expect(v.stack).toEqual([])
+    expect(v.players[1].exile.map((c) => c.id)).toEqual(['b1'])
+    applyEvent(
+      v,
+      ev(3, 'CardsMilled', {
+        player: 0,
+        cards: [
+          { ...bolt, id: 'm1' },
+          { ...bolt, id: 'm2' },
+        ],
+        library: 8,
+        source: 'Brain Freeze',
+      }),
+    )
+    expect(v.players[0].library).toBe(8)
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['m1', 'm2'])
+    const warrior: PublicCard = { id: 'p0_t1', name: 'Warrior', type: 'creature', cost: 0, effect: null, amount: 0, token: true }
+    applyEvent(v, ev(4, 'TokenCreated', { player: 0, card: warrior, tapped: true, attacking: 1 }))
+    expect(v.players[0].battlefield[0]).toMatchObject({ tapped: true, attacking: 1 })
+    applyEvent(v, ev(5, 'TokenCreated', { player: 1, card: { ...warrior, id: 'p1_t2' } }))
+    expect(v.players[1].battlefield[0].tapped).toBe(false)
+    expect(v.players[1].battlefield[0].attacking).toBeUndefined()
+  })
+})

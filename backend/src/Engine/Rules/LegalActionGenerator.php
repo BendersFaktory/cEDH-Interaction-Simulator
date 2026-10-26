@@ -11,6 +11,7 @@ use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\AssignCombatDamage;
 use App\Engine\Action\BottomCard;
 use App\Engine\Action\CastSpell;
+use App\Engine\Action\ChainCopy;
 use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
@@ -32,6 +33,7 @@ use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
 use App\Engine\Mana\ManaContext;
+use App\Engine\Mana\ManaCost;
 use App\Engine\Mana\ManaPayment;
 
 /**
@@ -68,7 +70,7 @@ final class LegalActionGenerator
      * dédoublonnée par nom (une décision par carte remise). Ponder (`arrange`) : un ordre par permutation des cartes regardées
      * (l'ordre actuel en premier, ce que l'agent passif choisit), puis « mélanger ».
      *
-     * @return list<PutBack|ArrangeTop>
+     * @return list<PutBack|ArrangeTop|ChainCopy>
      */
     private function selectionActions(GameState $s, int $playerId): array
     {
@@ -77,6 +79,23 @@ final class LegalActionGenerator
             return [];
         }
         $p = $s->player($playerId);
+        if ($sel['kind'] === 'chain') {
+            // Chain of Vapor : décliner d'abord (ce que l'agent passif choisit), puis un terrain par nom × un permanent non-terrain.
+            $actions = [new ChainCopy($playerId)];
+            $lands = [];
+            foreach ($p->battlefield as $card) {
+                if ($card->isLand() && !isset($lands[$card->name])) {
+                    $lands[$card->name] = $card->id;
+                }
+            }
+            foreach ($lands as $landId) {
+                foreach (self::bounceTargets($s) as [$target]) {
+                    $actions[] = new ChainCopy($playerId, $landId, $target);
+                }
+            }
+
+            return $actions;
+        }
         if ($sel['kind'] === 'put_back') {
             $actions = [];
             $seen = [];
@@ -181,15 +200,31 @@ final class LegalActionGenerator
         // Le coût d'un commandant inclut la taxe : +2 par lancement précédent.
         $seen = [];
         $mana = ManaPayment::context($p, $s->turn); // champ de bataille scanné une seule fois pour tous les sorts et capacités
+        // Interdictions (Silence, Lavinia, Voice of Victory…) : vérifiées seulement s'il y en a, le cas courant reste rapide.
+        $restricted = $s->castLocks !== [] || $s->noncreatureLocks !== [] || self::opponentsHaveStatics($s, $playerId);
         foreach ([...$p->hand, ...$p->command] as $card) {
-            if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed) || (!$card->isCreature() && $s->castLockedFor($playerId))) {
+            if ($card->isLand() || (!$sorcerySpeed && !$s->castsAtInstantSpeed($playerId, $card)) || ($restricted && !$s->canCast($playerId, $card))) {
                 continue;
             }
             // Modes de paiement : le coût de mana (si payable avec les terrains non engagés : couleurs, hybrides), puis les coûts alternatifs.
             $cost = $p->castCost($card);
             $modes = ManaPayment::plan($p, $cost, 0, $s->turn, null, $card, $mana) === null ? [] : [null];
-            if ($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander()) {
-                $modes[] = CastSpell::ALT_FREE;
+            if (($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander())
+                || ($card->altCost === CardInstance::ALT_OPPONENT_THREE_SPELLS && PriorityManager::opponentCastThree($s, $playerId))) {
+                $modes[] = CastSpell::ALT_FREE; // Fierce Guardianship, Mindbreak Trap
+            }
+            if ($card->altCost === CardInstance::ALT_PITCH_TWO_BLUE) {
+                // Commandeer : deux cartes bleues distinctes de la main, dédoublonnées par paire de noms.
+                $blues = array_values(array_filter($p->hand, static fn (CardInstance $o) => $o->id !== $card->id && $o->isBlue()));
+                $pairs = [];
+                foreach ($blues as $i => $a) {
+                    foreach (array_slice($blues, $i + 1) as $b) {
+                        $names = [$a->name, $b->name];
+                        sort($names);
+                        $pairs[implode('|', $names)] ??= CastSpell::ALT_PITCH . $a->id . ',' . $b->id;
+                    }
+                }
+                array_push($modes, ...array_values($pairs));
             }
             if (($card->altCost === CardInstance::ALT_PITCH_BLUE && $p->life >= 1) || $card->altCost === CardInstance::ALT_PITCH_BLUE_FREE
                 || ($card->altCost === CardInstance::ALT_PITCH_BLUE_OFF_TURN && $s->activePlayer !== $playerId)) {
@@ -220,17 +255,22 @@ final class LegalActionGenerator
                 }
                 $sacrifices = array_values($sacrifices);
             }
+            // Kicker (Orim's Chant) : une variante payée en plus, au coût de mana seulement.
+            $kicks = $card->kicker !== null && in_array(null, $modes, true)
+                && ManaPayment::plan($p, ManaCost::parse((string) $cost . $card->kicker), 0, $s->turn, null, $card, $mana) !== null ? [false, true] : [false];
             foreach ($card->isModal() ? $card->modes() : [0] as $mode) {
                 foreach ($modes as $alt) {
                     foreach ($this->targetSets($s, $card, $playerId, $mode) as $targets) {
                         foreach ($sacrifices as $sacrifice) {
-                            for ($x = 0; $x <= ($alt === null ? $maxX : 0); $x++) {
-                                $key = $card->name . '|' . implode(',', $targets) . '|' . $x . '|' . $alt . '|' . $mode . '|' . $sacrifice;
-                                if (isset($seen[$key])) {
-                                    continue;
+                            foreach ($alt === null ? $kicks : [false] as $kicked) {
+                                for ($x = 0; $x <= ($alt === null ? $maxX : 0); $x++) {
+                                    $key = $card->name . '|' . implode(',', $targets) . '|' . $x . '|' . $alt . '|' . $mode . '|' . $sacrifice . '|' . ($kicked ? 'k' : '');
+                                    if (isset($seen[$key]) || ($restricted && $x > 0 && !$s->canCast($playerId, $card, $x))) {
+                                        continue;
+                                    }
+                                    $seen[$key] = true;
+                                    $actions[] = new CastSpell($playerId, $card->id, $targets, $x, $alt, $mode, $sacrifice, $kicked);
                                 }
-                                $seen[$key] = true;
-                                $actions[] = new CastSpell($playerId, $card->id, $targets, $x, $alt, $mode, $sacrifice);
                             }
                         }
                     }
@@ -239,6 +279,22 @@ final class LegalActionGenerator
         }
 
         return [...$actions, ...$this->abilityActions($s, $p, $mana)];
+    }
+
+    /** Un adversaire de `$playerId` contrôle-t-il un permanent à capacité statique (Lavinia, Voice of Victory) ? */
+    private static function opponentsHaveStatics(GameState $s, int $playerId): bool
+    {
+        foreach ($s->players as $o) {
+            if ($o->id !== $playerId && !$o->lost) {
+                foreach ($o->battlefield as $card) {
+                    if ($card->statics !== []) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -419,6 +475,9 @@ final class LegalActionGenerator
             $targetSets = $ability->targetsPlayer()
                 ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
                 : ($pending->opponent !== null && $ability->effect === 'draw_unless' ? [['player:' . $pending->opponent]] : [[]]); // Rhystic Study : le lanceur paiera ; Kraum ne cible pas
+            if ($ability->effect === 'counter_spell' && $pending->stackId !== null) {
+                $targetSets = [['stack:' . $pending->stackId]]; // Lavinia : le sort lancé sans mana
+            }
             if ($ability->choosesLibraryCard()) {
                 // Tuteur à l'entrée (Ranger-Captain of Eos) : une carte qui convient par nom, ou rien à chercher.
                 $targetSets = [];
@@ -517,7 +576,7 @@ final class LegalActionGenerator
      */
     public function attackActions(GameState $s, int $playerId): array
     {
-        if ($playerId !== $s->activePlayer) {
+        if ($playerId !== $s->activePlayer || $s->attackLocked) {
             return [];
         }
         $actions = [];
@@ -654,8 +713,14 @@ final class LegalActionGenerator
         return match ($effect->effect) {
             // Tuteur : une carte de sa bibliothèque par nom (`library:<id>`), comme une fetchland.
             'tutor' => self::libraryTargets($s->player($playerId), $effect->tutorFilter),
-            // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`).
-            'exile', 'bounce', 'destroy' => self::permanentTargets($s, $effect),
+            // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`) ; `opponent_…` : d'un adversaire.
+            'exile', 'bounce', 'destroy' => self::permanentTargets($s, $effect, $playerId),
+            'mill', 'silence_target' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
+            // Gift : un adversaire en vie reçoit le jeton.
+            'gift' => array_map(static fn (int $id) => 'player:' . $id, array_values(array_filter($s->alivePlayerIds(), static fn (int $id) => $id !== $playerId))),
+            'steal' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && $effect->canCounter($item->card, $item->x)))),
+            'redirect' => $this->redirectCandidates($s, $effect),
+            'exile_spells' => self::exileSpellsCandidates($s, $playerId),
             // Copie : une créature que le lanceur contrôle (`permanent:<id>`).
             'copy' => array_map(static fn (CardInstance $c) => 'permanent:' . $c->id, array_values(array_filter($s->player($playerId)->battlefield, static fn (CardInstance $c) => $c->isCreature()))),
             'damage' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
@@ -702,13 +767,82 @@ final class LegalActionGenerator
         return $out;
     }
 
+    /**
+     * Deflecting Swat (`any`), Misdirection (`spell`) : une cible `stack:<id>><nouvelle cible>` par objet de pile à une seule
+     * cible et par nouvelle cible légale pour lui (voir `retargetCandidates()`).
+     *
+     * @return list<string>
+     */
+    private function redirectCandidates(GameState $s, SpellEffect $effect): array
+    {
+        $out = [];
+        foreach ($s->stack as $item) {
+            if ($effect->target === 'spell' && $item->isAbility()) {
+                continue;
+            }
+            foreach ($this->retargetCandidates($s, $item) as $new) {
+                $out[] = 'stack:' . $item->id . '>' . $new;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Nouvelles cibles légales d'un objet de pile à une seule cible (CR 115.7), autres que l'actuelle et que lui-même, du point
+     * de vue de son contrôleur : sort à un effet ciblé (contresort, dégâts, renvoi…), ou capacité de dégâts (un joueur) ou de
+     * renvoi (Channel d'Otawara). Vide sinon (cible d'une recherche de bibliothèque, d'un Gift, d'un Mindbreak Trap…).
+     *
+     * @return list<string>
+     */
+    public function retargetCandidates(GameState $s, \App\Engine\Game\StackItem $item): array
+    {
+        if (count($item->targets) !== 1) {
+            return [];
+        }
+        if ($item->isAbility()) {
+            $effect = ($item->ability ?? $item->trigger)->effect;
+            $candidates = match ($effect) {
+                'damage' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
+                'bounce' => array_merge(...array_map(static fn (array $t) => $t, self::bounceTargets($s))),
+                default => [],
+            };
+        } else {
+            $targeted = $item->card->targetedEffects($item->mode);
+            if (count($targeted) !== 1 || in_array($targeted[0]->effect, ['tutor', 'gift', 'redirect', 'exile_spells'], true)) {
+                return [];
+            }
+            $candidates = $this->targetCandidates($s, $targeted[0], $item->controller);
+        }
+
+        return array_values(array_filter($candidates, static fn (string $t) => $t !== $item->targets[0] && $t !== 'stack:' . $item->id));
+    }
+
+    /**
+     * Mindbreak Trap (« any number of target spells ») : chaque sort de la pile seul, puis tous les sorts des adversaires du
+     * lanceur ensemble s'il y en a au moins deux (`stack:<id>+<id>…`). Les autres combinaisons ne sont pas proposées.
+     *
+     * @return list<string>
+     */
+    private static function exileSpellsCandidates(GameState $s, int $playerId): array
+    {
+        $spells = array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility()));
+        $out = array_map(static fn ($item) => 'stack:' . $item->id, $spells);
+        $theirs = array_map(static fn ($item) => $item->id, array_values(array_filter($spells, static fn ($item) => $item->controller !== $playerId)));
+        if (count($theirs) >= 2) {
+            $out[] = 'stack:' . implode('+', $theirs);
+        }
+
+        return $out;
+    }
+
     /** @return list<string> une cible `permanent:<id>` par permanent légal, joueurs dans l'ordre du tour */
-    private static function permanentTargets(GameState $s, SpellEffect $effect): array
+    private static function permanentTargets(GameState $s, SpellEffect $effect, ?int $caster = null): array
     {
         $out = [];
         foreach ($s->alivePlayerIds() as $id) {
             foreach ($s->player($id)->battlefield as $permanent) {
-                if ($effect->canTargetPermanent($permanent)) {
+                if ($effect->canTargetPermanent($permanent, $id, $caster)) {
                     $out[] = 'permanent:' . $permanent->id;
                 }
             }

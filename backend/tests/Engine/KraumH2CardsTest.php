@@ -119,7 +119,8 @@ final class KraumH2CardsTest extends TestCase
             'Mox Opal', 'Mox Amber', 'Starting Town', 'City of Traitors', 'Otawara, Soaring City', 'Pyroblast', 'Red Elemental Blast', 'Gamble', 'Ranger-Captain of Eos'] as $name) {
             self::assertInstanceOf(CardDefinition::class, self::def($name), $name);
         }
-        foreach (['Misdirection' => 'Change the target', 'Commandeer' => 'two blue cards', 'Gemstone Caverns' => 'opening hand', 'Wishclaw Talisman' => 'wish counters'] as $name => $why) {
+        // Misdirection et Commandeer : acceptées depuis le lot H3 (KraumH3CardsTest).
+        foreach (['Gemstone Caverns' => 'opening hand', 'Wishclaw Talisman' => 'wish counters'] as $name => $why) {
             try {
                 self::def($name);
                 self::fail("$name devrait être refusée");

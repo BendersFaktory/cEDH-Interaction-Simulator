@@ -24,7 +24,7 @@ final class CardMapper
         'vigilance' => CardInstance::VIGILANCE, 'defender' => CardInstance::DEFENDER, 'menace' => CardInstance::MENACE,
         'first strike' => CardInstance::FIRST_STRIKE, 'double strike' => CardInstance::DOUBLE_STRIKE,
         'trample' => CardInstance::TRAMPLE, 'deathtouch' => CardInstance::DEATHTOUCH, 'lifelink' => CardInstance::LIFELINK,
-        'flash' => CardInstance::FLASH, 'partner' => CardInstance::PARTNER,
+        'flash' => CardInstance::FLASH, 'partner' => CardInstance::PARTNER, 'storm' => CardInstance::STORM,
     ];
     private const TYPES = [
         'land' => CardInstance::LAND, 'instant' => CardInstance::INSTANT, 'sorcery' => CardInstance::SORCERY,
@@ -71,8 +71,8 @@ final class CardMapper
         $keywords = [];
         foreach ($card['keywords'] ?? [] as $keyword) {
             $key = strtolower((string) $keyword);
-            if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel'], true)) {
-                continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Threshold — … ») est traité ligne par ligne
+            if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel', 'mill', 'kicker', 'gift', 'mobilize'], true)) {
+                continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Kicker {W} », « Mobilize 2 ») est traité ligne par ligne
             }
             if (!isset(self::KEYWORDS[$key])) {
                 throw $fail("mot-clé non modélisé ($keyword)");
@@ -93,6 +93,9 @@ final class CardMapper
         $extraCost = null; // coût additionnel (Culling the Weak, Diabolic Intent)
         $tappedAfterOwnTurn = 0; // Starting Town
         $modal = null; // « Choose one — » : numéro du dernier mode lu
+        $statics = [];
+        $kicker = null; // « Kicker {W} » (Orim's Chant)
+        $gift = null; // « Gift a tapped Fish » : jeton promis (Into the Flood Maw)
 
         foreach ($this->oracleLines((string) ($card['oracle_text'] ?? ''), $name) as $line) {
             $line = $this->anyColor($line);
@@ -111,7 +114,47 @@ final class CardMapper
                 $mode = $modal;
                 $line = $bullet[1];
             }
-            if ($isSpell && preg_match('/^~ deals (\d+|X) damage to any target\.$/', $line, $m)) {
+            if ($isSpell && preg_match('/^Kicker ((?:\{(?:\d+|[WUBRG])\})+)$/', $line, $m)) {
+                $kicker = $m[1]; // Orim's Chant
+            } elseif ($isSpell && $line === 'Gift a tapped Fish') {
+                $gift = 'Fish:1/1'; // Into the Flood Maw (le jeton est créé engagé)
+            } elseif ($isSpell && $gift !== null && $line === 'Return target creature an opponent controls to its owner\'s hand. If the gift was promised, instead return target nonland permanent an opponent controls to its owner\'s hand.') {
+                // Gift modélisé en deux modes : sans promesse (mode 1) ; promesse à un adversaire, puis cible élargie (mode 2).
+                $effects[] = new SpellEffect('bounce', 0, null, 'opponent_creature', mode: 1);
+                $effects[] = new SpellEffect('gift', token: $gift, mode: 2);
+                $effects[] = new SpellEffect('bounce', 0, null, 'opponent_nonland', mode: 2);
+            } elseif ($isSpell && $line === 'You may cast spells this turn as though they had flash.') {
+                $effects[] = new SpellEffect('flash_grant'); // Borne Upon a Wind
+            } elseif ($isSpell && preg_match('/^Target player mills (one|two|three|four) cards?\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('mill', self::NUMBER[$m[1]]); // Brain Freeze
+            } elseif ($isSpell && $line === 'Return target nonland permanent to its owner\'s hand. Then that permanent\'s controller may sacrifice a land of their choice. If the player does, they may copy ~ and may choose a new target for that copy.') {
+                $effects[] = new SpellEffect('bounce', 0, null, 'nonland', chain: true); // Chain of Vapor
+            } elseif ($isSpell && $line === 'You may exile two blue cards from your hand rather than pay ~\'s mana cost.') {
+                $altCost = CardInstance::ALT_PITCH_TWO_BLUE; // Commandeer
+            } elseif ($isSpell && $line === 'Gain control of target noncreature spell. You may choose new targets for it.') {
+                $effects[] = new SpellEffect('steal', 0, null, 'noncreature'); // Commandeer (les cibles sont gardées)
+            } elseif ($isSpell && $line === 'You may choose new targets for target spell or ability.') {
+                $effects[] = new SpellEffect('redirect', 0, null, 'any'); // Deflecting Swat
+            } elseif ($isSpell && $line === 'Change the target of target spell with a single target.') {
+                $effects[] = new SpellEffect('redirect', 0, null, 'spell'); // Misdirection
+            } elseif ($isSpell && $line === 'If an opponent cast three or more spells this turn, you may pay {0} rather than pay ~\'s mana cost.') {
+                $altCost = CardInstance::ALT_OPPONENT_THREE_SPELLS; // Mindbreak Trap
+            } elseif ($isSpell && $line === 'Exile any number of target spells.') {
+                $effects[] = new SpellEffect('exile_spells'); // Mindbreak Trap
+            } elseif ($isSpell && $line === 'Your opponents can\'t cast spells this turn.') {
+                $effects[] = new SpellEffect('silence'); // Silence
+            } elseif ($isSpell && $kicker !== null && $line === 'Target player can\'t cast spells this turn. If ~ was kicked, creatures can\'t attack this turn.') {
+                $effects[] = new SpellEffect('silence_target'); // Orim's Chant
+                $effects[] = new SpellEffect('no_attacks', kicked: true);
+            } elseif (!$isSpell && !$isLand && $line === 'You may cast noncreature spells as though they had flash.') {
+                $statics[] = CardInstance::STATIC_NONCREATURE_FLASH; // Valley Floodcaller
+            } elseif (!$isSpell && !$isLand && $line === 'Each opponent can\'t cast noncreature spells with mana value greater than the number of lands that player controls.') {
+                $statics[] = CardInstance::STATIC_OPPONENTS_MV_LANDS; // Lavinia, Azorius Renegade
+            } elseif (!$isSpell && !$isLand && $line === 'Your opponents can\'t cast spells during your turn.') {
+                $statics[] = CardInstance::STATIC_OPPONENTS_NO_CAST_YOUR_TURN; // Voice of Victory
+            } elseif ($isCreature && preg_match('/^Mobilize (\d+)$/', $line, $m)) {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::ATTACKS, 'mobilize', (int) $m[1]); // Voice of Victory
+            } elseif ($isSpell && preg_match('/^~ deals (\d+|X) damage to any target\.$/', $line, $m)) {
                 if ($m[1] === 'X' && !$hasX) {
                     throw $fail('dégâts X sans {X} dans le coût');
                 }
@@ -168,8 +211,9 @@ final class CardMapper
                 $altCost = CardInstance::ALT_RETURN_ISLANDS . ($m[1] === 'an Island' ? 1 : 2); // Daze, Gush
             } elseif ($isSpell && $line === 'Counter target noncreature spell.') {
                 $effects[] = new SpellEffect('counter', 0, null, 'noncreature');
-            } elseif ($isSpell && preg_match('/^Counter target (noncreature )?spell unless its controller pays ((?:\{\d+\})+)\.$/', $line, $m)) {
-                $effects[] = new SpellEffect('counter', 0, null, $m[1] !== '' ? 'noncreature' : null, payCost: $m[2]); // Daze, Mana Leak, Spell Pierce
+            } elseif ($isSpell && preg_match('/^Counter target (noncreature |instant or sorcery )?spell unless its controller pays ((?:\{\d+\})+)\.$/', $line, $m)) {
+                $filter = ['' => null, 'noncreature ' => 'noncreature', 'instant or sorcery ' => CardInstance::INSTANT . '|' . CardInstance::SORCERY][$m[1]];
+                $effects[] = new SpellEffect('counter', 0, null, $filter, payCost: $m[2]); // Daze, Mana Leak, Spell Pierce, Flusterstorm
             } elseif ($isSpell && preg_match('/^Counter target (noncreature )?spell\. If that spell is countered this way, exile it instead of putting it into its owner\'s graveyard\.$/', $line, $m)) {
                 $effects[] = new SpellEffect('counter', 0, null, $m[1] !== '' ? 'noncreature' : null, counterTo: SpellEffect::COUNTER_EXILE); // Force of Negation
             } elseif ($isSpell && $line === 'Counter target spell. If that spell is countered this way, put it on top of its owner\'s library instead of into that player\'s graveyard.') {
@@ -282,7 +326,7 @@ final class CardMapper
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
             null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
             in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost, $altCost, $noUntap,
-            $extraCost, $tappedAfterOwnTurn,
+            $extraCost, $tappedAfterOwnTurn, $statics, $kicker,
         );
     }
 
@@ -392,7 +436,7 @@ final class CardMapper
     {
         $targetedPerMode = [];
         foreach ($effects as $e) {
-            if ($e->isTargeted()) {
+            if ($e->isTargeted() && $e->effect !== 'gift') { // le joueur d'un Gift n'est pas une cible
                 $targetedPerMode[$e->mode] = ($targetedPerMode[$e->mode] ?? 0) + 1;
             }
         }
@@ -430,6 +474,12 @@ final class CardMapper
         }
         if (preg_match('/^Whenever an opponent casts a spell, you may draw a card unless that player pays ((?:\{\d+\})+)\.$/', $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw_unless', 1, $m[1]); // Rhystic Study (« you may » : toujours)
+        }
+        if ($line === 'Whenever an opponent casts a spell, if no mana was spent to cast it, counter that spell.') {
+            return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'counter_spell', filter: TriggeredAbility::NO_MANA); // Lavinia
+        }
+        if ($isCreature && $line === 'Whenever you cast a noncreature spell, Birds, Frogs, Otters, and Rats you control get +1/+1 until end of turn. Untap them.') {
+            return new TriggeredAbility(TriggeredAbility::CAST, 'pump_untap', spec: 'Bird|Frog|Otter|Rat', filter: TriggeredAbility::NONCREATURE); // Valley Floodcaller
         }
         if ($line === 'Whenever an opponent casts their second spell each turn, draw a card.') {
             return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw', 1, filter: TriggeredAbility::SECOND_SPELL); // Kraum

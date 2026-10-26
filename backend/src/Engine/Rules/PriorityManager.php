@@ -10,6 +10,7 @@ use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\CastSpell;
+use App\Engine\Action\ChainCopy;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
@@ -129,6 +130,11 @@ final class PriorityManager
 
             if ($action instanceof ArrangeTop) {
                 $this->arrangeTop($s, $action);
+                continue;
+            }
+
+            if ($action instanceof ChainCopy) {
+                $this->chainCopy($s, $action);
                 continue;
             }
 
@@ -276,6 +282,28 @@ final class PriorityManager
         $this->finishSelection($s);
     }
 
+    /**
+     * Chain of Vapor : le joueur décline, ou sacrifie un terrain qu'il contrôle et copie le sort (CR 707.10) ; la copie, contrôlée
+     * par lui, vise le permanent non-terrain choisi (`SpellCopied`). Puis la sélection se termine.
+     */
+    private function chainCopy(GameState $s, ChainCopy $a): void
+    {
+        $sel = $s->selection ?? throw new \LogicException('Aucune sélection en cours');
+        if ($a->landId !== null) {
+            $p = $s->player($a->player());
+            if (!($p->findOnBattlefield($a->landId)?->isLand() ?? false)) {
+                throw new IllegalActionException('Terrain à sacrifier introuvable');
+            }
+            $s->sacrifice($a->player(), [$a->landId]);
+            $source = $sel['card'] ?? throw new \LogicException('Sort à copier absent de la sélection');
+            $card = CardInstance::fromArray($source);
+            $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), [(string) $a->target], copy: true);
+            $s->stack[] = $item;
+            $s->emit('SpellCopied', ['player' => $a->player(), 'card' => $card->toPublic(), 'stackId' => $item->id, 'targets' => $item->targets, 'source' => $sel['source']]);
+        }
+        $this->finishSelection($s);
+    }
+
     /** Fin de la sélection : les pioches qui suivaient (Ponder) se font, puis nouvelle ronde comme après une résolution. */
     private function finishSelection(GameState $s): void
     {
@@ -350,8 +378,8 @@ final class PriorityManager
         if ($card->isModal() ? !in_array($a->mode, $card->modes(), true) : $a->mode !== 0) {
             throw new IllegalActionException('Mode invalide pour ce sort');
         }
-        if (!$card->isCreature() && $s->castLockedFor($a->player())) {
-            throw new IllegalActionException('Un adversaire vous interdit les sorts non-créature ce tour');
+        if (!$s->canCast($a->player(), $card, $a->x)) {
+            throw new IllegalActionException('Une interdiction vous empêche de lancer ce sort');
         }
         $sacrificed = null; // coût additionnel : créature sacrifiée (Culling the Weak, Diabolic Intent)
         if ($card->extraCost === CardInstance::EXTRA_SACRIFICE_CREATURE) {
@@ -368,6 +396,12 @@ final class PriorityManager
         if ($a->x < 0 || ($a->x > 0 && !$cost->hasX())) {
             throw new IllegalActionException('X invalide pour ce sort');
         }
+        if ($a->kicked) {
+            if ($card->kicker === null || $a->alt !== null) {
+                throw new IllegalActionException('Kicker indisponible');
+            }
+            $cost = ManaCost::parse((string) $cost . $card->kicker); // Orim's Chant : {W} de plus
+        }
         $plan = null; // coût alternatif : rien à payer en mana
         if ($a->alt === null) {
             $plan = ManaPayment::plan($p, $cost, $a->x, $s->turn, null, $card) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
@@ -378,7 +412,8 @@ final class PriorityManager
         $pitchLife = 0;
         $returned = [];
         if ($a->alt === CastSpell::ALT_FREE) {
-            if ($card->altCost !== CardInstance::ALT_COMMANDER || !$p->controlsCommander()) {
+            if (!(($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander())
+                || ($card->altCost === CardInstance::ALT_OPPONENT_THREE_SPELLS && self::opponentCastThree($s, $a->player())))) {
                 throw new IllegalActionException('Coût alternatif gratuit indisponible');
             }
         } elseif ($a->alt !== null && str_starts_with($a->alt, CastSpell::ALT_RETURN)) {
@@ -395,11 +430,20 @@ final class PriorityManager
             }
             $returned = $ids;
         } elseif ($a->alt !== null) {
-            $pitch = $p->findHand(substr($a->alt, strlen(CastSpell::ALT_PITCH)));
+            // Exil de cartes bleues de la main : une (Force of Will, Misdirection…) ou deux (Commandeer).
+            $ids = str_starts_with($a->alt, CastSpell::ALT_PITCH) ? explode(',', substr($a->alt, strlen(CastSpell::ALT_PITCH))) : [];
+            $pitch = [];
+            foreach (array_unique($ids) as $id) {
+                $blue = $p->findHand($id);
+                if ($blue !== null && $blue->isBlue() && $blue->id !== $card->id) {
+                    $pitch[] = $blue;
+                }
+            }
             $pitchLife = $card->altCost === CardInstance::ALT_PITCH_BLUE ? 1 : 0;
-            $allowed = $card->altCost === CardInstance::ALT_PITCH_BLUE || $card->altCost === CardInstance::ALT_PITCH_BLUE_FREE
+            $wanted = $card->altCost === CardInstance::ALT_PITCH_TWO_BLUE ? 2 : 1;
+            $allowed = $card->altCost === CardInstance::ALT_PITCH_BLUE || $card->altCost === CardInstance::ALT_PITCH_BLUE_FREE || $card->altCost === CardInstance::ALT_PITCH_TWO_BLUE
                 || ($card->altCost === CardInstance::ALT_PITCH_BLUE_OFF_TURN && $s->activePlayer !== $a->player()); // Force of Negation
-            if (!$allowed || !str_starts_with($a->alt, CastSpell::ALT_PITCH) || $p->life < $pitchLife || $pitch === null || !$pitch->isBlue() || $pitch->id === $card->id) {
+            if (!$allowed || $p->life < $pitchLife || count($pitch) !== $wanted || count($ids) !== $wanted) {
                 throw new IllegalActionException('Coût alternatif par exil indisponible');
             }
         }
@@ -413,12 +457,12 @@ final class PriorityManager
         ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain] = $plan === null
             ? ['tapped' => [], 'paid' => [], 'fromPool' => [], 'sacrifice' => [], 'pain' => []]
             : $p->payWithPlan($plan);
-        if ($pitch !== null) {
-            if ($pitchLife > 0) {
-                $s->payLife($a->player(), $pitchLife, $card->name);
-            }
-            $p->takeFromHand($pitch->id);
-            $s->exileFromHand($a->player(), $pitch, $card->name);
+        if ($pitchLife > 0) {
+            $s->payLife($a->player(), $pitchLife, $card->name);
+        }
+        foreach ($pitch ?? [] as $blue) {
+            $p->takeFromHand($blue->id);
+            $s->exileFromHand($a->player(), $blue, $card->name);
         }
         foreach ($returned as $id) {
             $s->returnToHand($a->player(), $id, $card->name);
@@ -430,7 +474,7 @@ final class PriorityManager
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
 
-        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode);
+        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode, kicked: $a->kicked);
         $s->stack[] = $item;
 
         $s->emit('SpellCast', [
@@ -447,7 +491,7 @@ final class PriorityManager
             'pool' => $p->pool->toArray(),
         ] + $p->pool->restrictedField() + [
             'fromCommand' => $fromCommand,
-        ] + ($a->mode > 0 ? ['mode' => $a->mode] : []));
+        ] + ($a->mode > 0 ? ['mode' => $a->mode] : []) + ($a->kicked ? ['kicked' => true] : []));
         if ($sacrificed !== null && !in_array($sacrificed->id, $sacrifice, true)) {
             $sacrifice[] = $sacrificed->id;
         }
@@ -456,11 +500,32 @@ final class PriorityManager
         // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
         $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);
         $s->spellsCast[$a->player()] = ($s->spellsCast[$a->player()] ?? 0) + 1;
-        $s->queueOpponentCastTriggers($a->player(), $card); // Rhystic Study, Kraum
+        if ($card->hasKeyword(CardInstance::STORM)) {
+            // Storm (CR 702.40) : trigger du sort lui-même, une copie par sort lancé avant lui ce tour (tous joueurs confondus).
+            $count = array_sum($s->spellsCast) - 1;
+            if ($count > 0) {
+                $storm = new TriggeredAbility(TriggeredAbility::CAST, 'storm', $count, StackResolver::stormSpec($item));
+                $s->pendingTriggers[] = new \App\Engine\Game\PendingTrigger('tr' . $s->nextTriggerId++, $a->player(), clone $card, 0, $storm);
+            }
+        }
+        // Lavinia : « si aucun mana n'a été dépensé pour le lancer » (coût alternatif, ou coût de mana nul).
+        $s->queueOpponentCastTriggers($a->player(), $card, $item->id, $paid !== [] || $fromPool !== []); // Rhystic Study, Kraum, Lavinia
 
         // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
         $s->priority->passed = [];
         $s->priority->announced = false; // le lanceur reçoit la priorité en premier
+    }
+
+    /** Un adversaire de `$player` a-t-il lancé trois sorts ou plus ce tour (Mindbreak Trap) ? */
+    public static function opponentCastThree(GameState $s, int $player): bool
+    {
+        foreach ($s->spellsCast as $id => $count) {
+            if ($id !== $player && $count >= 3) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Si le détenteur a été éliminé pendant la ronde, la priorité passe au suivant. */

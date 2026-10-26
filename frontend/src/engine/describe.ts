@@ -2,8 +2,20 @@ import type { GameEvent } from '../types/engine'
 
 import { phaseLabel } from './phases'
 
-/** Cible lisible : `player:N` → `JN`, `permanent:<id>` → `permanent <id>`, `stack:<id>` → `sort <id>`. */
-export const target = (t: string): string => (t.startsWith('player:') ? `J${t.slice(7)}` : t.startsWith('permanent:') ? `permanent ${t.slice(10)}` : `sort ${t.slice(6)}`)
+/**
+ * Cible lisible : `player:N` → `JN`, `permanent:<id>` → `permanent <id>`, `stack:<id>` → `sort <id>` ; `stack:<id>><cible>`
+ * (Deflecting Swat, Misdirection) → `sort <id> (nouvelle cible : …)` ; `stack:<id>+<id>` (Mindbreak Trap) → `sorts <id>, <id>`.
+ */
+export const target = (t: string): string => {
+  const arrow = t.indexOf('>')
+  if (arrow >= 0) return `${target(t.slice(0, arrow))} (nouvelle cible : ${target(t.slice(arrow + 1))})`
+  if (t.startsWith('player:')) return `J${t.slice(7)}`
+  if (t.startsWith('permanent:')) return `permanent ${t.slice(10)}`
+  return t.includes('+') ? `sorts ${t.slice(6).split('+').join(', ')}` : `sort ${t.slice(6)}`
+}
+
+/** Objet de pile désigné par son id. */
+const sort = (id: string): string => `sort ${id}`
 
 const manaStr = (m: Record<string, number> | undefined): string =>
   Object.entries(m ?? {})
@@ -74,6 +86,24 @@ export function describeEvent(e: GameEvent): string {
       const where: Record<string, string> = { command: ' et retourne en zone de commandement', exile: ' et exilé', library: ' et remis sur le dessus de la bibliothèque' }
       return `${p.card.name} (J${p.controller}) est contré${where[p.destination] ?? ''}`
     }
+    case 'SpellCopied': {
+      const t = (p.targets as string[]).map(target).join(', ')
+      return `J${p.player} copie ${p.card.name} (${p.source})${t ? ` → ${t}` : ''}`
+    }
+    case 'TargetChanged':
+      return `${p.source} : nouvelle cible pour ${sort(p.stackId)} → ${(p.targets as string[]).map(target).join(', ')}`
+    case 'SpellControlChanged':
+      return `${p.source} : J${p.controller} prend le contrôle de ${sort(p.stackId)} (à J${p.previous})`
+    case 'SpellExiled':
+      return `${p.card.name} (J${p.controller}) est exilé de la pile${p.destination === 'none' ? " (la copie cesse d'exister)" : ''}`
+    case 'CardsMilled':
+      return `J${p.player} meule ${p.cards.length} carte${p.cards.length > 1 ? 's' : ''} (${p.source})`
+    case 'CastLockApplied':
+      return `${p.source} : ${(p.players as number[]).map((id) => `J${id}`).join(', ')} ne peu${p.players.length > 1 ? 'vent' : 't'} pas lancer de sort ce tour`
+    case 'AttacksLocked':
+      return `${p.source} : les créatures ne peuvent pas attaquer ce tour`
+    case 'FlashGranted':
+      return `${p.source} : J${p.player} lance ses sorts comme s'ils avaient le flash ce tour`
     case 'CostPaid':
       return `J${p.player} paie ${p.cost} (${p.source})`
     case 'CostNotPaid':
@@ -125,7 +155,7 @@ export function describeEvent(e: GameEvent): string {
     case 'CreatureBoosted':
       return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
     case 'TokenCreated':
-      return `J${p.player} crée un jeton ${p.copyOf ? 'copie de ' : ''}${p.card.name}`
+      return `J${p.player} crée un jeton ${p.copyOf ? 'copie de ' : ''}${p.card.name}${p.tapped ? ' engagé' : ''}${p.attacking !== undefined ? ` qui attaque J${p.attacking}` : ''}`
     case 'LegendRuleApplied':
       return `Règle des légendes : J${p.player} garde ${p.kept}, ${p.removed.map((r: { card: { id: string } }) => r.card.id).join(', ')} part au cimetière`
     case 'PermanentSacrificed':

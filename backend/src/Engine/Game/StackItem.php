@@ -26,7 +26,25 @@ final class StackItem
         public readonly int $abilityIndex = 0,
         public readonly ?TriggeredAbility $trigger = null,
         public readonly int $mode = 0, // mode choisi d'un sort modal (Pyroblast) ; 0 = sort non modal
+        public readonly bool $copy = false, // copie d'un sort (Storm, Chain of Vapor) : jamais lancée, cesse d'exister en quittant la pile (CR 707.10a)
+        public readonly bool $kicked = false, // kicker payé (Orim's Chant)
+        public readonly ?int $owner = null, // propriétaire, s'il n'est pas le contrôleur (sort dont Commandeer a pris le contrôle)
     ) {
+    }
+
+    /** Le même objet de pile avec d'autres cibles (Deflecting Swat, Misdirection) ou un autre contrôleur (Commandeer). */
+    public function with(?array $targets = null, ?int $controller = null): self
+    {
+        $controller ??= $this->controller;
+
+        return new self($this->id, $this->card, $controller, $targets ?? $this->targets, $this->x, $this->ability, $this->abilityIndex, $this->trigger,
+            $this->mode, $this->copy, $this->kicked, $controller === $this->ownerId() ? null : $this->ownerId());
+    }
+
+    /** Propriétaire de la carte : le joueur dans le cimetière duquel elle ira. */
+    public function ownerId(): int
+    {
+        return $this->owner ?? $this->controller;
     }
 
     /**
@@ -60,11 +78,13 @@ final class StackItem
             'x' => $this->x,
             'ability' => $this->ability?->toArray(),
             'abilityIndex' => $this->abilityIndex,
-        ] + ($this->trigger === null ? [] : ['trigger' => $this->trigger->toArray()]) + ($this->mode === 0 ? [] : ['mode' => $this->mode]);
+        ] + ($this->trigger === null ? [] : ['trigger' => $this->trigger->toArray()]) + ($this->mode === 0 ? [] : ['mode' => $this->mode])
+            + ($this->copy ? ['copy' => true] : []) + ($this->kicked ? ['kicked' => true] : []) + ($this->owner === null ? [] : ['owner' => $this->owner]);
     }
 
     public static function fromArray(array $d): self
     {
-        return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets'], (int) ($d['x'] ?? 0), isset($d['ability']) ? ActivatedAbility::fromArray($d['ability']) : null, (int) ($d['abilityIndex'] ?? 0), isset($d['trigger']) ? TriggeredAbility::fromArray($d['trigger']) : null, (int) ($d['mode'] ?? 0));
+        return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets'], (int) ($d['x'] ?? 0), isset($d['ability']) ? ActivatedAbility::fromArray($d['ability']) : null, (int) ($d['abilityIndex'] ?? 0), isset($d['trigger']) ? TriggeredAbility::fromArray($d['trigger']) : null, (int) ($d['mode'] ?? 0),
+            (bool) ($d['copy'] ?? false), (bool) ($d['kicked'] ?? false), isset($d['owner']) ? (int) $d['owner'] : null);
     }
 }

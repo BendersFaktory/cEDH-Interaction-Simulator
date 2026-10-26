@@ -95,18 +95,25 @@ final class StackResolver
                 'pact' => $paid === true ? null : (new StateBasedActions())->eliminate($s, $item->controller, 'pact_unpaid'),
                 'draw_unless' => $paid === true ? null : $this->draw($s, $item->controller, $ability->amount), // Rhystic Study
                 'pay_life_draw' => $this->payLifeDraw($s, $item->controller, $card->name), // Tymna the Weaver
+                'storm' => $this->stormCopies($s, $item),
+                'counter_spell' => $this->counter($s, $item->targets[0] ?? '', $item, new SpellEffect('counter'), null), // Lavinia
+                'mobilize' => $this->mobilize($s, $item),
+                'sacrifice_tokens' => $this->sacrificeTokens($s, $item->controller, $ability->spec),
+                'pump_untap' => $this->pumpUntap($s, $item->controller, $ability->spec), // Valley Floodcaller
                 default => null,
             };
 
             return;
         }
 
-        // Permanent -> champ de bataille ; sinon cimetière.
-        if ($card->isPermanent()) {
+        // Permanent -> champ de bataille ; sinon cimetière de son propriétaire. Une copie cesse d'exister (CR 707.10a).
+        if ($item->copy) {
+            $destination = 'none';
+        } elseif ($card->isPermanent()) {
             $s->enterBattlefield($item->controller, $card);
             $destination = 'battlefield';
         } else {
-            $destination = $s->sendToGraveyard($item->controller, $card);
+            $destination = $s->sendToGraveyard($item->ownerId(), $card);
         }
 
         $s->emit('SpellResolved', [
@@ -114,15 +121,16 @@ final class StackResolver
             'card' => $card->toPublic(),
             'controller' => $item->controller,
             'destination' => $destination,
-        ]);
+        ] + ($item->ownerId() !== $item->controller ? ['owner' => $item->ownerId()] : []));
 
         // CR 608.2b : une cible par effet ciblé, dans l'ordre du texte. Si TOUTES les cibles sont devenues illégales, le sort ne
         // fait rien (ses effets non ciblés compris) ; si seulement une partie l'est, les autres effets se résolvent quand même.
-        $effects = $item->effects();
+        // Le joueur d'un Gift n'est pas une cible (CR 702.174) : il ne compte pas, et sans cible légale il ne reçoit rien.
+        $effects = array_values(array_filter($item->effects(), static fn (SpellEffect $e) => !$e->kicked || $item->kicked));
         $targets = $this->targetsOfEffects($effects, $item->targets);
-        $anyLegal = $targets === [];
+        $anyLegal = array_filter(array_keys($targets), static fn (int $i) => $effects[$i]->effect !== 'gift') === [];
         foreach ($targets as $i => $target) {
-            if ($this->targetLegal($s, $effects[$i], $target, $item->controller)) {
+            if ($effects[$i]->effect !== 'gift' && $this->targetLegal($s, $effects[$i], $target, $item->controller)) {
                 $anyLegal = true;
             }
         }
@@ -130,7 +138,7 @@ final class StackResolver
         // Effets dans l'ordre du texte (CR 608.2c). Une sélection (Brainstorm, Ponder) suspend la résolution : les pioches qui
         // suivent attendent la décision (`GameState::$selection`, `draw`).
         foreach ($effects as $i => $effect) {
-            if (!$anyLegal && !$effect->isTargeted()) {
+            if (!$anyLegal && (!$effect->isTargeted() || $effect->effect === 'gift')) {
                 continue;
             }
             if ($s->selection !== null) {
@@ -146,7 +154,7 @@ final class StackResolver
                 'counter' => $this->counter($s, $target, $item, $effect, $paid),
                 'mana' => $this->addMana($s, $item->controller, $this->manaProduced($s, $item->controller, $card, $effect), $item->id),
                 'grant_sac_mana' => $this->grantSacrificeMana($s, $item->controller, (string) $effect->adds),
-                'bounce' => $this->bounceTarget($s, $target, $effect, $card->name),
+                'bounce' => $this->bounceTarget($s, $target, $effect, $item),
                 'destroy' => $this->destroyTarget($s, $target, $effect, $card->name),
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
@@ -157,6 +165,15 @@ final class StackResolver
                 'put_back' => $this->startSelection($s, $item->controller, 'put_back', min($effect->amount, count($s->player($item->controller)->hand)), $card->name),
                 'arrange' => $this->startSelection($s, $item->controller, 'arrange', min($effect->amount, count($s->player($item->controller)->library)), $card->name),
                 'pact' => $s->addDelayedTrigger($item->controller, $card, new \App\Engine\Ability\TriggeredAbility(\App\Engine\Ability\TriggeredAbility::NEXT_UPKEEP, 'pact', spec: (string) $effect->payCost)),
+                'redirect' => $this->redirect($s, $target, $effect, $item),
+                'steal' => $this->steal($s, $target, $effect, $item),
+                'exile_spells' => $this->exileSpells($s, $target, $item),
+                'mill' => $this->millTarget($s, $target, $effect->amount, $card->name),
+                'silence' => $this->lockCasts($s, array_values(array_filter($s->alivePlayerIds(), static fn (int $id) => $id !== $item->controller)), $card->name),
+                'silence_target' => $this->lockCasts($s, $this->livingPlayer($s, $target) === null ? [] : [(int) $this->livingPlayer($s, $target)], $card->name),
+                'no_attacks' => $this->lockAttacks($s, $card->name),
+                'flash_grant' => $this->grantFlash($s, $item->controller, $card->name),
+                'gift' => $this->gift($s, $target, (string) $effect->token, $card->name),
             };
         }
     }
@@ -196,8 +213,12 @@ final class StackResolver
         return match ($effect->effect) {
             'damage' => str_starts_with($target, 'player:') && !$s->player((int) substr($target, 7))->lost,
             'counter' => $this->counterVictim($s, $target) !== null,
-            'exile', 'bounce', 'destroy' => $this->targetPermanent($s, $target, $effect) !== null,
+            'exile', 'bounce', 'destroy' => $this->targetPermanent($s, $target, $effect, $controller) !== null,
             'copy' => $this->copyTarget($s, $target, $controller) !== null,
+            'redirect' => $this->stackObject($s, explode('>', $target, 2)[0]) !== null,
+            'steal' => ($v = $this->counterVictim($s, $target)) !== null && $effect->canCounter($v->card, $v->x),
+            'exile_spells' => array_filter(self::spellIds($target), fn (string $id) => $this->counterVictim($s, 'stack:' . $id) !== null) !== [],
+            'mill', 'silence_target' => $this->livingPlayer($s, $target) !== null,
             default => true, // recherche de bibliothèque : une cible absente ne fait simplement rien
         };
     }
@@ -216,12 +237,12 @@ final class StackResolver
      *
      * @return array{int, CardInstance}|null
      */
-    private function targetPermanent(GameState $s, string $target, SpellEffect $effect): ?array
+    private function targetPermanent(GameState $s, string $target, SpellEffect $effect, ?int $caster = null): ?array
     {
         $id = str_starts_with($target, 'permanent:') ? substr($target, 10) : null;
         foreach ($s->players as $p) {
             $card = $id === null || $p->lost ? null : $p->findOnBattlefield($id);
-            if ($card !== null && $effect->canTargetPermanent($card)) {
+            if ($card !== null && $effect->canTargetPermanent($card, $p->id, $caster)) {
                 return [$p->id, $card];
             }
         }
@@ -235,7 +256,7 @@ final class StackResolver
      */
     private function exileTarget(GameState $s, string $target, SpellEffect $effect, string $source): void
     {
-        $hit = $this->targetPermanent($s, $target, $effect);
+        $hit = $this->targetPermanent($s, $target, $effect); // aucun motif `opponent_…` pour un exil
         if ($hit === null) {
             $s->emit('SpellFizzled', ['target' => $target]);
 
@@ -249,16 +270,239 @@ final class StackResolver
         }
     }
 
-    /** Renvoie le permanent ciblé dans la main de son propriétaire (Snapback) s'il est encore là et légal ; sinon `SpellFizzled`. */
-    private function bounceTarget(GameState $s, string $target, SpellEffect $effect, string $source): void
+    /**
+     * Renvoie le permanent ciblé dans la main de son propriétaire (Snapback, Into the Flood Maw) s'il est encore là et légal ;
+     * sinon `SpellFizzled`. Chain of Vapor (`chain`) : son contrôleur peut ensuite sacrifier un terrain pour copier le sort,
+     * décision hors priorité (`GameState::$selection`, kind `chain`), proposée s'il a un terrain et qu'il reste une cible.
+     */
+    private function bounceTarget(GameState $s, string $target, SpellEffect $effect, \App\Engine\Game\StackItem $item): void
     {
-        $hit = $this->targetPermanent($s, $target, $effect);
+        $hit = $this->targetPermanent($s, $target, $effect, $item->controller);
         if ($hit === null) {
             $s->emit('SpellFizzled', ['target' => $target]);
 
             return;
         }
-        $s->returnToHand($hit[0], $hit[1]->id, $source);
+        [$controller, $card] = $hit;
+        $s->returnToHand($controller, $card->id, $item->card->name);
+        if (!$effect->chain || $s->player($controller)->lost) {
+            return;
+        }
+        $hasLand = array_filter($s->player($controller)->battlefield, static fn (CardInstance $c) => $c->isLand()) !== [];
+        $hasTarget = false;
+        foreach ($s->alivePlayerIds() as $id) {
+            foreach ($s->player($id)->battlefield as $permanent) {
+                $hasTarget = $hasTarget || !$permanent->isLand();
+            }
+        }
+        if ($hasLand && $hasTarget) {
+            $s->selection = ['player' => $controller, 'kind' => 'chain', 'count' => 1, 'source' => $item->card->name, 'draw' => 0, 'card' => $item->card->toArray()];
+        }
+    }
+
+    /** Le joueur en vie désigné par `player:<id>`, ou null. */
+    private function livingPlayer(GameState $s, string $target): ?int
+    {
+        if (!str_starts_with($target, 'player:')) {
+            return null;
+        }
+        $id = (int) substr($target, 7);
+
+        return isset($s->players[$id]) && !$s->player($id)->lost ? $id : null;
+    }
+
+    /** L'objet de pile désigné par `stack:<id>` (sort ou capacité), ou null. */
+    private function stackObject(GameState $s, string $ref): ?\App\Engine\Game\StackItem
+    {
+        return str_starts_with($ref, 'stack:') ? $s->findStackItem(substr($ref, 6)) : null;
+    }
+
+    /** @return list<string> ids des sorts d'une cible de Mindbreak Trap (`stack:<id>+<id>…`) */
+    private static function spellIds(string $target): array
+    {
+        return str_starts_with($target, 'stack:') ? explode('+', substr($target, 6)) : [];
+    }
+
+    /**
+     * Deflecting Swat, Misdirection : l'objet de pile visé reçoit la nouvelle cible choisie au lancement (`stack:<id>><cible>`),
+     * si elle est encore légale pour lui (CR 115.7 : sinon il garde sa cible) ; `TargetChanged`.
+     */
+    private function redirect(GameState $s, string $target, SpellEffect $effect, \App\Engine\Game\StackItem $by): void
+    {
+        [$ref, $new] = explode('>', $target, 2) + [1 => ''];
+        $victim = $this->stackObject($s, $ref);
+        if ($victim === null || ($effect->target === 'spell' && $victim->isAbility())) {
+            $s->emit('SpellFizzled', ['target' => $ref]);
+
+            return;
+        }
+        if (!in_array($new, (new LegalActionGenerator())->retargetCandidates($s, $victim), true)) {
+            return;
+        }
+        $s->replaceStackItem($victim->with(targets: [$new]));
+        $s->emit('TargetChanged', ['stackId' => $victim->id, 'targets' => [$new], 'by' => $by->id, 'source' => $by->card->name]);
+    }
+
+    /** Commandeer : le lanceur prend le contrôle du sort ciblé (il garde ses cibles) ; `SpellControlChanged`. */
+    private function steal(GameState $s, string $target, SpellEffect $effect, \App\Engine\Game\StackItem $by): void
+    {
+        $victim = $this->counterVictim($s, $target);
+        if ($victim === null || !$effect->canCounter($victim->card, $victim->x)) {
+            $s->emit('SpellFizzled', ['target' => $target]);
+
+            return;
+        }
+        if ($victim->controller === $by->controller) {
+            return;
+        }
+        $s->replaceStackItem($victim->with(controller: $by->controller));
+        $s->emit('SpellControlChanged', ['stackId' => $victim->id, 'controller' => $by->controller, 'previous' => $victim->controller, 'source' => $by->card->name]);
+    }
+
+    /** Mindbreak Trap : chaque sort ciblé encore sur la pile est exilé (une copie cesse d'exister) ; `SpellExiled`. */
+    private function exileSpells(GameState $s, string $target, \App\Engine\Game\StackItem $by): void
+    {
+        foreach (self::spellIds($target) as $id) {
+            $victim = $this->counterVictim($s, 'stack:' . $id);
+            if ($victim === null) {
+                continue;
+            }
+            $s->stack = array_values(array_filter($s->stack, static fn ($i) => $i->id !== $victim->id));
+            $destination = $victim->copy ? 'none' : $s->exile($victim->ownerId(), $victim->card);
+            $s->emit('SpellExiled', ['stackId' => $victim->id, 'card' => $victim->card->toPublic(), 'controller' => $victim->controller,
+                'owner' => $victim->ownerId(), 'by' => $by->id, 'destination' => $destination]);
+        }
+    }
+
+    /** Brain Freeze : le joueur ciblé meule (`CardsMilled`). */
+    private function millTarget(GameState $s, string $target, int $amount, string $source): void
+    {
+        $player = $this->livingPlayer($s, $target);
+        if ($player === null) {
+            $s->emit('SpellFizzled', ['target' => $target]);
+
+            return;
+        }
+        $s->mill($player, $amount, $source);
+    }
+
+    /**
+     * Silence, Orim's Chant : ces joueurs ne peuvent pas lancer de sorts ce tour (`GameState::$castLocks`) ; `CastLockApplied`.
+     *
+     * @param list<int> $players
+     */
+    private function lockCasts(GameState $s, array $players, string $source): void
+    {
+        foreach ($players as $id) {
+            if (!in_array($id, $s->castLocks, true)) {
+                $s->castLocks[] = $id;
+            }
+        }
+        sort($s->castLocks);
+        $s->emit('CastLockApplied', ['players' => $players, 'source' => $source]);
+    }
+
+    /** Orim's Chant avec kicker : les créatures ne peuvent pas attaquer ce tour ; `AttacksLocked`. */
+    private function lockAttacks(GameState $s, string $source): void
+    {
+        $s->attackLocked = true;
+        $s->emit('AttacksLocked', ['source' => $source]);
+    }
+
+    /** Borne Upon a Wind : le joueur lance ses sorts comme s'ils avaient le flash ce tour ; `FlashGranted`. */
+    private function grantFlash(GameState $s, int $player, string $source): void
+    {
+        if (!in_array($player, $s->flashGrants, true)) {
+            $s->flashGrants[] = $player;
+            sort($s->flashGrants);
+        }
+        $s->emit('FlashGranted', ['player' => $player, 'source' => $source]);
+    }
+
+    /** Gift (Into the Flood Maw) : l'adversaire choisi crée le jeton promis, engagé (`TokenCreated`). */
+    private function gift(GameState $s, string $target, string $token, string $source): void
+    {
+        $player = $this->livingPlayer($s, $target);
+        if ($player === null) {
+            return;
+        }
+        ['name' => $name, 'power' => $power, 'toughness' => $toughness] = ActivatedAbility::parseTokenSpec($token);
+        $s->createToken($player, $name, CardInstance::CREATURE, $power, $toughness, subtypes: [CardInstance::CREATURE => [$name]], tapped: true);
+    }
+
+    /**
+     * Spec du trigger Storm : id de pile du sort, mode, X et cibles (`s3;0;0;stack:s1|player:2`), pour copier le sort tel qu'il
+     * a été lancé même s'il a quitté la pile (information de dernière connaissance).
+     */
+    public static function stormSpec(\App\Engine\Game\StackItem $item): string
+    {
+        return implode(';', [$item->id, $item->mode, $item->x, implode('|', $item->targets)]);
+    }
+
+    /** Storm : `amount` copies du sort, avec ses cibles (CR 702.40, 707.10 ; elles ne sont pas lancées) ; `SpellCopied` chacune. */
+    private function stormCopies(GameState $s, \App\Engine\Game\StackItem $item): void
+    {
+        [$original, $mode, $x, $targets] = explode(';', $item->trigger->spec, 4) + [3 => ''];
+        $targets = $targets === '' ? [] : explode('|', $targets);
+        for ($i = 0; $i < $item->trigger->amount; $i++) {
+            $copy = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, clone $item->card, $item->controller, $targets, (int) $x, mode: (int) $mode, copy: true);
+            $s->stack[] = $copy;
+            $s->emit('SpellCopied', ['player' => $item->controller, 'card' => $copy->card->toPublic(), 'stackId' => $copy->id, 'targets' => $targets, 'source' => $item->card->name, 'copyOf' => $original]);
+        }
+    }
+
+    /**
+     * Mobilize (Voice of Victory) : `amount` jetons Warrior 1/1 engagés et attaquants (même défenseur que la source, sinon le
+     * premier adversaire en vie), sacrifiés au début de la prochaine étape de fin (trigger retardé `next_end`).
+     */
+    private function mobilize(GameState $s, \App\Engine\Game\StackItem $item): void
+    {
+        $defender = $s->combat->attackers[$item->card->id] ?? null;
+        if ($defender === null || $s->player($defender)->lost) {
+            $defender = null;
+            foreach ($s->alivePlayerIds() as $id) {
+                $defender ??= $id !== $item->controller ? $id : null;
+            }
+        }
+        if ($defender === null) {
+            return;
+        }
+        $ids = [];
+        for ($i = 0; $i < $item->trigger->amount; $i++) {
+            $token = $s->createToken($item->controller, 'Warrior', CardInstance::CREATURE, 1, 1, subtypes: [CardInstance::CREATURE => ['Warrior']], tapped: true, attacking: $defender);
+            $ids[] = $token->id;
+        }
+        $s->addDelayedTrigger($item->controller, $item->card, new \App\Engine\Ability\TriggeredAbility(\App\Engine\Ability\TriggeredAbility::NEXT_END, 'sacrifice_tokens', spec: implode(',', $ids)));
+    }
+
+    /** Sacrifie ceux des jetons `$spec` (ids séparés par des virgules) encore sur le champ de bataille du joueur. */
+    private function sacrificeTokens(GameState $s, int $player, string $spec): void
+    {
+        $ids = array_values(array_filter(explode(',', $spec), static fn (string $id) => $s->player($player)->findOnBattlefield($id) !== null));
+        if ($ids !== []) {
+            $s->sacrifice($player, $ids);
+        }
+    }
+
+    /** Valley Floodcaller : ses créatures des sous-types `$spec` gagnent +1/+1 jusqu'à la fin du tour et se dégagent. */
+    private function pumpUntap(GameState $s, int $player, string $spec): void
+    {
+        $untapped = [];
+        foreach ($s->player($player)->battlefield as $card) {
+            if (!$card->isCreature() || array_filter(explode('|', $spec), static fn (string $t) => $card->hasSubtype($t, CardInstance::CREATURE)) === []) {
+                continue;
+            }
+            $card->powerBonus++;
+            $card->toughnessBonus++;
+            $s->emit('CreatureBoosted', ['player' => $player, 'card' => $card->id, 'power' => $card->currentPower(), 'toughness' => $card->currentToughness()]);
+            if ($card->tapped) {
+                $card->tapped = false;
+                $untapped[] = $card->id;
+            }
+        }
+        if ($untapped !== []) {
+            $s->emit('PermanentsUntapped', ['player' => $player, 'cards' => $untapped]);
+        }
     }
 
     /** Channel (Otawara) : le permanent ciblé (hors terrain) retourne dans la main de son propriétaire ; sinon `SpellFizzled`. */
@@ -577,19 +821,21 @@ final class StackResolver
             return; // le contrôleur du sort visé a payé (`CostPaid`)
         }
         $s->stack = array_values(array_filter($s->stack, static fn ($i) => $i->id !== $victim->id));
-        $owner = $s->player($victim->controller);
-        $extra = [];
-        if ($effect->counterTo === SpellEffect::COUNTER_EXILE) {
-            $destination = $s->exile($victim->controller, $victim->card);
+        $owner = $s->player($victim->ownerId());
+        $extra = $victim->ownerId() !== $victim->controller ? ['owner' => $victim->ownerId()] : [];
+        if ($victim->copy) {
+            $destination = 'none'; // une copie cesse d'exister (CR 707.10a)
+        } elseif ($effect->counterTo === SpellEffect::COUNTER_EXILE) {
+            $destination = $s->exile($victim->ownerId(), $victim->card);
         } elseif ($effect->counterTo === SpellEffect::COUNTER_LIBRARY_TOP && $victim->card->commander) {
             $owner->command[] = $victim->card;
             $destination = 'command';
         } elseif ($effect->counterTo === SpellEffect::COUNTER_LIBRARY_TOP && !$victim->card->token) {
             array_unshift($owner->library, $victim->card);
             $destination = 'library';
-            $extra = ['library' => count($owner->library)];
+            $extra += ['library' => count($owner->library)];
         } else {
-            $destination = $s->sendToGraveyard($victim->controller, $victim->card);
+            $destination = $s->sendToGraveyard($victim->ownerId(), $victim->card);
         }
         $s->emit('SpellCountered', [
             'stackId' => $victim->id,

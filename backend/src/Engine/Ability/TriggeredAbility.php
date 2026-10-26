@@ -35,6 +35,13 @@ use App\Engine\Game\CardInstance;
  * prochaine phase principale). Effets : `pact` (payer `spec` ou perdre la partie, décision à la résolution) et `mana`
  * (ajouter `amount` {C}, Mana Drain).
  *
+ * Lot H3 : `storm` (trigger du sort lancé lui-même, jamais porté par une carte : `amount` copies du sort ; `spec` = son id de
+ * pile, son mode, son X et ses cibles, `PriorityManager::stormSpec()`), `counter_spell` (Lavinia : contre le sort ciblé
+ * `stack:<id>`, filtre `no_mana` = aucun mana dépensé pour le lancer), `mobilize` (Voice of Victory, `attacks` : `amount`
+ * jetons Warrior 1/1 rouges engagés et attaquants, sacrifiés au début de la prochaine étape de fin par un trigger retardé
+ * `next_end` d'effet `sacrifice_tokens`, `spec` = leurs ids) et `pump_untap` (Valley Floodcaller, `cast` filtré `noncreature` :
+ * ses créatures des sous-types `spec` (séparés par `|`) gagnent +1/+1 jusqu'à la fin du tour et se dégagent).
+ *
  * Forme sérialisée (`toArray`) : `spec` et `filter` omis s'ils sont vides.
  */
 final class TriggeredAbility
@@ -54,18 +61,25 @@ final class TriggeredAbility
     /** Triggers retardés (voir l'en-tête). */
     public const NEXT_UPKEEP = 'next_upkeep';
     public const NEXT_MAIN = 'next_main';
+    /** Début de la prochaine étape de fin (Mobilize : sacrifier les jetons). */
+    public const NEXT_END = 'next_end';
 
     /** Filtre de `cast` : le sort lancé est un éphémère ou un rituel. */
     public const INSTANT_SORCERY = 'instant_sorcery';
     /** Filtre de `opponent_cast` : le sort est le deuxième que le lanceur lance ce tour (Kraum). */
     public const SECOND_SPELL = 'second_spell';
+    /** Filtre de `cast` : le sort lancé n'est pas une créature (Valley Floodcaller). */
+    public const NONCREATURE = 'noncreature';
+    /** Filtre de `opponent_cast` : aucun mana n'a été dépensé pour lancer le sort (Lavinia, Azorius Renegade). */
+    public const NO_MANA = 'no_mana';
 
     /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
     public const TAPPED = 'tapped';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN];
-    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor'];
-    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL];
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END];
+    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor',
+        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap'];
+    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA];
 
     public function __construct(
         public readonly string $event,
@@ -81,7 +95,8 @@ final class TriggeredAbility
             throw new \InvalidArgumentException("Effet de trigger inconnu : $effect");
         }
         if (!in_array($filter, self::FILTERS, true) || ($filter === self::INSTANT_SORCERY && $event !== self::CAST)
-            || ($filter === self::TAPPED && $event === self::CAST) || ($filter === self::SECOND_SPELL && $event !== self::OPPONENT_CAST)) {
+            || ($filter === self::TAPPED && $event === self::CAST) || ($filter === self::SECOND_SPELL && $event !== self::OPPONENT_CAST)
+            || ($filter === self::NONCREATURE && $event !== self::CAST) || ($filter === self::NO_MANA && $event !== self::OPPONENT_CAST)) {
             throw new \InvalidArgumentException("Filtre de trigger invalide : $filter ($event)");
         }
         if ($effect === 'token') {
@@ -100,6 +115,7 @@ final class TriggeredAbility
     {
         return match ($this->filter) {
             self::INSTANT_SORCERY => $spell->hasType(CardInstance::INSTANT) || $spell->hasType(CardInstance::SORCERY),
+            self::NONCREATURE => !$spell->isCreature(),
             default => true,
         };
     }
@@ -139,14 +155,23 @@ final class TriggeredAbility
             self::UPKEEP => 'Au début de votre entretien',
             self::ATTACKS => 'Quand elle attaque',
             self::END_STEP => 'Au début de votre étape de fin',
-            self::CAST => $this->filter === self::INSTANT_SORCERY ? 'Quand vous lancez un éphémère ou un rituel' : 'Quand vous lancez un sort',
-            self::OPPONENT_CAST => $this->filter === self::SECOND_SPELL ? 'Quand un adversaire lance son deuxième sort du tour' : 'Quand un adversaire lance un sort',
+            self::CAST => match ($this->filter) {
+                self::INSTANT_SORCERY => 'Quand vous lancez un éphémère ou un rituel',
+                self::NONCREATURE => 'Quand vous lancez un sort non-créature',
+                default => 'Quand vous lancez un sort',
+            },
+            self::OPPONENT_CAST => match ($this->filter) {
+                self::SECOND_SPELL => 'Quand un adversaire lance son deuxième sort du tour',
+                self::NO_MANA => 'Quand un adversaire lance un sort sans dépenser de mana',
+                default => 'Quand un adversaire lance un sort',
+            },
             self::DISCARD => 'Quand vous défaussez une carte',
             self::DRAW_STEP => 'Au début de votre étape de pioche',
             self::POSTCOMBAT_MAIN => 'Au début de votre phase principale d\'après combat',
             self::LAND_PLAYED => 'Quand vous jouez un autre terrain',
             self::NEXT_UPKEEP => 'Au début de votre prochain entretien',
             self::NEXT_MAIN => 'Au début de votre prochaine phase principale',
+            self::NEXT_END => 'Au début de la prochaine étape de fin',
         } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
         $what = match ($this->effect) {
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
@@ -161,6 +186,11 @@ final class TriggeredAbility
             'mana' => sprintf('ajouter %s', $this->amount > 0 ? str_repeat('{C}', $this->amount) : 'rien'),
             'sacrifice_self' => 'la sacrifier',
             'tutor' => sprintf('chercher une carte (%s) et la mettre dans la main', $this->spec),
+            'storm' => sprintf('Storm : copier le sort %d fois', $this->amount),
+            'counter_spell' => 'contrer ce sort',
+            'mobilize' => sprintf('créer %d jetons Warrior 1/1 engagés et attaquants', $this->amount),
+            'sacrifice_tokens' => 'sacrifier les jetons Warrior',
+            'pump_untap' => sprintf('vos %s gagnent +1/+1 et se dégagent', str_replace('|', ', ', $this->spec)),
         };
 
         return "$when : $what";

@@ -61,7 +61,9 @@ final class GameState
      * `ArrangeTop`), `source` = nom du sort, `draw` = cartes à piocher une fois la sélection finie (Ponder). Le sort a déjà
      * quitté la pile. Sérialisé sous `selection`, omis quand null.
      *
-     * @var array{player: int, kind: string, count: int, source: string, draw: int}|null
+     * Chain of Vapor (kind `chain`) : `card` = le sort à copier (forme `CardInstance::toArray()`), une décision `ChainCopy`.
+     *
+     * @var array{player: int, kind: string, count: int, source: string, draw: int, card?: array<string, mixed>}|null
      */
     public ?array $selection = null;
     /**
@@ -105,6 +107,22 @@ final class GameState
      * @var list<int>
      */
     public array $noncreatureLocks = [];
+    /**
+     * Joueurs qui ne peuvent pas lancer de sort ce tour (Silence, Orim's Chant) ; vidé au cleanup. Sérialisé sous `castLocks`,
+     * omis quand vide.
+     *
+     * @var list<int>
+     */
+    public array $castLocks = [];
+    /**
+     * Joueurs qui lancent leurs sorts comme s'ils avaient le flash ce tour (Borne Upon a Wind) ; vidé au cleanup. Sérialisé
+     * sous `flashGrants`, omis quand vide.
+     *
+     * @var list<int>
+     */
+    public array $flashGrants = [];
+    /** Les créatures ne peuvent pas attaquer ce tour (Orim's Chant avec kicker) ; remis à faux au cleanup. Sérialisé sous `attackLocked`, omis à faux. */
+    public bool $attackLocked = false;
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -360,14 +378,17 @@ final class GameState
      * @param list<ActivatedAbility>      $abilities
      * @param array<string, list<string>> $subtypes
      */
-    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = [], array $subtypes = [], array $keywords = []): CardInstance
+    public function createToken(int $playerId, string $name, string $type, int $power = 0, int $toughness = 0, array $abilities = [], array $subtypes = [], array $keywords = [], bool $tapped = false, ?int $attacking = null): CardInstance
     {
         $token = new CardInstance(
             sprintf('p%d_t%d', $playerId, $this->nextTokenId++), $name, $type,
-            power: $power, toughness: $toughness, abilities: $abilities, token: true, subtypes: $subtypes, keywords: $keywords,
+            power: $power, toughness: $toughness, abilities: $abilities, token: true, subtypes: $subtypes, keywords: $keywords, tapped: $tapped,
         );
         $this->enterBattlefield($playerId, $token);
-        $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()]);
+        if ($attacking !== null) {
+            $this->combat->attackers[$token->id] = $attacking; // créé attaquant (Mobilize) : jamais déclaré, aucun trigger d'attaque
+        }
+        $this->emit('TokenCreated', ['player' => $playerId, 'card' => $token->toPublic()] + ($tapped ? ['tapped' => true] : []) + ($attacking !== null ? ['attacking' => $attacking] : []));
 
         return $token;
     }
@@ -517,6 +538,86 @@ final class GameState
         return false;
     }
 
+    /**
+     * `$playerId` peut-il lancer `$card` (X = `$x`) au regard des interdictions en cours ? Silence / Orim's Chant (`$castLocks`),
+     * Ranger-Captain of Eos (`$noncreatureLocks`), et capacités statiques des permanents de ses adversaires : Voice of Victory
+     * (aucun sort pendant le tour de son contrôleur), Lavinia (aucun sort non-créature de valeur de mana supérieure à ses
+     * terrains). Le moment (flash) n'est pas vérifié ici : voir `castsAtInstantSpeed()`.
+     */
+    public function canCast(int $playerId, CardInstance $card, int $x = 0): bool
+    {
+        if (in_array($playerId, $this->castLocks, true) || (!$card->isCreature() && $this->castLockedFor($playerId))) {
+            return false;
+        }
+        $lands = null;
+        foreach ($this->players as $o) {
+            if ($o->id === $playerId || $o->lost) {
+                continue;
+            }
+            foreach ($o->battlefield as $permanent) {
+                if ($permanent->statics === []) {
+                    continue;
+                }
+                if ($permanent->hasStatic(CardInstance::STATIC_OPPONENTS_NO_CAST_YOUR_TURN) && $this->activePlayer === $o->id) {
+                    return false;
+                }
+                if ($permanent->hasStatic(CardInstance::STATIC_OPPONENTS_MV_LANDS) && !$card->isCreature()) {
+                    $lands ??= count(array_filter($this->player($playerId)->battlefield, static fn (CardInstance $c) => $c->isLand()));
+                    if ($card->manaCost()->manaValue($x) > $lands) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /** `$playerId` peut-il lancer `$card` à tout moment où il a la priorité (éphémère, flash, Borne Upon a Wind, Valley Floodcaller) ? */
+    public function castsAtInstantSpeed(int $playerId, CardInstance $card): bool
+    {
+        if ($card->isInstantSpeed() || in_array($playerId, $this->flashGrants, true)) {
+            return true;
+        }
+        if ($card->isCreature()) {
+            return false;
+        }
+        foreach ($this->player($playerId)->battlefield as $permanent) {
+            if ($permanent->hasStatic(CardInstance::STATIC_NONCREATURE_FLASH)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Remplace l'objet de pile de même id (cibles changées, contrôle pris). */
+    public function replaceStackItem(StackItem $item): void
+    {
+        foreach ($this->stack as $i => $existing) {
+            if ($existing->id === $item->id) {
+                $this->stack[$i] = $item;
+
+                return;
+            }
+        }
+        throw new \DomainException("Objet de pile introuvable : {$item->id}");
+    }
+
+    /**
+     * Meule (CR 701.13) : les `$n` cartes du dessus de la bibliothèque de `$playerId` vont dans son cimetière (`CardsMilled`).
+     * Une bibliothèque vide ne fait rien perdre (seule la pioche le fait).
+     */
+    public function mill(int $playerId, int $n, string $source): void
+    {
+        $p = $this->player($playerId);
+        $milled = array_splice($p->library, 0, min($n, count($p->library)));
+        foreach ($milled as $card) {
+            $this->sendToGraveyard($playerId, $card);
+        }
+        $this->emit('CardsMilled', ['player' => $playerId, 'cards' => array_map(static fn (CardInstance $c) => $c->toPublic(), $milled), 'library' => count($p->library), 'source' => $source]);
+    }
+
     public function enterBattlefield(int $playerId, CardInstance $card): void
     {
         $card->enteredTurn = $this->turn;
@@ -529,22 +630,24 @@ final class GameState
      * `$spell` est le sort lancé : seuls les triggers dont le filtre l'accepte sont retenus. La source est copiée
      * (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
      */
-    public function queueTriggers(int $controller, CardInstance $card, string $event, ?CardInstance $spell = null, ?int $opponent = null): void
+    public function queueTriggers(int $controller, CardInstance $card, string $event, ?CardInstance $spell = null, ?int $opponent = null, ?string $stackId = null, bool $manaSpent = true): void
     {
         foreach ($card->triggers as $index => $trigger) {
             if ($trigger->event === $event && ($spell === null || $trigger->matches($spell))
                 && ($trigger->filter !== TriggeredAbility::TAPPED || $card->tapped)
-                && ($trigger->filter !== TriggeredAbility::SECOND_SPELL || ($this->spellsCast[$opponent] ?? 0) === 2)) {
-                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index, opponent: $opponent);
+                && ($trigger->filter !== TriggeredAbility::SECOND_SPELL || ($this->spellsCast[$opponent] ?? 0) === 2)
+                && ($trigger->filter !== TriggeredAbility::NO_MANA || !$manaSpent)) {
+                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index, opponent: $opponent, stackId: $stackId);
             }
         }
     }
 
     /**
      * « Quand un adversaire lance un sort » (Rhystic Study) : met en file les triggers `opponent_cast` des permanents de chaque
-     * autre joueur en vie, avec le lanceur `$caster` (il paiera ou non à la résolution).
+     * autre joueur en vie, avec le lanceur `$caster` (il paiera ou non à la résolution), le sort sur la pile `$stackId` et
+     * le fait que du mana ait été dépensé pour le lancer (Lavinia).
      */
-    public function queueOpponentCastTriggers(int $caster, CardInstance $spell): void
+    public function queueOpponentCastTriggers(int $caster, CardInstance $spell, ?string $stackId = null, bool $manaSpent = true): void
     {
         foreach ($this->players as $p) {
             if ($p->id === $caster || $p->lost) {
@@ -552,7 +655,7 @@ final class GameState
             }
             foreach ($p->battlefield as $card) {
                 if ($card->triggers !== []) {
-                    $this->queueTriggers($p->id, $card, TriggeredAbility::OPPONENT_CAST, $spell, $caster);
+                    $this->queueTriggers($p->id, $card, TriggeredAbility::OPPONENT_CAST, $spell, $caster, $stackId, $manaSpent);
                 }
             }
         }
@@ -708,6 +811,15 @@ final class GameState
         if ($this->noncreatureLocks !== []) {
             $d['noncreatureLocks'] = $this->noncreatureLocks;
         }
+        if ($this->castLocks !== []) {
+            $d['castLocks'] = $this->castLocks;
+        }
+        if ($this->flashGrants !== []) {
+            $d['flashGrants'] = $this->flashGrants;
+        }
+        if ($this->attackLocked) {
+            $d['attackLocked'] = true;
+        }
 
         return $d;
     }
@@ -744,7 +856,8 @@ final class GameState
         $s->paymentPending = (bool) ($d['paymentPending'] ?? false);
         if (isset($d['selection'])) {
             $sel = $d['selection'];
-            $s->selection = ['player' => (int) $sel['player'], 'kind' => (string) $sel['kind'], 'count' => (int) $sel['count'], 'source' => (string) $sel['source'], 'draw' => (int) $sel['draw']];
+            $s->selection = ['player' => (int) $sel['player'], 'kind' => (string) $sel['kind'], 'count' => (int) $sel['count'], 'source' => (string) $sel['source'], 'draw' => (int) $sel['draw']]
+                + (isset($sel['card']) ? ['card' => $sel['card']] : []);
         }
         $s->delayedTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['delayedTriggers'] ?? []);
         foreach ($d['spellsCast'] ?? [] as $id => $count) {
@@ -759,6 +872,9 @@ final class GameState
         $s->over = (bool) $d['over'];
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];
         $s->noncreatureLocks = array_map('intval', $d['noncreatureLocks'] ?? []);
+        $s->castLocks = array_map('intval', $d['castLocks'] ?? []);
+        $s->flashGrants = array_map('intval', $d['flashGrants'] ?? []);
+        $s->attackLocked = (bool) ($d['attackLocked'] ?? false);
         foreach ($d['stops'] ?? [] as $id => $config) {
             $s->stops[(int) $id] = StopConfig::fromArray($config);
         }

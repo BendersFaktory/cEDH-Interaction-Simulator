@@ -1421,13 +1421,16 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
-     * Sorts que l'IA ne lance pas faute de jugement fin (lot H2) : modaux (Pyroblast), à coût additionnel de sacrifice (Culling
-     * the Weak, Diabolic Intent) et de renvoi en main (Snapback), qui pourraient viser ses propres permanents.
+     * Sorts que l'IA ne lance pas faute de jugement fin (lot H2) : modaux (Pyroblast, Into the Flood Maw), à coût additionnel de
+     * sacrifice (Culling the Weak, Diabolic Intent) et de renvoi en main (Snapback, Chain of Vapor), qui pourraient viser ses
+     * propres permanents ; lot H3 : changer une cible (Deflecting Swat, Misdirection), prendre un sort (Commandeer), exiler des
+     * sorts (Mindbreak Trap).
      */
     private function aiSkips(GameState $state, CastSpell $action): bool
     {
         $card = $state->player($action->player())->findCastable($action->cardId);
 
-        return $card !== null && ($card->isModal() || $card->extraCost !== null || $card->hasEffect('bounce') || $card->hasEffect('destroy') || $card->hasEffect('grant_sac_mana'));
+        return $card !== null && ($card->isModal() || $card->extraCost !== null || $card->hasEffect('bounce') || $card->hasEffect('destroy') || $card->hasEffect('grant_sac_mana')
+            || $card->hasEffect('redirect') || $card->hasEffect('steal') || $card->hasEffect('exile_spells'));
     }
 }

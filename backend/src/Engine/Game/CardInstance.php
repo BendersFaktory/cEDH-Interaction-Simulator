@@ -36,6 +36,22 @@ final class CardInstance
     /** Misdirection / Snapback / Commandeer : exiler une carte bleue de sa main, sans PV (`ALT_PITCH_BLUE` en demande 1). */
     public const ALT_PITCH_BLUE_FREE = 'pitch_blue_free';
 
+    /** Commandeer : exiler deux cartes bleues de sa main (`CastSpell::ALT_PITCH` suivi des deux ids séparés par une virgule). */
+    public const ALT_PITCH_TWO_BLUE = 'pitch_two_blue';
+    /** Mindbreak Trap : gratuit si un adversaire a lancé trois sorts ou plus ce tour (`CastSpell::ALT_FREE`). */
+    public const ALT_OPPONENT_THREE_SPELLS = 'opponent_three_spells';
+
+    /**
+     * Capacités statiques (`statics`, lot H3), lues par `GameState::canCast()` et `GameState::castsAtInstantSpeed()` tant que
+     * le permanent est sur le champ de bataille : Valley Floodcaller (son contrôleur lance ses sorts non-créature comme s'ils
+     * avaient le flash), Lavinia (chaque adversaire ne peut pas lancer de sort non-créature de valeur de mana supérieure à son
+     * nombre de terrains), Voice of Victory (les adversaires ne peuvent pas lancer de sort pendant le tour de son contrôleur).
+     */
+    public const STATIC_NONCREATURE_FLASH = 'noncreature_flash';
+    public const STATIC_OPPONENTS_MV_LANDS = 'opponents_mv_lands';
+    public const STATIC_OPPONENTS_NO_CAST_YOUR_TURN = 'opponents_no_cast_your_turn';
+    public const STATICS = [self::STATIC_NONCREATURE_FLASH, self::STATIC_OPPONENTS_MV_LANDS, self::STATIC_OPPONENTS_NO_CAST_YOUR_TURN];
+
     /** Coût additionnel (`extraCost`) : sacrifier une créature que l'on contrôle (Culling the Weak, Diabolic Intent). */
     public const EXTRA_SACRIFICE_CREATURE = 'sacrifice_creature';
 
@@ -54,6 +70,8 @@ final class CardInstance
     public const FLASH = 'flash';
     /** Partner (CR 702.124) : deux commandants si les deux l'ont (`Decks::validate()`). Sans effet en jeu. */
     public const PARTNER = 'partner';
+    /** Storm (CR 702.40) : en le lançant, un trigger le copie une fois par sort lancé avant lui ce tour (`GameState::$spellsCast`). */
+    public const STORM = 'storm';
 
     // Supertypes (CR 205.4).
     public const LEGENDARY = 'legendary';
@@ -132,7 +150,13 @@ final class CardInstance
         public readonly bool $noUntap = false,   // « ne se dégage pas pendant votre étape de dégagement » (Mana Vault, Grim Monolith)
         public readonly ?string $extraCost = null, // coût additionnel du sort (EXTRA_SACRIFICE_CREATURE), null = aucun
         public readonly int $tappedAfterOwnTurn = 0, // terrain qui arrive engagé après son N-ième tour (Starting Town : 3), 0 = jamais
+        /** @var list<string> capacités statiques (constantes STATIC_…) */
+        public readonly array $statics = [],
+        public readonly ?string $kicker = null, // coût de kicker (Orim's Chant : `{W}`), null = pas de kicker
     ) {
+        if (array_diff($statics, self::STATICS) !== []) {
+            throw new \InvalidArgumentException("$name : capacité statique inconnue");
+        }
         $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
         $this->types = is_array($type) ? array_values($type) : [$type];
         if ($this->types === []) {
@@ -253,6 +277,11 @@ final class CardInstance
     public function isLegendary(): bool
     {
         return in_array(self::LEGENDARY, $this->supertypes, true);
+    }
+
+    public function hasStatic(string $static): bool
+    {
+        return in_array($static, $this->statics, true);
     }
 
     public function hasKeyword(string $keyword): bool
@@ -471,7 +500,9 @@ final class CardInstance
             + ($this->altCost === null ? [] : ['altCost' => $this->altCost]) // idem
             + ($this->noUntap ? ['noUntap' => true] : []) // idem
             + ($this->extraCost === null ? [] : ['extraCost' => $this->extraCost]) // idem
-            + ($this->tappedAfterOwnTurn > 0 ? ['tappedAfterOwnTurn' => $this->tappedAfterOwnTurn] : []); // idem
+            + ($this->tappedAfterOwnTurn > 0 ? ['tappedAfterOwnTurn' => $this->tappedAfterOwnTurn] : []) // idem
+            + ($this->statics === [] ? [] : ['statics' => $this->statics]) // idem
+            + ($this->kicker === null ? [] : ['kicker' => $this->kicker]); // idem
     }
 
     public function toArray(): array
@@ -520,6 +551,8 @@ final class CardInstance
             (bool) ($d['noUntap'] ?? false),
             $d['extraCost'] ?? null,
             (int) ($d['tappedAfterOwnTurn'] ?? 0),
+            $d['statics'] ?? [],
+            $d['kicker'] ?? null,
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);

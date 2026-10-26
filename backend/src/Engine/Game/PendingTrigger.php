@@ -12,7 +12,8 @@ use App\Engine\Ability\TriggeredAbility;
  * bataille, un jeton a cessé d'exister). Trigger retardé (`delayed`, CR 603.7) : la capacité n'est pas portée par la carte
  * source (le sort qui l'a créé, Pact of Negation, Mana Drain) ; `index` vaut 0. Sert aussi aux triggers retardés qui attendent
  * leur événement (`GameState::$delayedTriggers`). `opponent` : l'adversaire dont le sort a déclenché un trigger `opponent_cast`
- * (Rhystic Study ; sérialisé sous `opponent`, omis quand null).
+ * (Rhystic Study ; sérialisé sous `opponent`, omis quand null). `stackId` : le sort lancé qui l'a déclenché (Lavinia le
+ * contre ; sérialisé sous `stackId`, omis quand null).
  */
 final class PendingTrigger
 {
@@ -23,6 +24,7 @@ final class PendingTrigger
         public readonly int $index, // rang dans `$source->triggers`
         public readonly ?TriggeredAbility $delayed = null, // trigger retardé : la capacité elle-même (sérialisée sous `delayed`)
         public readonly ?int $opponent = null, // `opponent_cast` : le joueur qui a lancé le sort
+        public readonly ?string $stackId = null, // `opponent_cast` : le sort lancé (sa place sur la pile)
     ) {
     }
 
@@ -35,12 +37,14 @@ final class PendingTrigger
     {
         return ['id' => $this->id, 'controller' => $this->controller, 'source' => $this->source->toArray(), 'index' => $this->index]
             + ($this->delayed === null ? [] : ['delayed' => $this->delayed->toArray()])
-            + ($this->opponent === null ? [] : ['opponent' => $this->opponent]);
+            + ($this->opponent === null ? [] : ['opponent' => $this->opponent])
+            + ($this->stackId === null ? [] : ['stackId' => $this->stackId]);
     }
 
     public static function fromArray(array $d): self
     {
         return new self($d['id'], (int) $d['controller'], CardInstance::fromArray($d['source']), (int) $d['index'],
-            isset($d['delayed']) ? TriggeredAbility::fromArray($d['delayed']) : null, isset($d['opponent']) ? (int) $d['opponent'] : null);
+            isset($d['delayed']) ? TriggeredAbility::fromArray($d['delayed']) : null, isset($d['opponent']) ? (int) $d['opponent'] : null,
+            $d['stackId'] ?? null);
     }
 }

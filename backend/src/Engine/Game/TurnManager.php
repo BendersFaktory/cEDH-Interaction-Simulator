@@ -44,12 +44,16 @@ final class TurnManager
         // Triggers « au début de votre étape de fin » : idem, à l'étape de fin du joueur actif.
         if ($s->phase === Phase::End) {
             $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::END_STEP);
+            $s->fireDelayedTriggers(TriggeredAbility::NEXT_END); // Mobilize : sacrifier les jetons
         }
 
         $this->combat->beginStep($s);
 
         if ($s->phase === Phase::Cleanup) {
             $s->noncreatureLocks = []; // « ce tour » : Ranger-Captain of Eos
+            $s->castLocks = [];        // Silence, Orim's Chant
+            $s->flashGrants = [];      // Borne Upon a Wind
+            $s->attackLocked = false;  // Orim's Chant avec kicker
             foreach ($s->players as $p) {
                 foreach ($p->battlefield as $card) {
                     $card->damage = 0;
