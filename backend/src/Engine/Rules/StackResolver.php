@@ -14,7 +14,53 @@ use App\Engine\Mana\ManaCost;
 /** Résout le sommet de la pile (sort, capacité activée ou trigger). TODO: dispatch par carte (handlers) au lieu de flags 'damage'/'counter'. */
 final class StackResolver
 {
-    public function resolveTop(GameState $s): void
+    /**
+     * Le sommet de pile demande-t-il un paiement à sa résolution ? Contresort « sauf si son contrôleur paie » (Daze, Mana Leak)
+     * dont la cible est encore légale : le contrôleur du sort visé paie. Trigger de Pact of Negation : son contrôleur paie
+     * ou perd la partie. Trigger de Rhystic Study (`draw_unless`) : le lanceur du sort (sa cible `player:<id>`) paie, s'il est
+     * encore en jeu. Rien sinon (aucune décision).
+     *
+     * @return array{player: int, cost: string, source: string}|null
+     */
+    public static function paymentDue(GameState $s): ?array
+    {
+        $top = $s->topOfStack();
+        if ($top === null) {
+            return null;
+        }
+        if ($top->isTrigger()) {
+            if ($top->trigger->effect === 'draw_unless') {
+                $payer = str_starts_with($top->targets[0] ?? '', 'player:') ? (int) substr($top->targets[0], 7) : null;
+
+                return $payer === null || $s->player($payer)->lost ? null : ['player' => $payer, 'cost' => $top->trigger->spec, 'source' => $top->card->name];
+            }
+
+            return $top->trigger->effect === 'pact' ? ['player' => $top->controller, 'cost' => $top->trigger->spec, 'source' => $top->card->name] : null;
+        }
+        if ($top->isAbility()) {
+            return null;
+        }
+        $k = 0;
+        foreach ($top->card->effects as $effect) {
+            if (!$effect->isTargeted()) {
+                continue;
+            }
+            $target = $top->targets[$k++] ?? '';
+            if ($effect->effect === 'counter' && $effect->payCost !== null) {
+                $victim = str_starts_with($target, 'stack:') ? $s->findStackItem(substr($target, 6)) : null;
+                if ($victim === null || $victim->isAbility() || $s->player($victim->controller)->lost) {
+                    return null;
+                }
+
+                return ['player' => $victim->controller, 'cost' => $effect->payCost, 'source' => $top->card->name];
+            }
+        }
+
+        return null;
+    }
+
+    /** @param ?bool $paid réponse au paiement demandé par `paymentDue()` (null : aucun paiement demandé) */
+    public function resolveTop(GameState $s, ?bool $paid = null): void
     {
         $item = array_pop($s->stack);
         if ($item === null) {
@@ -38,6 +84,12 @@ final class StackResolver
                 'treasure' => $this->treasures($s, $item->controller, $ability->amount),
                 'pump' => $this->pump($s, $item->controller, $card->id, $item->ability),
                 'fetch' => $this->fetch($s, $item->controller, $item->ability, $item->targets),
+                'untap' => $this->untap($s, $item->controller, $card->id),
+                'self_damage' => $this->selfDamage($s, $item->controller, $card->id, $item->trigger),
+                'imprint' => $this->imprint($s, $item->controller, $card->id, $item->targets[0] ?? ''),
+                'mana' => $ability->amount > 0 ? $this->addMana($s, $item->controller, str_repeat('{C}', $ability->amount), $item->id) : null,
+                'pact' => $paid === true ? null : (new StateBasedActions())->eliminate($s, $item->controller, 'pact_unpaid'),
+                'draw_unless' => $paid === true ? null : $this->draw($s, $item->controller, $ability->amount), // Rhystic Study
                 default => null,
             };
 
@@ -69,15 +121,23 @@ final class StackResolver
             }
         }
 
-        // Effets dans l'ordre du texte (CR 608.2c).
+        // Effets dans l'ordre du texte (CR 608.2c). Une sélection (Brainstorm, Ponder) suspend la résolution : les pioches qui
+        // suivent attendent la décision (`GameState::$selection`, `draw`).
         foreach ($card->effects as $i => $effect) {
             if (!$anyLegal && !$effect->isTargeted()) {
+                continue;
+            }
+            if ($s->selection !== null) {
+                if ($effect->effect !== 'draw') {
+                    throw new \LogicException("Effet « {$effect->effect} » après une sélection de cartes");
+                }
+                $s->selection['draw'] += $effect->amount;
                 continue;
             }
             $target = $targets[$i] ?? '';
             match ($effect->effect) {
                 'damage' => $this->damage($s, $target, $card->manaCost()->hasX() ? $item->x : $effect->amount, $card->name),
-                'counter' => $this->counter($s, $target, $item->id, $effect),
+                'counter' => $this->counter($s, $target, $item, $effect, $paid),
                 'mana' => $this->addMana($s, $item->controller, $effect->adds ?? '', $item->id),
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
@@ -85,7 +145,18 @@ final class StackResolver
                 'tutor' => $this->tutor($s, $item->controller, $target, $effect, $card->name),
                 'copy' => $this->copy($s, $item->controller, $target),
                 'scry' => null, // rangement déjà décidé avant la résolution (PriorityManager::scry)
+                'put_back' => $this->startSelection($s, $item->controller, 'put_back', min($effect->amount, count($s->player($item->controller)->hand)), $card->name),
+                'arrange' => $this->startSelection($s, $item->controller, 'arrange', min($effect->amount, count($s->player($item->controller)->library)), $card->name),
+                'pact' => $s->addDelayedTrigger($item->controller, $card, new \App\Engine\Ability\TriggeredAbility(\App\Engine\Ability\TriggeredAbility::NEXT_UPKEEP, 'pact', spec: (string) $effect->payCost)),
             };
+        }
+    }
+
+    /** Ouvre une sélection de cartes (voir `GameState::$selection`) ; rien à choisir (`$count` nul) : aucune décision. */
+    private function startSelection(GameState $s, int $player, string $kind, int $count, string $source): void
+    {
+        if ($count > 0) {
+            $s->selection = ['player' => $player, 'kind' => $kind, 'count' => $count, 'source' => $source, 'draw' => 0];
         }
     }
 
@@ -271,6 +342,48 @@ final class StackResolver
         }
     }
 
+    /** Dégage la source si elle est encore sur le champ de bataille (Grim Monolith, Mana Vault) ; `PermanentsUntapped`. */
+    private function untap(GameState $s, int $player, string $cardId): void
+    {
+        $card = $s->player($player)->findOnBattlefield($cardId);
+        if ($card === null || !$card->tapped) {
+            return;
+        }
+        $card->tapped = false;
+        $s->emit('PermanentsUntapped', ['player' => $player, 'cards' => [$cardId]]);
+    }
+
+    /**
+     * Dégâts de la source à son contrôleur (Mana Vault). Clause « si engagée » (CR 603.4) revérifiée à la résolution :
+     * la source doit être encore sur le champ de bataille et engagée.
+     */
+    private function selfDamage(GameState $s, int $player, string $cardId, \App\Engine\Ability\TriggeredAbility $trigger): void
+    {
+        $card = $s->player($player)->findOnBattlefield($cardId);
+        if ($trigger->filter === \App\Engine\Ability\TriggeredAbility::TAPPED && ($card === null || !$card->tapped)) {
+            return;
+        }
+        $s->damageSelf($player, $trigger->amount, $card?->name ?? $cardId);
+    }
+
+    /**
+     * Imprint (Chrome Mox, CR 607.2) : la carte choisie (`card:<id>`) quitte la main pour l'exil si elle y est encore et reste
+     * éligible (non-artefact, non-terrain) ; le permanent retient ses couleurs (`CardImprinted`). Source partie : rien ne se passe.
+     */
+    private function imprint(GameState $s, int $player, string $sourceId, string $target): void
+    {
+        $p = $s->player($player);
+        $source = $p->findOnBattlefield($sourceId);
+        $card = str_starts_with($target, 'card:') ? $p->findInHand(substr($target, 5)) : null;
+        if ($source === null || $card === null || $card->isLand() || $card->hasType(CardInstance::ARTIFACT)) {
+            return;
+        }
+        $p->takeFromHand($card->id);
+        $s->exileFromHand($player, $card, $source->name);
+        $source->imprint = $card->colors();
+        $s->emit('CardImprinted', ['player' => $player, 'card' => $source->id, 'exiled' => $card->name, 'colors' => $source->imprint]);
+    }
+
     /** Bonus jusqu'à la fin du tour sur la source, si elle est encore sur le champ de bataille (sinon sans effet). */
     private function pump(GameState $s, int $player, string $cardId, ActivatedAbility $ability): void
     {
@@ -299,7 +412,13 @@ final class StackResolver
         $s->emit('DamageDealt', ['source' => $source, 'target' => $target, 'amount' => $amount, 'life' => $victim->life]);
     }
 
-    private function counter(GameState $s, string $target, string $byStackId, SpellEffect $effect): void
+    /**
+     * Contre le sort visé. « Sauf si son contrôleur paie » (`payCost`) : rien si `$paid`. Destination : cimetière, exil
+     * (`counterTo: exile`, Force of Negation) ou dessus de la bibliothèque (`library_top`, Memory Lapse ; un commandant va
+     * alors en zone de commandement, CR 903.9b, choix toujours fait). Mana Drain (`drainMana`) : trigger retardé qui ajoutera
+     * {C} égal à la valeur de mana du sort contré.
+     */
+    private function counter(GameState $s, string $target, \App\Engine\Game\StackItem $by, SpellEffect $effect, ?bool $paid): void
     {
         $victim = $this->counterVictim($s, $target);
         if ($victim === null) {
@@ -307,15 +426,35 @@ final class StackResolver
 
             return;
         }
+        if ($effect->payCost !== null && $paid === true) {
+            return; // le contrôleur du sort visé a payé (`CostPaid`)
+        }
         $s->stack = array_values(array_filter($s->stack, static fn ($i) => $i->id !== $victim->id));
-        $destination = $s->sendToGraveyard($victim->controller, $victim->card);
+        $owner = $s->player($victim->controller);
+        $extra = [];
+        if ($effect->counterTo === SpellEffect::COUNTER_EXILE) {
+            $destination = $s->exile($victim->controller, $victim->card);
+        } elseif ($effect->counterTo === SpellEffect::COUNTER_LIBRARY_TOP && $victim->card->commander) {
+            $owner->command[] = $victim->card;
+            $destination = 'command';
+        } elseif ($effect->counterTo === SpellEffect::COUNTER_LIBRARY_TOP && !$victim->card->token) {
+            array_unshift($owner->library, $victim->card);
+            $destination = 'library';
+            $extra = ['library' => count($owner->library)];
+        } else {
+            $destination = $s->sendToGraveyard($victim->controller, $victim->card);
+        }
         $s->emit('SpellCountered', [
             'stackId' => $victim->id,
             'card' => $victim->card->toPublic(),
             'controller' => $victim->controller,
-            'by' => $byStackId,
-            'destination' => $destination, // 'graveyard' (un commandant y passe avant les SBA, CR 903.9a)
-        ]);
+            'by' => $by->id,
+            'destination' => $destination, // 'graveyard' (un commandant y passe avant les SBA, CR 903.9a), 'exile', 'library', 'command'
+        ] + $extra);
+        if ($effect->drainMana) {
+            $amount = $victim->card->manaCost()->manaValue($victim->x);
+            $s->addDelayedTrigger($by->controller, $by->card, new \App\Engine\Ability\TriggeredAbility(\App\Engine\Ability\TriggeredAbility::NEXT_MAIN, 'mana', $amount));
+        }
         if ($effect->token !== null) {
             // Swan Song : « si ce sort est contré ainsi, son contrôleur crée un jeton » (le sort contré, pas le contresort).
             ['name' => $name, 'power' => $power, 'toughness' => $toughness] = ActivatedAbility::parseTokenSpec($effect->token);

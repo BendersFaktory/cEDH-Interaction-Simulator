@@ -96,6 +96,39 @@ final class DeckLoaderTest extends TestCase
         self::assertSame([['effect' => 'counter', 'target' => 'noncreature']], array_map(static fn ($e) => $e->toArray(), $fierce->effects));
     }
 
+    public function testMapsFreeInteraction(): void
+    {
+        $effects = static fn (string $name): array => array_map(static fn ($e) => $e->toArray(), self::map($name)->effects);
+
+        $fon = self::map('Force of Negation');
+        self::assertSame(CardInstance::ALT_PITCH_BLUE_OFF_TURN, $fon->altCost);
+        self::assertSame([['effect' => 'counter', 'target' => 'noncreature', 'counterTo' => 'exile']], $effects('Force of Negation'));
+
+        self::assertSame(CardInstance::ALT_RETURN_ISLANDS . '1', self::map('Daze')->altCost);
+        self::assertSame([['effect' => 'counter', 'payCost' => '{1}']], $effects('Daze'));
+        self::assertSame([['effect' => 'counter', 'payCost' => '{3}']], $effects('Mana Leak'));
+        self::assertSame(CardInstance::ALT_RETURN_ISLANDS . '2', self::map('Gush')->altCost);
+        self::assertSame([['effect' => 'draw', 'amount' => 2]], $effects('Gush'));
+
+        self::assertSame([['effect' => 'counter'], ['effect' => 'pact', 'payCost' => '{3}{U}{U}']], $effects('Pact of Negation'));
+        self::assertSame('{U/P}', self::map('Mental Misstep')->manaCost);
+        self::assertSame([['effect' => 'counter', 'manaValue' => 1]], $effects('Mental Misstep'));
+        self::assertSame([['effect' => 'counter', 'drainMana' => true]], $effects('Mana Drain'));
+        self::assertSame([['effect' => 'counter', 'counterTo' => 'library_top']], $effects('Memory Lapse'));
+    }
+
+    public function testMapsCardSelection(): void
+    {
+        $effects = static fn (string $name): array => array_map(static fn ($e) => $e->toArray(), self::map($name)->effects);
+
+        self::assertSame([['effect' => 'draw', 'amount' => 3], ['effect' => 'put_back', 'amount' => 2]], $effects('Brainstorm'));
+        self::assertSame([['effect' => 'arrange', 'amount' => 3], ['effect' => 'draw', 'amount' => 1]], $effects('Ponder'));
+        self::assertSame([['effect' => 'scry', 'amount' => 2], ['effect' => 'draw', 'amount' => 1]], $effects('Preordain'), 'Le mot-clé Scry de Scryfall ne fait plus refuser la carte');
+        $rhystic = self::map('Rhystic Study');
+        self::assertSame([], $rhystic->effects);
+        self::assertSame([['event' => 'opponent_cast', 'effect' => 'draw_unless', 'amount' => 1, 'spec' => '{1}']], array_map(static fn ($t) => $t->toArray(), $rhystic->triggers));
+    }
+
     public function testMapsSwanSongWithItsBirdToken(): void
     {
         $swanSong = self::map('Swan Song');
@@ -264,7 +297,6 @@ final class DeckLoaderTest extends TestCase
     {
         return [
             'Path to Exile : recherche de terrain pour l\'adversaire' => ['Path to Exile', 'texte non modélisé'],
-            'texte inconnu' => ['Rhystic Study', 'texte non modélisé'],
             'planeswalker' => ['Jace, the Mind Sculptor', 'type non modélisé (Planeswalker)'],
             'deux faces' => ['Delver of Secrets // Insectile Aberration', 'plusieurs faces'],
             'force variable' => ['Tarmogoyf', 'force / endurance variable'],
@@ -301,11 +333,11 @@ final class DeckLoaderTest extends TestCase
     public function testCollectsAllProblems(): void
     {
         try {
-            $this->loader()->load("CMDR: Isamaru, Hound of Konda\n1 Rhystic Study\n1 Carte Inventée\n1 Plains");
+            $this->loader()->load("CMDR: Isamaru, Hound of Konda\n1 Phyrexian Arena\n1 Carte Inventée\n1 Plains");
             self::fail('Exception attendue');
         } catch (DeckLoadException $e) {
             self::assertCount(2, $e->problems);
-            self::assertStringContainsString('Rhystic Study', $e->getMessage());
+            self::assertStringContainsString('Phyrexian Arena', $e->getMessage());
             self::assertStringContainsString('carte inconnue', $e->getMessage());
         }
     }

@@ -38,6 +38,12 @@ class ScryfallClient
         }
         $cards = [];
         $notFound = [];
+        // /cards/collection ne connaît pas « Fire // Ice » (nom complet) mais accepte « Fire » : on demande la première face
+        // des cartes à plusieurs faces et on rend les introuvables sous le nom demandé.
+        $asked = [];
+        foreach ($names as $name) {
+            $asked[mb_strtolower(self::frontFace($name))] ??= $name;
+        }
 
         foreach (array_chunk($names, self::BATCH_SIZE) as $i => $batch) {
             if ($i > 0 && $this->delayMicroseconds > 0) {
@@ -49,7 +55,7 @@ class ScryfallClient
                     'User-Agent' => 'cEDH-Interaction-Simulator/0.1',
                     'Accept' => 'application/json',
                 ],
-                'json' => ['identifiers' => array_map(static fn (string $n): array => ['name' => $n], $batch)],
+                'json' => ['identifiers' => array_map(static fn (string $n): array => ['name' => self::frontFace($n)], $batch)],
             ]);
             $payload = $response->toArray();
 
@@ -58,12 +64,18 @@ class ScryfallClient
             }
             foreach ($payload['not_found'] ?? [] as $identifier) {
                 if (isset($identifier['name']) && is_string($identifier['name'])) {
-                    $notFound[] = $identifier['name'];
+                    $notFound[] = $asked[mb_strtolower($identifier['name'])] ?? $identifier['name'];
                 }
             }
         }
 
         return ['cards' => $cards, 'not_found' => $notFound];
+    }
+
+    /** Première face d'une carte à plusieurs faces (« Fire // Ice » => « Fire »), le nom tel quel sinon. */
+    private static function frontFace(string $name): string
+    {
+        return trim(explode(' // ', $name, 2)[0]);
     }
 
     /**

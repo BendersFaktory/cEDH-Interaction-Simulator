@@ -28,6 +28,10 @@ final class CardInstance
     // Coûts alternatifs (`altCost`) : Force of Will (1 PV + exiler un bleu de la main), Fierce Guardianship (gratuit si commandant).
     public const ALT_PITCH_BLUE = 'pitch_blue';
     public const ALT_COMMANDER = 'commander';
+    /** Force of Negation : exiler une carte bleue de sa main (sans PV), seulement si ce n'est pas le tour du lanceur. */
+    public const ALT_PITCH_BLUE_OFF_TURN = 'pitch_blue_off_turn';
+    /** Daze (`return_islands:1`), Gush (`return_islands:2`) : renvoyer N Îles que l'on contrôle dans la main de leur propriétaire. */
+    public const ALT_RETURN_ISLANDS = 'return_islands:';
 
     // Mots-clés de combat (CR 702).
     public const FLYING = 'flying';
@@ -63,6 +67,14 @@ final class CardInstance
      */
     /** @var list<SpellEffect> effets d'un sort à sa résolution, dans l'ordre (vide : aucun effet de sort) */
     public readonly array $effects;
+
+    /**
+     * Couleurs (lettres WUBRG) de la carte exilée par l'imprint (Chrome Mox) ; vide = rien d'exilé ou carte incolore. État de
+     * partie mutable : sérialisé sous `imprint` par `toArray()` (pas par `toPublic()`), omis quand vide.
+     *
+     * @var list<string>
+     */
+    public array $imprint = [];
 
     private ?array $publicMemo = null;
     private ?array $arrayMemo = null;
@@ -100,7 +112,8 @@ final class CardInstance
         array $effects = [],
         /** PV à payer en arrivant pour ne pas arriver engagé (shockland : 2) ; 0 = terrain ordinaire */
         public readonly int $untappedLifeCost = 0,
-        public readonly ?string $altCost = null, // coût alternatif (ALT_PITCH_BLUE | ALT_COMMANDER), null = coût de mana seul
+        public readonly ?string $altCost = null, // coût alternatif (ALT_PITCH_BLUE | ALT_COMMANDER | ALT_PITCH_BLUE_OFF_TURN | ALT_RETURN_ISLANDS . N), null = coût de mana seul
+        public readonly bool $noUntap = false,   // « ne se dégage pas pendant votre étape de dégagement » (Mana Vault, Grim Monolith)
     ) {
         $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
         $this->types = is_array($type) ? array_values($type) : [$type];
@@ -154,6 +167,18 @@ final class CardInstance
         }
 
         return false;
+    }
+
+    /** Nombre d'Îles à renvoyer en main pour le coût alternatif (`ALT_RETURN_ISLANDS`), 0 sans ce coût. */
+    public function islandsToReturn(): int
+    {
+        return $this->altCost !== null && str_starts_with($this->altCost, self::ALT_RETURN_ISLANDS) ? (int) substr($this->altCost, strlen(self::ALT_RETURN_ISLANDS)) : 0;
+    }
+
+    /** Île : terrain de sous-type Island (Volcanic Island compris) ; terrain de base des decks de démo, construit sans sous-type, reconnu par son nom. */
+    public function isIsland(): bool
+    {
+        return $this->isLand() && ($this->hasSubtype('Island', self::LAND) || $this->name === 'Island');
     }
 
     /** Légendaire : soumis à la règle des légendes (CR 704.5j). */
@@ -248,6 +273,30 @@ final class CardInstance
             Color::cases(),
             static fn (Color $c) => $c !== Color::Colorless && isset($found[$c->symbol()]),
         ));
+    }
+
+    /**
+     * Couleurs de la carte (CR 105.2) : celles des symboles de son coût de mana (hybride = les deux, phyrexien = sa couleur ;
+     * `{C}` et le générique n'en sont pas). Contrairement à `colorIdentity()`, ignore les capacités.
+     *
+     * @return list<string> lettres dans l'ordre WUBRG
+     */
+    public function colors(): array
+    {
+        if ($this->isLand()) {
+            return [];
+        }
+        $cost = $this->manaCost();
+        $found = array_fill_keys(array_keys($cost->colored), true);
+        foreach ($cost->hybrid as [$a, $b]) {
+            $found[$a->symbol()] = true;
+            $found[$b->symbol()] = true;
+        }
+        foreach ($cost->phyrexian as $color) {
+            $found[$color->symbol()] = true;
+        }
+
+        return array_values(array_filter(['W', 'U', 'B', 'R', 'G'], static fn (string $c) => isset($found[$c])));
     }
 
     /** Coût de mana structuré (les terrains n'ont pas de coût). */
@@ -355,12 +404,13 @@ final class CardInstance
             // `effects` à partir de deux, ou quand le premier porte une précision absente des clés historiques (`target`, `powerLife` d'un exil).
             + (count($this->effects) > 1 || ($this->effects[0] ?? null)?->isPrecise() === true ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []) // idem
             + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []) // idem
-            + ($this->altCost === null ? [] : ['altCost' => $this->altCost]); // idem
+            + ($this->altCost === null ? [] : ['altCost' => $this->altCost]) // idem
+            + ($this->noUntap ? ['noUntap' => true] : []); // idem
     }
 
     public function toArray(): array
     {
-        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus";
+        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint));
         if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
             return $this->arrayMemo;
         }
@@ -369,7 +419,8 @@ final class CardInstance
         // `boost` omis sans bonus : au-delà de 16 clés, PHP double la table (voir toPublic).
         return $this->arrayMemo = $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
             + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : [])
-            + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : []);
+            + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : [])
+            + ($this->imprint === [] ? [] : ['imprint' => $this->imprint]);
     }
 
     public static function fromArray(array $d): self
@@ -399,9 +450,11 @@ final class CardInstance
             array_map([SpellEffect::class, 'fromArray'], $d['effects'] ?? []),
             (int) ($d['untappedLifeCost'] ?? 0),
             $d['altCost'] ?? null,
+            (bool) ($d['noUntap'] ?? false),
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);
+        $card->imprint = $d['imprint'] ?? [];
 
         return $card;
     }

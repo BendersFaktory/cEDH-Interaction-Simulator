@@ -548,7 +548,7 @@ final class SimulationApiTest extends WebTestCase
     public function testRefusedDecklistReturns422WithProblems(): void
     {
         $this->useFixtureCatalog();
-        [$status, $body] = $this->call('POST', self::BASE, ['seed' => 5, 'decks' => ['0' => "CMDR: Isamaru, Hound of Konda\n1 Rhystic Study\n1 Inconnue"]]);
+        [$status, $body] = $this->call('POST', self::BASE, ['seed' => 5, 'decks' => ['0' => "CMDR: Isamaru, Hound of Konda\n1 Phyrexian Arena\n1 Inconnue"]]);
         self::assertSame(422, $status);
         self::assertCount(2, $body['problems']['J0']);
     }

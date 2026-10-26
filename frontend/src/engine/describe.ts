@@ -70,8 +70,18 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} perd son mana flottant ${manaStr(p.lost)}`
     case 'SpellResolved':
       return `${p.card.name} se résout`
-    case 'SpellCountered':
-      return `${p.card.name} (J${p.controller}) est contré${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'SpellCountered': {
+      const where: Record<string, string> = { command: ' et retourne en zone de commandement', exile: ' et exilé', library: ' et remis sur le dessus de la bibliothèque' }
+      return `${p.card.name} (J${p.controller}) est contré${where[p.destination] ?? ''}`
+    }
+    case 'CostPaid':
+      return `J${p.player} paie ${p.cost} (${p.source})`
+    case 'CostNotPaid':
+      return `J${p.player} ne paie pas ${p.cost} (${p.source})`
+    case 'DelayedTriggerCreated':
+      return `Trigger retardé de ${p.card.name} (J${p.player}) : ${p.label}`
+    case 'PermanentReturnedToHand':
+      return `J${p.player} renvoie ${p.card.name} en main (${p.source})`
     case 'SpellFizzled':
       return "Le sort n'a plus de cible valide"
     case 'DamageDealt':
@@ -88,6 +98,8 @@ export function describeEvent(e: GameEvent): string {
       return p.toBottom ? `J${p.player} garde sa main (${p.toBottom} carte${p.toBottom > 1 ? 's' : ''} au fond)` : `J${p.player} garde sa main`
     case 'CardPutOnBottom':
       return `J${p.player} met une carte au fond de sa bibliothèque`
+    case 'CardPutOnTop':
+      return `J${p.player} remet une carte sur le dessus de sa bibliothèque (${p.source})`
     case 'AttackerDeclared':
       return `J${p.player} attaque J${p.defender} avec ${p.card}`
     case 'BlockerDeclared':
@@ -98,6 +110,8 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
     case 'CardExiled':
       return `${p.card.name} (J${p.player}) est exilé par ${p.source}${p.destination === 'none' ? " (le jeton cesse d'exister)" : ''}`
+    case 'CardImprinted':
+      return `J${p.player} exile ${p.exiled} (imprint)${p.colors.length ? `, couleurs ${p.colors.join('')}` : ', sans couleur'}`
     case 'CommanderReturned':
       return `${p.card.name} (J${p.player}) retourne en zone de commandement`
     case 'CreatureBoosted':
@@ -111,7 +125,7 @@ export function describeEvent(e: GameEvent): string {
     case 'CombatEnded':
       return 'Fin du combat'
     case 'PlayerLost':
-      return `J${p.player} est éliminé (${p.reason})`
+      return `J${p.player} est éliminé (${p.reason === 'pact_unpaid' ? 'pacte non payé' : p.reason})`
     case 'PlayerLeftGame':
       return `Les objets de J${p.player} quittent la partie`
     case 'GameOver':

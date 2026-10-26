@@ -50,6 +50,28 @@ final class GameState
     /** Un sort avec Scry attend le rangement de son contrôleur (`ScryArrange`), avant sa résolution. Sérialisé, omis quand faux. */
     public bool $scryPending = false;
     /**
+     * Le sommet de pile attend un paiement à sa résolution (« sauf si son contrôleur paie », Daze ; « payez ou perdez la
+     * partie », Pact of Negation) : le payeur (voir `StackResolver::paymentDue()`) choisit `PayCost`. Sérialisé, omis quand faux.
+     */
+    public bool $paymentPending = false;
+    /**
+     * Sélection de cartes en cours au milieu d'une résolution (lot G3, voir `SpellEffect::SELECTION`) : `player` décide,
+     * `kind` = `put_back` (Brainstorm : `count` cartes de la main encore à remettre sur le dessus, une décision `PutBack` par
+     * carte) ou `arrange` (Ponder : les `count` cartes du dessus à remettre dans l'ordre choisi ou à mélanger, une décision
+     * `ArrangeTop`), `source` = nom du sort, `draw` = cartes à piocher une fois la sélection finie (Ponder). Le sort a déjà
+     * quitté la pile. Sérialisé sous `selection`, omis quand null.
+     *
+     * @var array{player: int, kind: string, count: int, source: string, draw: int}|null
+     */
+    public ?array $selection = null;
+    /**
+     * Triggers retardés (CR 603.7) qui attendent leur événement (`TriggeredAbility::NEXT_UPKEEP`, `NEXT_MAIN`) : à ce moment
+     * ils rejoignent `$pendingTriggers`. Sérialisé sous `delayedTriggers`, omis quand vide.
+     *
+     * @var list<PendingTrigger>
+     */
+    public array $delayedTriggers = [];
+    /**
      * Stops de l'auto-pass par joueur (voir StopConfig) ; un joueur absent garde le comportement par défaut. Sérialisé
      * sous la clé `stops`, omise quand le tableau est vide (ne gonfle pas les états des parties sans config).
      *
@@ -81,6 +103,48 @@ final class GameState
         $this->activePlayer = (int) array_key_first($this->players);
         $this->priority = new PriorityState($this->activePlayer);
         $this->combat = new CombatState();
+        // Branche chaque joueur sur ses adversaires (couleurs de leurs terrains) ; référence faible : pas de cycle d'objets.
+        $self = \WeakReference::create($this);
+        foreach ($this->players as $p) {
+            $id = $p->id;
+            $p->opponentColors = static fn (): array => $self->get()?->opponentLandColors($id) ?? [];
+        }
+    }
+
+    /**
+     * Couleurs (lettres WUBRG, `[lettre => true]`) qu'un terrain contrôlé par un adversaire de `$playerId` pourrait produire
+     * (Fellwar Stone, Exotic Orchard). Seules comptent les capacités de mana fixes : une capacité dynamique (un autre
+     * Exotic Orchard) ne produit rien par elle-même (CR 106.7). L'incolore n'est pas une couleur. Calcul à la demande.
+     *
+     * @return array<string, true>
+     */
+    public function opponentLandColors(int $playerId): array
+    {
+        $set = [];
+        foreach ($this->players as $o) {
+            if ($o->id === $playerId || $o->lost) {
+                continue;
+            }
+            foreach ($o->battlefield as $card) {
+                if (!$card->isLand()) {
+                    continue;
+                }
+                foreach ($card->abilities() as $ability) {
+                    if (!$ability->isManaAbility || $ability->effect !== 'mana' || $ability->isDynamicMana()) {
+                        continue;
+                    }
+                    foreach ($ability->options as $option) {
+                        foreach ($option as $color) {
+                            if ($color !== \App\Engine\Mana\Color::Colorless) {
+                                $set[$color->symbol()] = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return $set;
     }
 
     public function player(int $id): PlayerState
@@ -394,11 +458,30 @@ final class GameState
      * `$spell` est le sort lancé : seuls les triggers dont le filtre l'accepte sont retenus. La source est copiée
      * (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
      */
-    public function queueTriggers(int $controller, CardInstance $card, string $event, ?CardInstance $spell = null): void
+    public function queueTriggers(int $controller, CardInstance $card, string $event, ?CardInstance $spell = null, ?int $opponent = null): void
     {
         foreach ($card->triggers as $index => $trigger) {
-            if ($trigger->event === $event && ($spell === null || $trigger->matches($spell))) {
-                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index);
+            if ($trigger->event === $event && ($spell === null || $trigger->matches($spell))
+                && ($trigger->filter !== TriggeredAbility::TAPPED || $card->tapped)) {
+                $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index, opponent: $opponent);
+            }
+        }
+    }
+
+    /**
+     * « Quand un adversaire lance un sort » (Rhystic Study) : met en file les triggers `opponent_cast` des permanents de chaque
+     * autre joueur en vie, avec le lanceur `$caster` (il paiera ou non à la résolution).
+     */
+    public function queueOpponentCastTriggers(int $caster, CardInstance $spell): void
+    {
+        foreach ($this->players as $p) {
+            if ($p->id === $caster || $p->lost) {
+                continue;
+            }
+            foreach ($p->battlefield as $card) {
+                if ($card->triggers !== []) {
+                    $this->queueTriggers($p->id, $card, TriggeredAbility::OPPONENT_CAST, $spell, $caster);
+                }
             }
         }
     }
@@ -427,6 +510,59 @@ final class GameState
         $destination = $this->sendToGraveyard($playerId, $card);
         $this->emit('CardDiscarded', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'hand' => count($p->hand)]);
         $this->queuePlayerTriggers($playerId, TriggeredAbility::DISCARD);
+    }
+
+    /**
+     * Crée un trigger retardé (CR 603.7) contrôlé par `$controller`, de source `$source` (le sort qui le crée, copié) :
+     * il attend son événement dans `$delayedTriggers` (`DelayedTriggerCreated`).
+     */
+    public function addDelayedTrigger(int $controller, CardInstance $source, TriggeredAbility $ability): void
+    {
+        $pending = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $source, 0, $ability);
+        $this->delayedTriggers[] = $pending;
+        $this->emit('DelayedTriggerCreated', ['player' => $controller, 'id' => $pending->id, 'card' => $source->toPublic(), 'trigger' => $ability->toArray(), 'label' => $ability->label()]);
+    }
+
+    /**
+     * Les triggers retardés de l'événement `$event` (`next_upkeep`, `next_main`) du joueur actif se déclenchent : ils passent
+     * dans `$pendingTriggers` (mis sur la pile avant la prochaine priorité). Ceux d'un joueur éliminé disparaissent.
+     */
+    public function fireDelayedTriggers(string $event): void
+    {
+        if ($this->delayedTriggers === []) {
+            return;
+        }
+        $kept = [];
+        foreach ($this->delayedTriggers as $pending) {
+            if ($this->player($pending->controller)->lost) {
+                continue;
+            }
+            if ($pending->controller === $this->activePlayer && $pending->ability()->event === $event) {
+                $this->pendingTriggers[] = $pending;
+            } else {
+                $kept[] = $pending;
+            }
+        }
+        $this->delayedTriggers = $kept;
+    }
+
+    /**
+     * Renvoie un permanent de `$playerId` dans la main de son propriétaire (coût de Daze, Gush) ; un jeton cesse d'exister
+     * (`destination: none`). Il redevient un objet neuf (dégagé, sans dégâts ni bonus). `PermanentReturnedToHand`.
+     */
+    public function returnToHand(int $playerId, string $cardId, string $source): void
+    {
+        $p = $this->player($playerId);
+        $card = $p->takeFromBattlefield($cardId) ?? throw new \DomainException("Permanent à renvoyer en main introuvable : $cardId");
+        $card->tapped = false;
+        $card->damage = 0;
+        $card->deathtouchDamage = false;
+        $card->powerBonus = 0;
+        $card->toughnessBonus = 0;
+        if (!$card->token) {
+            $p->hand[] = $card;
+        }
+        $this->emit('PermanentReturnedToHand', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $card->token ? 'none' : 'hand', 'hand' => count($p->hand), 'source' => $source]);
     }
 
     /** Change les stops d'un joueur ; `null` (ou une config équivalente au défaut) revient au comportement par défaut. */
@@ -478,6 +614,15 @@ final class GameState
         if ($this->scryPending) {
             $d['scryPending'] = true;
         }
+        if ($this->paymentPending) {
+            $d['paymentPending'] = true;
+        }
+        if ($this->selection !== null) {
+            $d['selection'] = $this->selection;
+        }
+        if ($this->delayedTriggers !== []) {
+            $d['delayedTriggers'] = array_map(static fn (PendingTrigger $t) => $t->toArray(), $this->delayedTriggers);
+        }
         if ($this->sbaResume !== null) {
             $d['sbaResume'] = $this->sbaResume->toArray();
         }
@@ -514,6 +659,12 @@ final class GameState
         $s->cleanupRound = (bool) ($d['cleanupRound'] ?? false);
         $s->sbaResume = isset($d['sbaResume']) ? PriorityState::fromArray($d['sbaResume']) : null;
         $s->scryPending = (bool) ($d['scryPending'] ?? false);
+        $s->paymentPending = (bool) ($d['paymentPending'] ?? false);
+        if (isset($d['selection'])) {
+            $sel = $d['selection'];
+            $s->selection = ['player' => (int) $sel['player'], 'kind' => (string) $sel['kind'], 'count' => (int) $sel['count'], 'source' => (string) $sel['source'], 'draw' => (int) $sel['draw']];
+        }
+        $s->delayedTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['delayedTriggers'] ?? []);
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];

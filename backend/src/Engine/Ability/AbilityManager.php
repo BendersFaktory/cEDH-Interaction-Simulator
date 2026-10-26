@@ -8,6 +8,7 @@ use App\Engine\Action\ActivateAbility;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
+use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
 use App\Engine\Game\StackItem;
 use App\Engine\Mana\ManaContext;
@@ -34,6 +35,15 @@ final class AbilityManager
         if (!self::sourceReady($card, $ability, $s->turn)) {
             return false;
         }
+        if ($ability->effect === 'untap' && !$card->tapped) {
+            return false; // rien à dégager
+        }
+        if ($ability->upkeepOnly && !($p->id === $s->activePlayer && $s->phase === Phase::Upkeep)) {
+            return false;
+        }
+        if ($ability->isDynamicMana() && self::allowedOptions($p, $card, $ability) === []) {
+            return false; // aucune couleur utilisable (Fellwar Stone sans terrain adverse, Chrome Mox sans carte colorée exilée)
+        }
         if ($ability->sorcerySpeed
             && !($p->id === $s->activePlayer && $s->phase->isMain() && $s->stack === [] && $s->combat->declaring === null)) {
             return false;
@@ -49,6 +59,23 @@ final class AbilityManager
         }
 
         return true;
+    }
+
+    /**
+     * Alternatives de mana utilisables d'une capacité de mana (toutes, sauf couleur interdite d'une capacité dynamique).
+     *
+     * @return list<int>
+     */
+    public static function allowedOptions(PlayerState $p, CardInstance $card, ActivatedAbility $ability): array
+    {
+        if (!$ability->isDynamicMana()) {
+            return array_keys($ability->options);
+        }
+
+        return array_values(array_filter(
+            array_keys($ability->options),
+            static fn (int $option) => $p->optionAllowed($card, $ability, $option),
+        ));
     }
 
     /**
@@ -128,6 +155,9 @@ final class AbilityManager
         }
         if ($ability->isManaAbility && !isset($ability->options[$a->option])) {
             throw new IllegalActionException('Alternative de mana inconnue');
+        }
+        if ($ability->isManaAbility && !$p->optionAllowed($card, $ability, $a->option)) {
+            throw new IllegalActionException('Couleur de mana non permise');
         }
         $valid = array_map(
             static fn (array $choice) => array_map(static fn (CardInstance $c) => $c->id, $choice),

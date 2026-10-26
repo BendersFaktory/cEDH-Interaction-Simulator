@@ -61,6 +61,21 @@ describe('ActionPanel', () => {
     expect(decide).toHaveBeenCalledWith('k2')
   })
 
+  it('propose les sélections de cartes (Brainstorm, Ponder) dans leurs groupes', async () => {
+    const store = useSimulationStore()
+    store.simulation = simWith([
+      { id: 'putback:0:c1', label: 'Remettre Island sur le dessus de la bibliothèque', type: 'putBack', player: 0, cardId: 'c1' },
+      { id: 'arrange:0:a,b', label: 'Remettre dans cet ordre (dessus en premier) : A, B', type: 'arrange', player: 0, order: ['a', 'b'], shuffle: false },
+      { id: 'arrange:0:shuffle', label: 'Mélanger la bibliothèque', type: 'arrange', player: 0, order: [], shuffle: true },
+    ])
+    const decide = vi.fn()
+    store.decide = decide
+    const w = mount(ActionPanel)
+    expect(w.findAll('h4').map((h) => h.text())).toEqual(['Remettre une carte de ta main sur ta bibliothèque', 'Remettre les cartes du dessus dans l’ordre, ou mélanger'])
+    await w.findAll('button')[2].trigger('click')
+    expect(decide).toHaveBeenCalledWith('arrange:0:shuffle')
+  })
+
   it('indique la déclaration en cours et désactive les boutons pendant un chargement', () => {
     const store = useSimulationStore()
     store.simulation = simWith([{ id: 'd', label: 'Terminer', type: 'done', player: 0 }], { declaring: 'attackers' })

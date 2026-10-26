@@ -9,9 +9,13 @@ use App\Engine\Game\GameState;
 /** Met un sort sur la pile : remet la liste des passes à zéro et rend la priorité au lanceur. */
 final class CastSpell implements Action
 {
-    /** `alt` : coût alternatif choisi. Gratuit (commandant, Fierce Guardianship) ; `pitch:<id>` : 1 PV et exil de la carte bleue `<id>` (Force of Will). */
+    /**
+     * `alt` : coût alternatif choisi. Gratuit (commandant, Fierce Guardianship) ; `pitch:<id>` : exil de la carte bleue `<id>`
+     * (+ 1 PV pour Force of Will, sans PV pour Force of Negation) ; `return:<id>[,<id>]` : renvoi en main des Îles `<id>` (Daze, Gush).
+     */
     public const ALT_FREE = 'free';
     public const ALT_PITCH = 'pitch:';
+    public const ALT_RETURN = 'return:';
 
     /** @param list<string> $targets ex: ['player:1'] ou ['stack:s3'] */
     public function __construct(
@@ -19,7 +23,7 @@ final class CastSpell implements Action
         public readonly string $cardId,
         public readonly array $targets = [],
         public readonly int $x = 0, // valeur choisie pour {X} (0 si le sort n'en a pas)
-        public readonly ?string $alt = null, // coût alternatif (ALT_FREE | ALT_PITCH . id) ; null = coût de mana
+        public readonly ?string $alt = null, // coût alternatif (ALT_FREE | ALT_PITCH . id | ALT_RETURN . ids) ; null = coût de mana
     ) {
     }
 
@@ -47,9 +51,17 @@ final class CastSpell implements Action
         }
         if ($this->alt === self::ALT_FREE) {
             $label .= ' (coût alternatif : gratuit)';
+        } elseif ($this->alt !== null && str_starts_with($this->alt, self::ALT_RETURN)) {
+            $names = array_map(static function (string $id) use ($player): string {
+                $island = $player->findOnBattlefield($id);
+
+                return ($island?->name ?? $id) . ($island?->tapped ? ' engagée' : '');
+            }, explode(',', substr($this->alt, strlen(self::ALT_RETURN))));
+            $label .= ' (coût alternatif : renvoyer en main ' . implode(', ', $names) . ')';
         } elseif ($this->alt !== null) {
             $pitched = $player->findHand(substr($this->alt, strlen(self::ALT_PITCH)));
-            $label .= ' (coût alternatif : 1 PV et exil de ' . ($pitched?->name ?? 'une carte bleue') . ')';
+            $life = $card?->altCost === \App\Engine\Game\CardInstance::ALT_PITCH_BLUE ? '1 PV et ' : '';
+            $label .= ' (coût alternatif : ' . $life . 'exil de ' . ($pitched?->name ?? 'une carte bleue') . ')';
         }
         if ($this->targets !== []) {
             $label .= ' → ' . implode(', ', array_map(static fn (string $t) => self::targetLabel($state, $t), $this->targets));

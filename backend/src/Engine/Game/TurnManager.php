@@ -30,6 +30,11 @@ final class TurnManager
         // Triggers « au début de votre entretien » : mis sur la pile avant la première priorité de l'étape.
         if ($s->phase === Phase::Upkeep) {
             $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::UPKEEP);
+            $s->fireDelayedTriggers(TriggeredAbility::NEXT_UPKEEP); // Pact of Negation
+        }
+        // Triggers retardés « au début de votre prochaine phase principale » (Mana Drain), avant la première priorité.
+        if ($s->phase->isMain()) {
+            $s->fireDelayedTriggers(TriggeredAbility::NEXT_MAIN);
         }
         // Triggers « au début de votre étape de fin » : idem, à l'étape de fin du joueur actif.
         if ($s->phase === Phase::End) {
@@ -57,6 +62,8 @@ final class TurnManager
         // Bibliothèque vide : le joueur perd à la vérification des SBA qui précède la priorité (CR 704.5b).
         if ($s->phase === Phase::Draw) {
             $s->drawCard($s->activePlayer);
+            // Triggers « au début de votre étape de pioche » (après la pioche de l'étape, CR 504.1 puis 504.2).
+            $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::DRAW_STEP);
         }
 
         if (!$s->phase->hasPriority()) {

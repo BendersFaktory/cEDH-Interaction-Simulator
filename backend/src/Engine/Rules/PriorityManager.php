@@ -8,15 +8,19 @@ use App\Engine\Ability\AbilityManager;
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
+use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\PassPriority;
+use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PutBack;
 use App\Engine\Action\ScryArrange;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PriorityState;
+use App\Engine\Mana\ManaCost;
 use App\Engine\Mana\ManaPayment;
 use App\Engine\Snapshot\CheckpointListener;
 
@@ -51,8 +55,9 @@ final class PriorityManager
             $p = $s->priority;
 
             // SBA puis triggers en attente (y compris après une action spéciale comme jouer un terrain, ou à la reprise d'un
-            // choix de légende, d'ordre ou de cible) : avant que quiconque reçoive la priorité.
-            if (!$p->announced || $s->pendingTriggers !== [] || $s->sbaResume !== null) {
+            // choix de légende, d'ordre ou de cible) : avant que quiconque reçoive la priorité. Jamais au milieu d'une sélection
+            // de cartes (Brainstorm, Ponder) : la résolution n'est pas finie.
+            if ($s->selection === null && (!$p->announced || $s->pendingTriggers !== [] || $s->sbaResume !== null)) {
                 $this->sba->check($s, $injected);
                 if ($s->over) {
                     return;
@@ -111,6 +116,22 @@ final class PriorityManager
                 continue;
             }
 
+            if ($action instanceof PayCost) {
+                $s->paymentPending = false;
+                $this->resolveStack($s, $this->pay($s, $action->player(), $action->pay));
+                continue;
+            }
+
+            if ($action instanceof PutBack) {
+                $this->putBack($s, $action);
+                continue;
+            }
+
+            if ($action instanceof ArrangeTop) {
+                $this->arrangeTop($s, $action);
+                continue;
+            }
+
             if ($action instanceof ScryArrange) {
                 $s->scryPending = false;
                 $this->scry($s, $action);
@@ -154,12 +175,118 @@ final class PriorityManager
         $s->emit('Scried', ['player' => $a->player(), 'top' => count($kept), 'bottom' => count($bottom), 'library' => count($p->library)]);
     }
 
-    /** Résolution du sommet de pile, puis nouvelle ronde : le joueur actif (ou le suivant s'il est mort) commence. */
-    private function resolveStack(GameState $s): void
+    /**
+     * Paiement demandé par le sommet de pile (`StackResolver::paymentDue()`) : payé par auto-paiement (`CostPaid`, sources
+     * engagées, Treasures sacrifiés, blessures des terrains) si `$pay` et payable ; sinon `CostNotPaid`. Retourne s'il est payé.
+     */
+    private function pay(GameState $s, int $player, bool $pay): bool
     {
-        $this->resolver->resolveTop($s);
+        $due = StackResolver::paymentDue($s) ?? throw new \LogicException('Aucun paiement demandé');
+        $p = $s->player($player);
+        $cost = ManaCost::parse($due['cost']);
+        $plan = $pay ? ManaPayment::plan($p, $cost, 0, $s->turn) : null;
+        $stackId = $s->topOfStack()?->id;
+        if ($plan === null) {
+            $s->emit('CostNotPaid', ['player' => $player, 'cost' => $due['cost'], 'source' => $due['source'], 'stackId' => $stackId]);
+
+            return false;
+        }
+        ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain] = $p->payWithPlan($plan);
+        if ($plan->lifeCost > 0) {
+            $pain[] = ['source' => $due['source'], 'lifeCost' => $plan->lifeCost, 'selfDamage' => 0];
+        }
+        $s->emit('CostPaid', [
+            'player' => $player,
+            'cost' => $due['cost'],
+            'source' => $due['source'],
+            'stackId' => $stackId,
+            'tapped' => $tapped,
+            'paid' => $paid,
+            'fromPool' => $fromPool,
+            'pool' => $p->pool->toArray(),
+        ] + $p->pool->restrictedField());
+        $s->sacrifice($player, $sacrifice);
+        $s->hurtByMana($player, $pain);
+
+        return true;
+    }
+
+    /**
+     * Résolution du sommet de pile, puis nouvelle ronde : le joueur actif (ou le suivant s'il est mort) commence. Si la
+     * résolution ouvre une sélection de cartes (Brainstorm, Ponder), son joueur décide d'abord (hors priorité, sans checkpoint).
+     */
+    private function resolveStack(GameState $s, ?bool $paid = null): void
+    {
+        $this->resolver->resolveTop($s, $paid);
+        if ($s->selection !== null) {
+            $s->priority = new PriorityState($s->selection['player'], [], true);
+
+            return;
+        }
+        $this->newRoundAfterResolution($s);
+    }
+
+    private function newRoundAfterResolution(GameState $s): void
+    {
         $first = $s->player($s->activePlayer)->lost ? $s->nextAlive($s->activePlayer) : $s->activePlayer;
         $s->priority = new PriorityState($first);
+    }
+
+    /**
+     * Brainstorm : la carte choisie passe de la main au dessus de la bibliothèque (`CardPutOnTop`) ; la dernière remise finit
+     * la sélection.
+     */
+    private function putBack(GameState $s, PutBack $a): void
+    {
+        $sel = $s->selection ?? throw new \LogicException('Aucune sélection en cours');
+        $p = $s->player($a->player());
+        $card = $p->takeFromHand($a->cardId) ?? throw new IllegalActionException('Carte absente de la main');
+        array_unshift($p->library, $card);
+        $s->emit('CardPutOnTop', ['player' => $a->player(), 'card' => $card->toPublic(), 'hand' => count($p->hand), 'library' => count($p->library), 'source' => $sel['source']]);
+        $s->selection['count']--;
+        if ($s->selection['count'] <= 0) {
+            $this->finishSelection($s);
+        }
+    }
+
+    /**
+     * Ponder : les cartes regardées reviennent sur le dessus dans l'ordre choisi (`Scried`, toutes dessus : seuls les nombres
+     * sont publics), ou la bibliothèque est mélangée par `GameState::$rng` (`LibraryShuffled`). Puis la sélection se termine.
+     */
+    private function arrangeTop(GameState $s, ArrangeTop $a): void
+    {
+        $sel = $s->selection ?? throw new \LogicException('Aucune sélection en cours');
+        $p = $s->player($a->player());
+        if ($a->shuffle) {
+            $p->library = $s->rng->shuffle($p->library);
+            $s->emit('LibraryShuffled', ['player' => $a->player(), 'library' => count($p->library)]);
+        } else {
+            $top = array_slice($p->library, 0, $sel['count']);
+            $byId = [];
+            foreach ($top as $card) {
+                $byId[$card->id] = $card;
+            }
+            $ordered = array_map(static fn (string $id) => $byId[$id] ?? throw new IllegalActionException("Carte $id hors des cartes regardées"), $a->order);
+            if (count($ordered) !== count($top)) {
+                throw new IllegalActionException('Toutes les cartes regardées doivent être remises');
+            }
+            $p->library = [...$ordered, ...array_slice($p->library, $sel['count'])];
+            $s->emit('Scried', ['player' => $a->player(), 'top' => count($ordered), 'bottom' => 0, 'library' => count($p->library)]);
+        }
+        $this->finishSelection($s);
+    }
+
+    /** Fin de la sélection : les pioches qui suivaient (Ponder) se font, puis nouvelle ronde comme après une résolution. */
+    private function finishSelection(GameState $s): void
+    {
+        $sel = $s->selection;
+        $s->selection = null;
+        for ($i = 0; $i < ($sel['draw'] ?? 0); $i++) {
+            if (!$s->drawCard($sel['player'])) {
+                break;
+            }
+        }
+        $this->newRoundAfterResolution($s);
     }
 
     /** @return bool true si la ronde est terminée (étape suivante) */
@@ -179,6 +306,20 @@ final class PriorityManager
                 // Scry : le contrôleur du sort range le dessus de sa bibliothèque avant la résolution (décision hors priorité).
                 $s->scryPending = true;
                 $s->priority = new PriorityState($s->stack[array_key_last($s->stack)]->controller, [], true);
+
+                return false;
+            }
+            $due = StackResolver::paymentDue($s);
+            if ($due !== null) {
+                if (ManaPayment::plan($s->player($due['player']), ManaCost::parse($due['cost']), 0, $s->turn) === null) {
+                    // Impayable : pas de décision (un seul choix possible, comme un trigger sans alternative).
+                    $this->resolveStack($s, $this->pay($s, $due['player'], false));
+
+                    return false;
+                }
+                // Le payeur décide avant la résolution (hors priorité, comme le Scry).
+                $s->paymentPending = true;
+                $s->priority = new PriorityState($due['player'], [], true);
 
                 return false;
             }
@@ -218,13 +359,31 @@ final class PriorityManager
             throw new IllegalActionException('Coût alternatif sans X');
         }
         $pitch = null;
+        $pitchLife = 0;
+        $returned = [];
         if ($a->alt === CastSpell::ALT_FREE) {
             if ($card->altCost !== CardInstance::ALT_COMMANDER || !$p->controlsCommander()) {
                 throw new IllegalActionException('Coût alternatif gratuit indisponible');
             }
+        } elseif ($a->alt !== null && str_starts_with($a->alt, CastSpell::ALT_RETURN)) {
+            // Daze, Gush : renvoyer N Îles distinctes que l'on contrôle.
+            $ids = explode(',', substr($a->alt, strlen(CastSpell::ALT_RETURN)));
+            foreach ($ids as $id) {
+                $island = $p->findOnBattlefield($id);
+                if ($island === null || !$island->isIsland()) {
+                    throw new IllegalActionException('Île à renvoyer introuvable');
+                }
+            }
+            if ($card->islandsToReturn() === 0 || count(array_unique($ids)) !== $card->islandsToReturn() || count($ids) !== $card->islandsToReturn()) {
+                throw new IllegalActionException('Coût alternatif par renvoi d\'Îles indisponible');
+            }
+            $returned = $ids;
         } elseif ($a->alt !== null) {
             $pitch = $p->findHand(substr($a->alt, strlen(CastSpell::ALT_PITCH)));
-            if ($card->altCost !== CardInstance::ALT_PITCH_BLUE || $p->life < 1 || $pitch === null || !$pitch->isBlue() || $pitch->id === $card->id) {
+            $pitchLife = $card->altCost === CardInstance::ALT_PITCH_BLUE ? 1 : 0;
+            $allowed = $card->altCost === CardInstance::ALT_PITCH_BLUE
+                || ($card->altCost === CardInstance::ALT_PITCH_BLUE_OFF_TURN && $s->activePlayer !== $a->player()); // Force of Negation
+            if (!$allowed || !str_starts_with($a->alt, CastSpell::ALT_PITCH) || $p->life < $pitchLife || $pitch === null || !$pitch->isBlue() || $pitch->id === $card->id) {
                 throw new IllegalActionException('Coût alternatif par exil indisponible');
             }
         }
@@ -239,9 +398,14 @@ final class PriorityManager
             ? ['tapped' => [], 'paid' => [], 'fromPool' => [], 'sacrifice' => [], 'pain' => []]
             : $p->payWithPlan($plan);
         if ($pitch !== null) {
-            $s->payLife($a->player(), 1, $card->name);
+            if ($pitchLife > 0) {
+                $s->payLife($a->player(), $pitchLife, $card->name);
+            }
             $p->takeFromHand($pitch->id);
             $s->exileFromHand($a->player(), $pitch, $card->name);
+        }
+        foreach ($returned as $id) {
+            $s->returnToHand($a->player(), $id, $card->name);
         }
         if ($plan !== null && $plan->lifeCost > 0) {
             $pain[] = ['source' => $card->name, 'lifeCost' => $plan->lifeCost, 'selfDamage' => 0]; // symboles phyrexian payés en PV
@@ -272,6 +436,7 @@ final class PriorityManager
         $s->hurtByMana($a->player(), $pain);     // Ancient Tomb, Talismans, Mana Confluence
         // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
         $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);
+        $s->queueOpponentCastTriggers($a->player(), $card); // Rhystic Study
 
         // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
         $s->priority->passed = [];

@@ -7,6 +7,7 @@ namespace App\Engine\Rules;
 use App\Engine\Ability\AbilityManager;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
+use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\AssignCombatDamage;
 use App\Engine\Action\BottomCard;
 use App\Engine\Action\CastSpell;
@@ -19,7 +20,9 @@ use App\Engine\Action\KeepLegend;
 use App\Engine\Action\ScryArrange;
 use App\Engine\Action\Mulligan;
 use App\Engine\Action\PassPriority;
+use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PutBack;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Card\SpellEffect;
 use App\Engine\Decision\IllegalActionException;
@@ -60,6 +63,44 @@ final class LegalActionGenerator
         return array_map(static fn (array $seq) => new ScryArrange($playerId, array_map(static fn (int $i) => $ids[$i], $seq), $count), self::orderedSelections($count));
     }
 
+    /**
+     * Sélection de cartes en cours (`GameState::$selection`). Brainstorm (`put_back`) : une action par carte de la main,
+     * dédoublonnée par nom (une décision par carte remise). Ponder (`arrange`) : un ordre par permutation des cartes regardées
+     * (l'ordre actuel en premier, ce que l'agent passif choisit), puis « mélanger ».
+     *
+     * @return list<PutBack|ArrangeTop>
+     */
+    private function selectionActions(GameState $s, int $playerId): array
+    {
+        $sel = $s->selection;
+        if ($sel === null || $sel['player'] !== $playerId) {
+            return [];
+        }
+        $p = $s->player($playerId);
+        if ($sel['kind'] === 'put_back') {
+            $actions = [];
+            $seen = [];
+            foreach ($p->hand as $card) {
+                if (!isset($seen[$card->name])) {
+                    $seen[$card->name] = true;
+                    $actions[] = new PutBack($playerId, $card->id);
+                }
+            }
+
+            return $actions;
+        }
+        $ids = array_map(static fn (CardInstance $c) => $c->id, array_slice($p->library, 0, $sel['count']));
+        $actions = [];
+        foreach (self::orderedSelections(count($ids)) as $seq) {
+            if (count($seq) === count($ids)) {
+                $actions[] = new ArrangeTop($playerId, array_map(static fn (int $i) => $ids[$i], $seq));
+            }
+        }
+        $actions[] = new ArrangeTop($playerId, [], true);
+
+        return $actions;
+    }
+
     /** Toutes les sélections ordonnées d'indices distincts de 0 à `$n - 1`, les plus grandes d'abord (ordre naturel en premier). @return list<list<int>> */
     private static function orderedSelections(int $n): array
     {
@@ -84,8 +125,14 @@ final class LegalActionGenerator
         if ($s->mulligan !== null) {
             return $this->mulliganActions($s, $playerId);
         }
+        if ($s->selection !== null) {
+            return $this->selectionActions($s, $playerId);
+        }
         if ($s->scryPending) {
             return $this->scryActions($s, $playerId);
+        }
+        if ($s->paymentPending) {
+            return $this->paymentActions($s, $playerId);
         }
         if ($s->sbaResume !== null) {
             return $this->legendActions($s, $playerId);
@@ -144,11 +191,17 @@ final class LegalActionGenerator
             if ($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander()) {
                 $modes[] = CastSpell::ALT_FREE;
             }
-            if ($card->altCost === CardInstance::ALT_PITCH_BLUE && $p->life >= 1) {
+            if (($card->altCost === CardInstance::ALT_PITCH_BLUE && $p->life >= 1)
+                || ($card->altCost === CardInstance::ALT_PITCH_BLUE_OFF_TURN && $s->activePlayer !== $playerId)) {
                 foreach ($p->hand as $other) {
                     if ($other->id !== $card->id && $other->isBlue()) {
                         $modes[] = CastSpell::ALT_PITCH . $other->id;
                     }
+                }
+            }
+            if ($card->islandsToReturn() > 0) {
+                foreach (self::islandChoices($p, $card->islandsToReturn()) as $ids) {
+                    $modes[] = CastSpell::ALT_RETURN . implode(',', $ids);
                 }
             }
             if ($modes === []) {
@@ -171,6 +224,54 @@ final class LegalActionGenerator
         }
 
         return [...$actions, ...$this->abilityActions($s, $p, $mana)];
+    }
+
+    /**
+     * Îles à renvoyer pour Daze / Gush : chaque combinaison de `$n` Îles du joueur, dédoublonnée par (nom, engagée) — renvoyer
+     * une Île engagée plutôt qu'une dégagée est un vrai choix.
+     *
+     * @return list<list<string>>
+     */
+    private static function islandChoices(PlayerState $p, int $n): array
+    {
+        $islands = array_values(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isIsland()));
+        $out = [];
+        $seen = [];
+        $walk = static function (int $from, array $picked) use (&$walk, &$out, &$seen, $islands, $n): void {
+            if (count($picked) === $n) {
+                $key = array_map(static fn (CardInstance $c) => $c->name . ($c->tapped ? '#t' : ''), $picked);
+                sort($key);
+                $key = implode('|', $key);
+                if (!isset($seen[$key])) {
+                    $seen[$key] = true;
+                    $out[] = array_map(static fn (CardInstance $c) => $c->id, $picked);
+                }
+
+                return;
+            }
+            for ($i = $from; $i < count($islands); $i++) {
+                $walk($i + 1, [...$picked, $islands[$i]]);
+            }
+        };
+        $walk(0, []);
+
+        return $out;
+    }
+
+    /**
+     * Paiement demandé à la résolution (`StackResolver::paymentDue()`) : payer (si l'auto-paiement trouve un plan), puis refuser.
+     *
+     * @return list<PayCost>
+     */
+    private function paymentActions(GameState $s, int $playerId): array
+    {
+        $due = StackResolver::paymentDue($s);
+        if ($due === null || $due['player'] !== $playerId) {
+            return [];
+        }
+        $payable = ManaPayment::plan($s->player($playerId), \App\Engine\Mana\ManaCost::parse($due['cost']), 0, $s->turn) !== null;
+
+        return [...($payable ? [new PayCost($playerId, true, $due['cost'])] : []), new PayCost($playerId, false, $due['cost'])];
     }
 
     /**
@@ -202,7 +303,7 @@ final class LegalActionGenerator
                 if (!AbilityManager::canActivate($s, $p, $card, $ability, $mana)) {
                     continue;
                 }
-                $options = $ability->isManaAbility ? array_keys($ability->options) : [0];
+                $options = $ability->isManaAbility ? AbilityManager::allowedOptions($p, $card, $ability) : [0];
                 $targetSets = match ($ability->effect) {
                     'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
                     'fetch' => self::fetchTargets($p, $ability),
@@ -284,9 +385,18 @@ final class LegalActionGenerator
             if ($pending->controller !== $playerId) {
                 continue;
             }
-            $targetSets = $pending->ability()->targetsPlayer()
+            $ability = $pending->ability();
+            $targetSets = $ability->targetsPlayer()
                 ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
-                : [[]];
+                : ($pending->opponent !== null ? [['player:' . $pending->opponent]] : [[]]); // Rhystic Study : le lanceur paiera
+            if ($ability->choosesHandCard()) {
+                // Imprint (Chrome Mox) : ne rien exiler, ou l'une des cartes éligibles de la main (non-artefact, non-terrain).
+                foreach ($s->player($playerId)->hand as $card) {
+                    if (!$card->isLand() && !$card->hasType(CardInstance::ARTIFACT)) {
+                        $targetSets[] = ['card:' . $card->id];
+                    }
+                }
+            }
             foreach ($targetSets as $targets) {
                 $key = $pending->source->name . '|' . $pending->index . '|' . implode(',', $targets);
                 if (!isset($seen[$key])) {
@@ -508,7 +618,7 @@ final class LegalActionGenerator
             'copy' => array_map(static fn (CardInstance $c) => 'permanent:' . $c->id, array_values(array_filter($s->player($playerId)->battlefield, static fn (CardInstance $c) => $c->isCreature()))),
             'damage' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
             // Un contresort ne cible que des sorts, pas des capacités activées ; Dispel seulement les instants (`SpellEffect::canCounter()`).
-            'counter' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && $effect->canCounter($item->card)))),
+            'counter' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && $effect->canCounter($item->card, $item->x)))),
             default => [],
         };
     }

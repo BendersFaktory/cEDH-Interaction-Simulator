@@ -7,6 +7,7 @@ namespace App\Engine\Agent;
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
+use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\BottomCard;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\DeclareAttacker;
@@ -17,7 +18,9 @@ use App\Engine\Action\KeepHand;
 use App\Engine\Action\KeepLegend;
 use App\Engine\Action\ScryArrange;
 use App\Engine\Action\Mulligan;
+use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PutBack;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
@@ -42,6 +45,9 @@ use App\Engine\Mana\ManaPayment;
  * Combat : attaque avec toutes ses créatures sur l'adversaire qu'elle peut tuer, sinon le plus menaçant (sauf le commandant s'il peut mourir, et une
  * garde si un adversaire peut me tuer) ; bloque quand le bloqueur survit ou tue l'attaquant, bloque à deux quand la paire
  * tue l'attaquant sans mourir toute entière, et chump-bloque seulement si l'attaque est létale.
+ * Sélection de cartes : Brainstorm remet les cartes qu'il défausserait (terrains en surplus d'abord, voir `discard`) ; Ponder
+ * garde en ordre ce qui est utile (terrain s'il en manque, sort à portée de mana) et mélange si rien ne l'est. Rhystic Study :
+ * paie {1} sauf si ça l'empêche de payer son contresort gardé (voir `reservedCounter`).
  * Profils (`AgentRegistry`) : `ai:heuristic` (défaut ci-dessus), `ai:aggro` (ne garde ni contresort ni bloqueur, attaque
  * le plus faible), `ai:control` (contre plus large, garde un bloqueur dès la moitié de ses PV menacée). Le profil est figé à
  * la construction : l'agent reste sans état.
@@ -81,8 +87,14 @@ final class HeuristicAgent implements PlayerAgent
 
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
+        if ($state->selection !== null) {
+            return $this->selectionDecision($state, $playerId, $legal);
+        }
         if ($state->scryPending) {
             return $this->scryDecision($state, $playerId, $legal);
+        }
+        if ($state->paymentPending) {
+            return $this->paymentDecision($state, $playerId, $legal);
         }
         if ($state->mulligan !== null) {
             return $this->mulliganDecision($state, $legal, $playerId);
@@ -111,7 +123,7 @@ final class HeuristicAgent implements PlayerAgent
         if ($top !== null && $top->controller !== $playerId && $this->threat($state, $playerId, $top) >= $this->counterThreshold) {
             foreach ($legal as $action) {
                 if ($action instanceof CastSpell && $this->isCounter($state, $action) && !$this->isPitch($action)
-                    && $action->targets === ['stack:' . $top->id]) {
+                    && $action->targets === ['stack:' . $top->id] && $this->counterWorks($state, $playerId, $action, $top)) {
                     return $action;
                 }
             }
@@ -166,6 +178,7 @@ final class HeuristicAgent implements PlayerAgent
                 if ($action instanceof CastSpell
                     && !$this->isCounter($state, $action)
                     && !$this->isPitch($action)
+                    && !str_starts_with((string) $action->alt, CastSpell::ALT_RETURN) // Gush : jamais en renvoyant ses Îles en phase principale
                     && !in_array('player:' . $playerId, $action->targets, true)) {
                     $casts[] = $action;
                 }
@@ -308,6 +321,81 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return array_values(array_filter($casts, static fn (CastSpell $c) => !$isExile($c) || ($best[$c->cardId][0] ?? null) === $c));
+    }
+
+    /**
+     * Paiement à la résolution. Daze, Mana Leak, Pact of Negation : payer dès que possible (première action proposée), sinon
+     * refuser. Rhystic Study : payer seulement si le contresort gardé (`reservedCounter`) reste payable après.
+     *
+     * @param list<Action> $legal
+     */
+    private function paymentDecision(GameState $state, int $playerId, array $legal): Action
+    {
+        $pay = null;
+        $refuse = null;
+        foreach ($legal as $a) {
+            if ($a instanceof PayCost && $a->pay) {
+                $pay ??= $a;
+            } elseif ($a instanceof PayCost) {
+                $refuse ??= $a;
+            }
+        }
+        if ($pay === null || $refuse === null || $state->topOfStack()?->trigger?->effect !== 'draw_unless') {
+            return $legal[0] ?? AutoPassAgent::pass($legal, $playerId);
+        }
+        $reserve = $this->reservedCounter($state, $playerId);
+        if ($reserve === null) {
+            return $pay;
+        }
+        $after = $state->player($playerId)->duplicate();
+        $plan = ManaPayment::plan($after, ManaCost::parse($pay->cost), 0, $state->turn);
+        if ($plan === null) {
+            return $refuse;
+        }
+        $after->payWithPlan($plan);
+        $counter = $after->findCastable($reserve->id);
+
+        return $counter !== null && $this->canPayCounter($state, $after, $counter) ? $pay : $refuse;
+    }
+
+    /**
+     * Sélection de cartes. Brainstorm : remettre la carte que l'on défausserait (`discard` : terrain en surplus, carte
+     * injouable, la plus chère ; contresorts gardés). Ponder : les cartes utiles d'abord (terrain s'il en manque, sort dont le
+     * coût est à portée), dans l'ordre de la bibliothèque ; si aucune ne l'est, mélanger.
+     *
+     * @param list<Action> $legal
+     */
+    private function selectionDecision(GameState $state, int $playerId, array $legal): Action
+    {
+        $putBacks = array_values(array_filter($legal, static fn (Action $a) => $a instanceof PutBack));
+        if ($putBacks !== []) {
+            return $this->discard($state, $putBacks, $playerId);
+        }
+        $arranges = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ArrangeTop));
+        if ($arranges === []) {
+            return AutoPassAgent::pass($legal, $playerId);
+        }
+        $p = $state->player($playerId);
+        $lands = count(array_filter([...$p->battlefield, ...$p->hand], static fn (CardInstance $c) => $c->isLand()));
+        $potential = $this->manaPotential($p->battlefield) + count(array_filter($p->hand, static fn (CardInstance $c) => $c->isLand()));
+        $useful = [];
+        $rest = [];
+        foreach (array_slice($p->library, 0, $state->selection['count'] ?? 0) as $card) {
+            $good = $card->isLand() ? $lands < 5 : $card->cost <= $potential + 1;
+            if ($good) {
+                $useful[] = $card->id;
+            } else {
+                $rest[] = $card->id;
+            }
+        }
+        $order = [...$useful, ...$rest];
+        foreach ($arranges as $a) {
+            if ($useful === [] ? $a->shuffle : (!$a->shuffle && $a->order === $order)) {
+                return $a;
+            }
+        }
+
+        return $arranges[0];
     }
 
     /** Scry : garder sur le dessus les cartes qui ne sont pas des terrains (dans l'ordre), mettre les terrains dessous. */
@@ -474,7 +562,7 @@ final class HeuristicAgent implements PlayerAgent
      */
     private function afterCast(GameState $state, PlayerState $p, CardInstance $card, ?int $x = null): ?PlayerState
     {
-        $copy = PlayerState::fromArray($p->toArray());
+        $copy = $p->duplicate();
         $copyCard = $copy->findCastable($card->id);
         if ($copyCard === null) {
             return null;
@@ -549,7 +637,7 @@ final class HeuristicAgent implements PlayerAgent
     /** Mana qui serait perdu en payant `$counter` avec l'état `$after` (production d'un Signet en trop) ; null si impayable. */
     private function counterWaste(GameState $state, PlayerState $after, CardInstance $counter): ?int
     {
-        $copy = PlayerState::fromArray($after->toArray());
+        $copy = $after->duplicate();
         $copyCounter = $copy->findCastable($counter->id);
         $plan = $copyCounter === null ? null : ManaPayment::plan($copy, $copy->castCost($copyCounter), 0, $state->turn, null, $copyCounter);
         if ($plan === null) {
@@ -586,13 +674,13 @@ final class HeuristicAgent implements PlayerAgent
             return null;
         }
         // Sources du contresort mises de côté (engagées sur une copie), puis paiement du sort sur le reste.
-        $spared = PlayerState::fromArray($p->toArray());
+        $spared = $p->duplicate();
         $spared->pool->clear();
         $counterPlan = ManaPayment::plan($spared, $spared->castCost($counter), 0, $state->turn, null, $counter);
         if ($counterPlan === null) {
             return null;
         }
-        $spared = PlayerState::fromArray($p->toArray());
+        $spared = $p->duplicate();
         foreach ([...$counterPlan->taps, ...$counterPlan->converters] as $use) {
             $spared->findOnBattlefield($use['card'])->tapped = true;
         }
@@ -619,7 +707,7 @@ final class HeuristicAgent implements PlayerAgent
         if ($reserve === null) {
             return true;
         }
-        $copy = PlayerState::fromArray($state->player($playerId)->toArray());
+        $copy = $state->player($playerId)->duplicate();
         if ($ability->manaCost !== null && !$ability->manaCost->hasX()) {
             $plan = ManaPayment::plan($copy, $ability->manaCost, 0, $state->turn, $action->cardId);
             if ($plan === null) {
@@ -643,7 +731,7 @@ final class HeuristicAgent implements PlayerAgent
         $p = $state->player($playerId);
         $best = null;
         foreach ($p->hand as $card) {
-            if ($card->hasEffect('counter') && ($best === null || $card->cost < $best->cost)) {
+            if ($card->hasEffect('counter') && !$card->hasEffect('pact') && ($best === null || $card->cost < $best->cost)) {
                 $best = $card;
             }
         }
@@ -685,7 +773,7 @@ final class HeuristicAgent implements PlayerAgent
         if ($ritual === null || !$ritual->hasEffect('mana')) {
             return true;
         }
-        $copy = PlayerState::fromArray($p->toArray());
+        $copy = $p->duplicate();
         $copyRitual = $copy->findCastable($cast->cardId);
         $plan = ManaPayment::plan($copy, $copy->castCost($copyRitual), 0, $state->turn, null, $copyRitual);
         if ($plan === null) {
@@ -696,7 +784,7 @@ final class HeuristicAgent implements PlayerAgent
             $copy->pool->add(\App\Engine\Mana\Color::fromSymbol($symbol), $n);
         }
         // Avant : sans le rituel (état d'origine) ; après : réserve augmentée.
-        $before = PlayerState::fromArray($p->toArray());
+        $before = $p->duplicate();
         foreach ([...$p->hand, ...$p->command] as $card) {
             if ($card->isLand() || $card->hasEffect('mana') || $card->id === $ritual->id) {
                 continue;
@@ -740,6 +828,11 @@ final class HeuristicAgent implements PlayerAgent
     private function putTrigger(GameState $state, array $triggers, int $playerId): PutTrigger
     {
         $first = $triggers[0]->pendingId;
+        foreach ($state->pendingTriggers as $pending) {
+            if ($pending->id === $first && $pending->ability()->choosesHandCard()) {
+                return $this->imprintChoice($state, $triggers, $playerId);
+            }
+        }
         $best = null;
         foreach ($triggers as $t) {
             if ($t->pendingId !== $first) {
@@ -756,6 +849,48 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return $best[0];
+    }
+
+    /**
+     * Imprint (Chrome Mox) : exiler la carte de la main la moins chère dont une couleur sert à lancer une AUTRE carte non-terrain
+     * de la main (le Mox paiera alors cette couleur), jamais un contresort ni une carte incolore, et seulement si la main garde
+     * au moins deux autres cartes non-terrain. Sinon ne rien exiler (l'action sans cible). Égalité : première de la main.
+     *
+     * @param list<PutTrigger> $triggers
+     */
+    private function imprintChoice(GameState $state, array $triggers, int $playerId): PutTrigger
+    {
+        $hand = $state->player($playerId)->hand;
+        $spells = array_values(array_filter($hand, static fn (CardInstance $c) => !$c->isLand()));
+        $decline = null;
+        $best = null;
+        foreach ($triggers as $t) {
+            $id = str_starts_with($t->targets[0] ?? '', 'card:') ? substr($t->targets[0], 5) : null;
+            if ($id === null) {
+                $decline = $t;
+                continue;
+            }
+            $card = null;
+            foreach ($hand as $c) {
+                if ($c->id === $id) {
+                    $card = $c;
+                }
+            }
+            if ($card === null || $card->hasEffect('counter') || $card->colors() === [] || count($spells) < 3) {
+                continue;
+            }
+            $serves = false;
+            foreach ($spells as $other) {
+                if ($other->id !== $card->id && array_intersect($card->colors(), $other->colors()) !== []) {
+                    $serves = true;
+                }
+            }
+            if ($serves && ($best === null || $this->cardValue($card, 0) < $best[1])) {
+                $best = [$t, $this->cardValue($card, 0)];
+            }
+        }
+
+        return $best[0] ?? $decline ?? $triggers[0];
     }
 
     /**
@@ -792,7 +927,7 @@ final class HeuristicAgent implements PlayerAgent
      *  4. on garde en dernier : un terrain utile (-1, ou -1000 s'il y en a moins de 4 en jeu) et un contresort (-500).
      * Égalité : plus petit id.
      *
-     * @param list<Discard|BottomCard> $discards
+     * @param list<Discard|BottomCard|PutBack> $discards
      */
     private function discard(GameState $state, array $discards, int $playerId): Action
     {
@@ -1234,6 +1369,33 @@ final class HeuristicAgent implements PlayerAgent
     private function isPitch(CastSpell $action): bool
     {
         return str_starts_with((string) $action->alt, CastSpell::ALT_PITCH);
+    }
+
+    /**
+     * Ce contresort vaut-il d'être lancé sur `$top` ? Non pour un « sauf si son contrôleur paie » (Daze, Mana Leak) que la
+     * victime peut payer, ni pour Pact of Negation si l'on ne pourra pas payer {3}{U}{U} au prochain entretien (estimé : au
+     * moins autant de mana produisible par ses permanents que le coût, et du bleu). Toujours oui pour un contresort ordinaire.
+     */
+    private function counterWorks(GameState $state, int $playerId, CastSpell $action, \App\Engine\Game\StackItem $top): bool
+    {
+        $card = $state->player($playerId)->findCastable($action->cardId);
+        $counter = $card?->effect('counter');
+        if ($card === null || $counter === null) {
+            return true;
+        }
+        if ($counter->payCost !== null
+            && ManaPayment::plan($state->player($top->controller), \App\Engine\Mana\ManaCost::parse($counter->payCost), 0, $state->turn) !== null) {
+            return false;
+        }
+        $pact = $card->effect('pact');
+        if ($pact !== null) {
+            $battlefield = $state->player($playerId)->battlefield;
+            $cost = \App\Engine\Mana\ManaCost::parse((string) $pact->payCost);
+
+            return $this->manaPotential($battlefield) >= $cost->manaValue() && isset($this->producedSymbols($battlefield)['U']);
+        }
+
+        return true;
     }
 
     private function isCounter(GameState $state, CastSpell $action): bool

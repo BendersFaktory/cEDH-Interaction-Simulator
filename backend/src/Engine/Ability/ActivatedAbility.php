@@ -26,7 +26,7 @@ use App\Engine\Mana\ManaRestriction;
  * écrite en suffixe : `{C}{C}@eldrazi` (Eldrazi Temple). Ce mana va dans la partie restreinte de la réserve.
  *
  * Forme sérialisée (`toArray`) : les options sont des chaînes `{R}{R}` (suffixe `@kind` si restreintes) ; seules les lettres WUBRGC sont écrites ; les
- * champs `sacrificeCreature`, `discard`, `sorcerySpeed` et `spec` sont omis à leur valeur par défaut.
+ * champs `sacrificeCreature`, `discard`, `sorcerySpeed`, `spec`, `upkeepOnly`... sont omis à leur valeur par défaut.
  */
 final class ActivatedAbility
 {
@@ -52,6 +52,7 @@ final class ActivatedAbility
         public readonly array $restrictions = [],
         public readonly int $lifeCost = 0,   // PV payés à l'activation (Mana Confluence, fetchlands) ; impossible avec moins de PV (CR 119.4)
         public readonly int $selfDamage = 0, // dégâts infligés à son contrôleur par la capacité (Ancient Tomb, Talismans, pain lands)
+        public readonly bool $upkeepOnly = false, // activable seulement pendant l'entretien de son contrôleur (Mana Vault : « à l'entretien, payez {4} : dégagez-la »)
     ) {
         if ($effect === 'fetch') {
             $this->fetchSpec();
@@ -77,6 +78,35 @@ final class ActivatedAbility
             return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, restrictions: $restrictions,
                 lifeCost: $lifeCost, selfDamage: $selfDamage);
         })();
+    }
+
+    /** Mana produit dynamique : `spec` d'une capacité de mana dont les alternatives (les cinq couleurs) sont filtrées à l'usage. */
+    public const DYNAMIC_OPPONENT_LAND = 'oppland'; // Fellwar Stone, Exotic Orchard : couleurs que produit un terrain adverse
+    public const DYNAMIC_IMPRINT = 'imprint';       // Chrome Mox : couleurs de la carte exilée
+
+    /**
+     * `{T}: un mana d'une couleur parmi celles que `$kind` autorise` : cinq alternatives à une couleur, dont seules les
+     * autorisées sont utilisables (voir `PlayerState::allowedColors()`).
+     */
+    public static function dynamicMana(string $kind): self
+    {
+        if (!in_array($kind, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT], true)) {
+            throw new \InvalidArgumentException("Mana dynamique inconnu : $kind");
+        }
+
+        return new self(true, 'mana', true, null, array_map(self::parseOption(...), ['{W}', '{U}', '{B}', '{R}', '{G}']), spec: $kind);
+    }
+
+    /** Vrai pour une capacité de mana dont les couleurs dépendent de l'état de la partie (`dynamicMana()`). */
+    public function isDynamicMana(): bool
+    {
+        return $this->isManaAbility && ($this->spec === self::DYNAMIC_OPPONENT_LAND || $this->spec === self::DYNAMIC_IMPRINT);
+    }
+
+    /** `[coût] : dégager la source` (Grim Monolith : `{4}` ; Mana Vault : `{4}` pendant son entretien seulement). Non-mana, passe par la pile. */
+    public static function untap(string $cost, bool $upkeepOnly = false): self
+    {
+        return new self(false, 'untap', false, ManaCost::parse($cost), upkeepOnly: $upkeepOnly);
     }
 
     /**
@@ -249,6 +279,7 @@ final class ActivatedAbility
             'draw' => sprintf('piocher %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'pump' => $this->spec,
+            'untap' => $this->upkeepOnly ? 'dégager (entretien)' : 'dégager',
             'fetch' => 'chercher ' . ($this->fetchSpec()['basic'] ? 'un terrain de base' : implode(' ou ', $this->fetchSpec()['types'])) . ($this->fetchSpec()['tapped'] ? ' (engagé)' : ''),
             default => $this->effect,
         };
@@ -274,6 +305,7 @@ final class ActivatedAbility
             'spec' => $this->spec,
             'lifeCost' => $this->lifeCost,
             'selfDamage' => $this->selfDamage,
+            'upkeepOnly' => $this->upkeepOnly,
         ]);
     }
 
@@ -296,6 +328,7 @@ final class ActivatedAbility
             $restrictions,
             (int) ($d['lifeCost'] ?? 0),
             (int) ($d['selfDamage'] ?? 0),
+            (bool) ($d['upkeepOnly'] ?? false),
         );
     }
 

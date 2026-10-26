@@ -59,6 +59,24 @@ describe('describeEvent — capacités', () => {
   it('bonus de force/endurance', () => {
     expect(describeEvent(e('CreatureBoosted', { player: 0, card: 'p0_c3', power: 3, toughness: 3 }))).toBe('p0_c3 (J0) passe à 3/3')
   })
+  it('imprint', () => {
+    expect(describeEvent(e('CardImprinted', { player: 0, exiled: 'Lightning Bolt', colors: ['R'] }))).toBe('J0 exile Lightning Bolt (imprint), couleurs R')
+    expect(describeEvent(e('CardImprinted', { player: 0, exiled: 'Sol Ring', colors: [] }))).toBe('J0 exile Sol Ring (imprint), sans couleur')
+  })
+  it('interaction gratuite (Daze, Pact of Negation, Force of Negation, Memory Lapse)', () => {
+    expect(describeEvent(e('PermanentReturnedToHand', { player: 0, card: { name: 'Island' }, destination: 'hand', source: 'Daze' }))).toBe('J0 renvoie Island en main (Daze)')
+    expect(describeEvent(e('CostPaid', { player: 1, cost: '{1}', source: 'Daze' }))).toBe('J1 paie {1} (Daze)')
+    expect(describeEvent(e('CardPutOnTop', { player: 0, card: { id: 'c1', name: 'Island' }, hand: 2, library: 40, source: 'Brainstorm' }))).toBe(
+      'J0 remet une carte sur le dessus de sa bibliothèque (Brainstorm)',
+    )
+    expect(describeEvent(e('CostNotPaid', { player: 0, cost: '{3}{U}{U}', source: 'Pact of Negation' }))).toBe('J0 ne paie pas {3}{U}{U} (Pact of Negation)')
+    expect(describeEvent(e('DelayedTriggerCreated', { player: 0, card: { name: 'Mana Drain' }, label: 'Au début de votre prochaine phase principale : ajouter {C}{C}' }))).toBe(
+      'Trigger retardé de Mana Drain (J0) : Au début de votre prochaine phase principale : ajouter {C}{C}',
+    )
+    expect(describeEvent(e('PlayerLost', { player: 0, reason: 'pact_unpaid' }))).toBe('J0 est éliminé (pacte non payé)')
+    expect(describeEvent(e('SpellCountered', { card: { name: 'Bolt' }, controller: 1, destination: 'exile' }))).toBe('Bolt (J1) est contré et exilé')
+    expect(describeEvent(e('SpellCountered', { card: { name: 'Bolt' }, controller: 1, destination: 'library' }))).toBe('Bolt (J1) est contré et remis sur le dessus de la bibliothèque')
+  })
   it('exil', () => {
     expect(describeEvent(e('CardExiled', { player: 1, card: { name: 'Goblin Guide' }, destination: 'exile', source: 'Swords to Plowshares' }))).toBe(
       'Goblin Guide (J1) est exilé par Swords to Plowshares',

@@ -141,7 +141,11 @@ final class ManaContext
                 if ($withCost && ($ability->manaCost->hybrid !== [] || $ability->manaCost->phyrexian !== [] || $ability->manaCost->x > 0)) {
                     continue;
                 }
+                $allowed = $ability->spec === '' ? null : $this->p->allowedColors($card, $ability); // Fellwar Stone, Chrome Mox
                 foreach ($ability->options as $oi => $_) {
+                    if ($allowed !== null && !isset($allowed[$ability->options[$oi][0]->symbol()])) {
+                        continue;
+                    }
                     $restriction = $ability->restriction($oi);
                     if ($restriction !== null && $withCost) {
                         continue;

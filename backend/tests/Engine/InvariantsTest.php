@@ -101,6 +101,45 @@ final class InvariantsTest extends TestCase
         }
     }
 
+    /** @return iterable<string, array{int}> */
+    public static function interactionSeeds(): iterable
+    {
+        foreach (range(1, 8) as $seed) {
+            yield "graine $seed" => [$seed];
+        }
+    }
+
+    /**
+     * Decks Dimir à interaction gratuite (lot G2 : Force of Negation, Daze, Gush, Pact of Negation, Mental Misstep, Mana Drain,
+     * Mana Leak, Memory Lapse) : paiements à la résolution, triggers retardés, Îles renvoyées en main, sorts contrés exilés ou
+     * remis sur la bibliothèque. Les types d'événements vus sur toutes les graines couvrent ces mécanismes.
+     */
+    public function testInvariantsWithFreeInteraction(): void
+    {
+        $seen = [];
+        foreach (self::interactionSeeds() as [$seed]) {
+            $seen = [...$seen, ...array_fill_keys($this->checkSeed($seed, self::fetchDecks(true)), true)];
+        }
+        foreach (['SpellCountered', 'DelayedTriggerCreated', 'CostPaid', 'CostNotPaid', 'PermanentReturnedToHand'] as $type) {
+            self::assertArrayHasKey($type, $seen, "aucun $type sur les graines 1 à 8");
+        }
+    }
+
+    /**
+     * Decks Dimir à sélection de cartes (lot G3 : Brainstorm, Ponder, Preordain, Rhystic Study) : remises sur la bibliothèque,
+     * mélanges, Scry, triggers « un adversaire lance un sort » et paiements de Rhystic Study.
+     */
+    public function testInvariantsWithCardSelection(): void
+    {
+        $seen = [];
+        foreach (self::interactionSeeds() as [$seed]) {
+            $seen = [...$seen, ...array_fill_keys($this->checkSeed($seed, self::fetchDecks(selection: true)), true)];
+        }
+        foreach (['CardPutOnTop', 'Scried', 'LibraryShuffled', 'CostPaid', 'AbilityTriggered'] as $type) {
+            self::assertArrayHasKey($type, $seen, "aucun $type sur les graines 1 à 8");
+        }
+    }
+
     /** Decks de démo avec des sorts d'exil : l'exil compte dans la conservation des cartes. */
     #[DataProvider('exileSeeds')]
     public function testInvariantsWithExileSpells(int $seed): void
@@ -442,7 +481,7 @@ final class InvariantsTest extends TestCase
      *
      * @return callable(int): array{commander: CardInstance, library: list<CardInstance>}
      */
-    private static function fetchDecks(): callable
+    private static function fetchDecks(bool $freeInteraction = false, bool $selection = false): callable
     {
         $mapper = new CardMapper();
         $fixtures = ScryfallFixtures::all();
@@ -469,7 +508,9 @@ final class InvariantsTest extends TestCase
             'Watery Grave', 'Polluted Delta', 'Prismatic Vista', 'Evolving Wilds', 'Underground Sea', 'Underground River',
             'Mana Confluence', 'Ancient Tomb', 'Command Tower', 'Sol Ring', 'Mind Stone', 'Talisman of Dominance', 'Lotus Petal',
             'Counterspell', 'Dark Ritual', 'Divination', 'Wind Drake', 'Perilous Myr',
-        ], ['Island' => 40, 'Swamp' => 41]);
+            ...($freeInteraction ? ['Force of Negation', 'Daze', 'Gush', 'Pact of Negation', 'Mental Misstep', 'Mana Drain', 'Mana Leak', 'Memory Lapse'] : []),
+            ...($selection ? ['Brainstorm', 'Ponder', 'Preordain', 'Rhystic Study'] : []),
+        ], ['Island' => 40 - ($freeInteraction ? 4 : 0) - ($selection ? 2 : 0), 'Swamp' => 41 - ($freeInteraction ? 4 : 0) - ($selection ? 2 : 0)]);
         $white = $build('Isamaru, Hound of Konda', [
             'Prismatic Vista', 'Evolving Wilds', 'Mana Confluence', 'Ancient Tomb', 'Command Tower', 'Sol Ring', 'Mind Stone',
             'Lotus Petal', 'Serra Angel', 'Wall of Omens', 'Perilous Myr',

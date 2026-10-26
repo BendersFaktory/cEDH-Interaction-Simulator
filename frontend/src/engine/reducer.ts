@@ -213,8 +213,26 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
     case 'SpellCountered': {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
-      // Un commandant contré retourne en zone de commandement (règle de remplacement).
-      zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
+      // Cimetière, exil (Force of Negation), zone de commandement, ou dessus de la bibliothèque (Memory Lapse : seule la taille est publique).
+      if (p.destination === 'library') v.players[p.controller].library = p.library
+      else zoneOf(v.players[p.controller], p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'CostPaid': {
+      // Paiement à la résolution (Daze, Mana Leak, Pact of Negation) : sources engagées, réserve absolue.
+      const pl = v.players[p.player]
+      tapAll(pl, p.tapped)
+      pl.pool = { ...p.pool }
+      pl.restricted = restrictedOf(p.restricted)
+      break
+    }
+
+    case 'PermanentReturnedToHand': {
+      // Coût alternatif de Daze / Gush : l'Île revient en main (dégagée) ; un jeton cesse d'exister.
+      const pl = v.players[p.player]
+      removeCard(pl.battlefield, p.card.id)
+      if (p.destination === 'hand') pl.hand.push(board(p.card))
       break
     }
 
@@ -246,7 +264,9 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
-    case 'CardPutOnBottom': {
+    case 'CardPutOnBottom':
+    case 'CardPutOnTop': {
+      // Main → fond (mulligan) ou dessus (Brainstorm) de la bibliothèque : seule la taille compte côté bibliothèque.
       const pl = v.players[p.player]
       removeCard(pl.hand, p.card.id)
       pl.library = p.library
@@ -282,6 +302,13 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       const pl = v.players[p.player]
       removeCard(p.from === 'hand' ? pl.hand : pl.battlefield, p.card.id)
       zoneOf(pl, p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'CardImprinted': {
+      // Le permanent retient les couleurs de la carte exilée (la carte elle-même est partie par `CardExiled`, `from: hand`).
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) c.imprint = [...p.colors]
       break
     }
 
@@ -350,7 +377,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.winner = p.winner
       break
 
-    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled' et autres : pas d'effet sur l'état affiché.
+    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled', 'CostNotPaid', 'DelayedTriggerCreated' et autres : pas d'effet sur l'état affiché.
   }
 
   return v

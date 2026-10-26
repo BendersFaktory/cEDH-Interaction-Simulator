@@ -236,6 +236,34 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[1].command.map((c) => c.id)).toContain('cmd')
   })
 
+  it('interaction gratuite : Île renvoyée en main, coût payé à la résolution, sort contré exilé ou remis sur la bibliothèque', () => {
+    const v = start()
+    applyEvent(v, ev(4, 'PermanentReturnedToHand', { player: 0, card: land, destination: 'hand', hand: 1, source: 'Daze' }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['a1'])
+    expect(v.players[0].hand.map((c) => [c.id, c.tapped])).toEqual([['l1', false]])
+    v.players[1].battlefield.push({ ...land, id: 'l2', tapped: false })
+    applyEvent(v, ev(5, 'CostPaid', { player: 1, cost: '{1}', source: 'Daze', stackId: 's2', tapped: ['l2'], paid: { R: 1 }, fromPool: {}, pool: {} }))
+    expect(v.players[1].battlefield.find((c) => c.id === 'l2')?.tapped).toBe(true)
+    applyEvent(v, ev(6, 'CostNotPaid', { player: 1, cost: '{1}', source: 'Daze', stackId: 's2' }))
+    const bolt = { id: 'b1', name: 'Lightning Bolt', type: 'instant' as const, cost: 1, effect: 'damage', amount: 3 }
+    v.stack.push({ id: 's1', card: bolt, controller: 1, targets: [] })
+    applyEvent(v, ev(7, 'SpellCountered', { stackId: 's1', card: bolt, controller: 1, by: 's3', destination: 'exile' }))
+    expect(v.players[1].exile.map((c) => c.id)).toEqual(['b1'])
+    v.stack.push({ id: 's4', card: bolt, controller: 1, targets: [] })
+    applyEvent(v, ev(8, 'SpellCountered', { stackId: 's4', card: bolt, controller: 1, by: 's5', destination: 'library', library: 7 }))
+    expect(v.stack).toEqual([])
+    expect(v.players[1].library).toBe(7)
+    expect(v.players[1].graveyard).toEqual([])
+  })
+
+  it('CardImprinted fixe les couleurs retenues par le permanent (valeurs absolues)', () => {
+    const v = start()
+    const mox = { id: 'mox', name: 'Chrome Mox', type: 'artifact' as const, cost: 0, effect: null, amount: 0 }
+    applyEvent(v, ev(4, 'SpellResolved', { stackId: 's1', card: mox, controller: 0, destination: 'battlefield' }))
+    applyEvent(v, ev(5, 'CardImprinted', { player: 0, card: 'mox', exiled: 'Lightning Bolt', colors: ['R'] }))
+    expect(v.players[0].battlefield.find((c) => c.id === 'mox')?.imprint).toEqual(['R'])
+  })
+
   it("CreatureBoosted fixe la force et l'endurance (valeurs absolues)", () => {
     const v = start()
     const bear = { id: 'c1', name: 'Wild Mongrel', type: 'creature' as const, cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
@@ -356,6 +384,13 @@ describe('reducer — mulligan de Londres', () => {
     const v = start()
     applyEvent(v, ev(5, 'CardPutOnBottom', { player: 0, card: card('b'), hand: 2, library: 92 }))
     expect(v.players[0].hand.map((c) => c.id)).toEqual(['a', 'c'])
+    expect(v.players[0].library).toBe(92)
+  })
+
+  it('CardPutOnTop (Brainstorm) retire la carte de la main et met à jour la bibliothèque', () => {
+    const v = start()
+    applyEvent(v, ev(5, 'CardPutOnTop', { player: 0, card: card('c'), hand: 2, library: 92, source: 'Brainstorm' }))
+    expect(v.players[0].hand.map((c) => c.id)).toEqual(['a', 'b'])
     expect(v.players[0].library).toBe(92)
   })
 

@@ -34,6 +34,15 @@ final class PlayerState
     public array $exile = [];
 
     /**
+     * Couleurs (lettres WUBRG) que peut produire un terrain contrôlé par un adversaire, en `[lettre => true]` : branché par
+     * `GameState` (jamais sérialisé, l'état se lit toujours depuis les adversaires). Sans lui (joueur isolé), aucune.
+     * Sert aux capacités `ActivatedAbility::DYNAMIC_OPPONENT_LAND` (Fellwar Stone, Exotic Orchard).
+     *
+     * @var (\Closure(): array<string, true>)|null
+     */
+    public ?\Closure $opponentColors = null;
+
+    /**
      * @param list<CardInstance> $library    index 0 = dessus de la bibliothèque
      * @param list<CardInstance> $hand
      * @param list<CardInstance> $battlefield
@@ -82,6 +91,44 @@ final class PlayerState
     public function findCastable(string $cardId): ?CardInstance
     {
         return $this->findInHand($cardId) ?? $this->findInCommand($cardId);
+    }
+
+    /**
+     * Copie indépendante (par la forme sérialisée) qui garde le branchement sur les adversaires : pour les simulations
+     * locales de l'IA, où une capacité de mana dynamique doit rester évaluable.
+     */
+    public function duplicate(): self
+    {
+        $copy = self::fromArray($this->toArray());
+        $copy->opponentColors = $this->opponentColors;
+
+        return $copy;
+    }
+
+    /**
+     * Couleurs (lettres) qu'une capacité de mana dynamique de `$card` autorise maintenant ; null si la capacité n'est pas dynamique
+     * (toutes ses alternatives sont permises).
+     *
+     * @return array<string, true>|null
+     */
+    public function allowedColors(CardInstance $card, ActivatedAbility $ability): ?array
+    {
+        if (!$ability->isDynamicMana()) {
+            return null;
+        }
+        if ($ability->spec === ActivatedAbility::DYNAMIC_IMPRINT) {
+            return array_fill_keys($card->imprint, true);
+        }
+
+        return $this->opponentColors === null ? [] : ($this->opponentColors)();
+    }
+
+    /** L'alternative `$option` de la capacité de mana est-elle utilisable (couleur autorisée si la capacité est dynamique) ? */
+    public function optionAllowed(CardInstance $card, ActivatedAbility $ability, int $option): bool
+    {
+        $allowed = $this->allowedColors($card, $ability);
+
+        return $allowed === null || isset($allowed[$ability->options[$option][0]->symbol()]);
     }
 
     /** Contrôle-t-il un commandant sur le champ de bataille (Fierce Guardianship) ? */
@@ -285,7 +332,7 @@ final class PlayerState
     {
         $ids = [];
         foreach ($this->battlefield as $card) {
-            if ($card->tapped) {
+            if ($card->tapped && !$card->noUntap) {
                 $card->tapped = false;
                 $ids[] = $card->id;
             }

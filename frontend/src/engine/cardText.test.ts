@@ -35,5 +35,43 @@ describe('cardText', () => {
     ).toBe('inflige 2 dégâts, puis pioche 1')
     expect(abilityText({ isManaAbility: false, effect: 'draw', tap: true, manaCost: '{2}', amount: 1 })).toBe('{2}, {T} : pioche 1')
     expect(triggerText({ event: 'etb', effect: 'damage', amount: 2 })).toBe('Quand elle arrive en jeu : inflige 2 dégâts')
+    expect(triggerText({ event: 'draw_step', effect: 'self_damage', amount: 1, filter: 'tapped' })).toBe('Au début de ton étape de pioche, si elle est engagée : inflige 1 dégâts à son contrôleur')
+    expect(abilityText({ isManaAbility: false, effect: 'untap', tap: false, manaCost: '{4}', upkeepOnly: true })).toBe('{4} : se dégage (à ton entretien)')
+    expect(spellText(card({ effect: 'counter', effects: [{ effect: 'counter', payCost: '{1}' }] }))).toBe('contrecarre le sort ciblé sauf si son contrôleur paie {1}')
+    expect(spellText(card({ effect: 'counter', effects: [{ effect: 'counter', manaValue: 1 }] }))).toBe('contrecarre le sort ciblé de valeur de mana 1')
+    expect(
+      spellText(
+        card({
+          effect: 'counter',
+          effects: [{ effect: 'counter' }, { effect: 'pact', payCost: '{3}{U}{U}' }],
+        }),
+      ),
+    ).toBe('contrecarre le sort ciblé, puis à ton prochain entretien, paie {3}{U}{U} ou perds la partie')
+    expect(triggerText({ event: 'next_main', effect: 'mana', amount: 2 })).toBe('Au début de ta prochaine phase principale : ajoute {C}{C}')
+    expect(triggerText({ event: 'opponent_cast', effect: 'draw_unless', amount: 1, spec: '{1}' })).toBe("Quand un adversaire lance un sort : pioche 1 sauf s'il paie {1}")
+    expect(
+      spellText(
+        card({
+          effect: 'draw',
+          effects: [
+            { effect: 'draw', amount: 3 },
+            { effect: 'put_back', amount: 2 },
+          ],
+        }),
+      ),
+    ).toBe("pioche 3, puis remet 2 cartes de sa main sur le dessus de sa bibliothèque, dans l'ordre de son choix")
+    expect(
+      spellText(
+        card({
+          effect: 'arrange',
+          effects: [
+            { effect: 'arrange', amount: 3 },
+            { effect: 'draw', amount: 1 },
+          ],
+        }),
+      ),
+    ).toBe("regarde les 3 cartes du dessus et les remet dans l'ordre de son choix (ou mélange), puis pioche 1")
+    expect(triggerText({ event: 'next_upkeep', effect: 'pact', amount: 0, spec: '{3}{U}{U}' })).toBe('Au début de ton prochain entretien : paie {3}{U}{U} ou perd la partie')
+    expect(abilityText({ isManaAbility: true, effect: 'mana', tap: true, options: ['{W}', '{U}'], spec: 'oppland' })).toBe("{T} : un mana d'une couleur que produit un terrain adverse")
   })
 })

@@ -70,8 +70,24 @@ function effectText(effect: string, amount: number | undefined, spec?: string): 
       return 'cherche une carte dans sa bibliothèque et la met en main'
     case 'scry':
       return `regarde les ${n} cartes du dessus et en range une partie dessous`
+    case 'put_back':
+      return `remet ${n} cartes de sa main sur le dessus de sa bibliothèque, dans l'ordre de son choix`
+    case 'arrange':
+      return `regarde les ${n} cartes du dessus et les remet dans l'ordre de son choix (ou mélange)`
+    case 'draw_unless':
+      return `pioche ${n} sauf s'il paie ${spec ?? ''}`
     case 'pump':
       return spec ?? 'bonus'
+    case 'untap':
+      return 'se dégage'
+    case 'self_damage':
+      return `inflige ${n} dégâts à son contrôleur`
+    case 'imprint':
+      return 'exile une carte non-artefact et non-terrain de sa main (ses couleurs sont celles du mana produit)'
+    case 'pact':
+      return `paie ${spec ?? ''} ou perd la partie`
+    case 'mana':
+      return `ajoute ${'{C}'.repeat(amount ?? 0) || 'rien'}`
     default:
       return `${effect}${amount ? ` ${amount}` : ''}`
   }
@@ -81,8 +97,15 @@ export function abilityText(a: AbilityView): string {
   const cost = [a.manaCost, a.tap ? '{T}' : '', a.sacrifice ? 'sacrifier' : '', a.sacrificeCreature ? 'sacrifier une créature' : '', a.discard ? `défausser ${a.discard}` : '']
     .filter(Boolean)
     .join(', ')
-  const what = a.isManaAbility ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ') : effectText(a.effect, a.amount, a.spec)
-  return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}`
+  const what =
+    a.isManaAbility && a.spec === 'oppland'
+      ? "un mana d'une couleur que produit un terrain adverse"
+      : a.isManaAbility && a.spec === 'imprint'
+        ? "un mana d'une couleur de la carte exilée"
+        : a.isManaAbility
+          ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ')
+          : effectText(a.effect, a.amount, a.spec)
+  return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}${a.upkeepOnly ? ' (à ton entretien)' : ''}`
 }
 
 const triggerEvents: Record<string, string> = {
@@ -92,12 +115,16 @@ const triggerEvents: Record<string, string> = {
   attacks: 'Quand elle attaque',
   end_step: 'Au début de ta fin de tour',
   cast: 'Quand tu lances un sort',
+  opponent_cast: 'Quand un adversaire lance un sort',
   discard: 'Quand tu défausses une carte',
+  draw_step: 'Au début de ton étape de pioche',
+  next_upkeep: 'Au début de ton prochain entretien',
+  next_main: 'Au début de ta prochaine phase principale',
 }
 
 export function triggerText(t: TriggerView): string {
   const when = t.event === 'cast' && t.filter === 'instant_sorcery' ? 'Quand tu lances un éphémère ou un rituel' : (triggerEvents[t.event] ?? t.event)
-  return `${when} : ${effectText(t.effect, t.amount, t.spec)}`
+  return `${when}${t.filter === 'tapped' ? ', si elle est engagée' : ''} : ${effectText(t.effect, t.amount, t.spec)}`
 }
 
 /** Jeton créé pour le contrôleur du sort contré (Swan Song : « son contrôleur crée un jeton Bird 2/2 volant »). */
@@ -108,6 +135,17 @@ function counterTokenText(e: { effect: string; token?: string; tokenKeywords?: s
   return ` ; son contrôleur crée un jeton ${name} ${stats}${flying}`
 }
 
+/** Précisions d'un contresort (Daze, Mental Misstep, Force of Negation, Memory Lapse, Mana Drain). */
+function counterOptionsText(e: { effect: string; payCost?: string; manaValue?: number; counterTo?: string; drainMana?: boolean }): string {
+  if (e.effect !== 'counter') return ''
+  return [
+    e.manaValue !== undefined ? ` de valeur de mana ${e.manaValue}` : '',
+    e.payCost ? ` sauf si son contrôleur paie ${e.payCost}` : '',
+    e.counterTo === 'exile' ? ' (exilé)' : e.counterTo === 'library_top' ? ' (remis sur le dessus de la bibliothèque)' : '',
+    e.drainMana ? ' ; à ta prochaine phase principale, ajoute autant de {C} que sa valeur de mana' : '',
+  ].join('')
+}
+
 /** Effet d'un sort (dégâts, contre, pioche...), tel que le moteur le décrit. */
 export function spellText(card: PublicCard): string | null {
   const effects = card.effects ?? (card.effect ? [{ effect: card.effect, amount: card.amount, adds: card.adds }] : [])
@@ -116,7 +154,12 @@ export function spellText(card: PublicCard): string | null {
     .map((e) =>
       e.effect === 'mana'
         ? `ajoute ${Array.isArray(e.adds) ? e.adds.join('') : (e.adds ?? '')}`
-        : effectText(e.effect, e.amount, 'target' in e ? e.target : undefined) + ('powerLife' in e && e.powerLife ? ' (son contrôleur gagne autant de PV que sa force)' : '') + counterTokenText(e),
+        : e.effect === 'pact'
+          ? `à ton prochain entretien, paie ${'payCost' in e ? e.payCost : ''} ou perds la partie`
+          : effectText(e.effect, e.amount, 'target' in e ? e.target : undefined) +
+            ('powerLife' in e && e.powerLife ? ' (son contrôleur gagne autant de PV que sa force)' : '') +
+            counterOptionsText(e) +
+            counterTokenText(e),
     )
     .join(', puis ')
 }

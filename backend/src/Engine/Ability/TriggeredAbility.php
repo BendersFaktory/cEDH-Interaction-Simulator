@@ -15,9 +15,20 @@ use App\Engine\Game\CardInstance;
  * priorité ; `TriggerManager` la met alors sur la pile (ordre APNAP).
  *
  * Effets (même vocabulaire que `ActivatedAbility`) : `damage` (`amount` dégâts à un joueur ciblé), `draw` (piocher
- * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`) ou `treasure` (`amount` jetons Treasure).
+ * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`) ou `treasure` (`amount` jetons Treasure), `self_damage` (`amount` dégâts à son contrôleur) ou `imprint` (Chrome Mox : exiler une carte
+ * non-artefact non-terrain de sa main, choisie en mettant le trigger sur la pile — cible `card:<id>`, absente = ne rien exiler).
  *
- * Filtre (`filter`, seulement pour `cast`) : `''` = tout sort, `instant_sorcery` = éphémère ou rituel.
+ * `opponent_cast` (un adversaire de son contrôleur lance un sort ; le lanceur est retenu par `PendingTrigger::$opponent` et
+ * devient la cible `player:<id>` du trigger) avec l'effet `draw_unless` (Rhystic Study : son contrôleur pioche `amount` cartes
+ * sauf si le lanceur paie `spec`, décision du lanceur à la résolution comme Daze ; le « you may » est toujours choisi).
+ *
+ * Filtre (`filter`) : pour `cast`, `''` = tout sort, `instant_sorcery` = éphémère ou rituel ; pour les autres événements, `tapped` =
+ * seulement si la source est engagée (Mana Vault au début de l'étape de pioche).
+ *
+ * Triggers retardés (CR 603.7, créés par la résolution d'un sort, gardés dans `GameState::$delayedTriggers` jusqu'à leur
+ * événement, jamais portés par une carte) : `next_upkeep` (prochain entretien de son contrôleur) et `next_main` (début de sa
+ * prochaine phase principale). Effets : `pact` (payer `spec` ou perdre la partie, décision à la résolution) et `mana`
+ * (ajouter `amount` {C}, Mana Drain).
  *
  * Forme sérialisée (`toArray`) : `spec` et `filter` omis s'ils sont vides.
  */
@@ -29,14 +40,22 @@ final class TriggeredAbility
     public const ATTACKS = 'attacks';
     public const END_STEP = 'end_step';
     public const CAST = 'cast';
+    public const OPPONENT_CAST = 'opponent_cast';
     public const DISCARD = 'discard';
+    public const DRAW_STEP = 'draw_step';
+    /** Triggers retardés (voir l'en-tête). */
+    public const NEXT_UPKEEP = 'next_upkeep';
+    public const NEXT_MAIN = 'next_main';
 
     /** Filtre de `cast` : le sort lancé est un éphémère ou un rituel. */
     public const INSTANT_SORCERY = 'instant_sorcery';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::DISCARD];
-    private const EFFECTS = ['damage', 'draw', 'token', 'treasure'];
-    private const FILTERS = ['', self::INSTANT_SORCERY];
+    /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
+    public const TAPPED = 'tapped';
+
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::NEXT_UPKEEP, self::NEXT_MAIN];
+    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless'];
+    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED];
 
     public function __construct(
         public readonly string $event,
@@ -51,11 +70,15 @@ final class TriggeredAbility
         if (!in_array($effect, self::EFFECTS, true)) {
             throw new \InvalidArgumentException("Effet de trigger inconnu : $effect");
         }
-        if (!in_array($filter, self::FILTERS, true) || ($filter !== '' && $event !== self::CAST)) {
+        if (!in_array($filter, self::FILTERS, true) || ($filter === self::INSTANT_SORCERY && $event !== self::CAST)
+            || ($filter === self::TAPPED && $event === self::CAST)) {
             throw new \InvalidArgumentException("Filtre de trigger invalide : $filter ($event)");
         }
         if ($effect === 'token') {
             ActivatedAbility::parseTokenSpec($spec);
+        }
+        if (in_array($effect, ['pact', 'draw_unless'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)) {
+            throw new \InvalidArgumentException("Coût de pacte invalide : $spec");
         }
     }
 
@@ -66,6 +89,12 @@ final class TriggeredAbility
             self::INSTANT_SORCERY => $spell->hasType(CardInstance::INSTANT) || $spell->hasType(CardInstance::SORCERY),
             default => true,
         };
+    }
+
+    /** Choisit-elle une carte de la main du contrôleur en étant mise sur la pile (Chrome Mox) ? */
+    public function choosesHandCard(): bool
+    {
+        return $this->effect === 'imprint';
     }
 
     /** La capacité cible-t-elle un joueur (à choisir en la mettant sur la pile) ? */
@@ -84,13 +113,22 @@ final class TriggeredAbility
             self::ATTACKS => 'Quand elle attaque',
             self::END_STEP => 'Au début de votre étape de fin',
             self::CAST => $this->filter === self::INSTANT_SORCERY ? 'Quand vous lancez un éphémère ou un rituel' : 'Quand vous lancez un sort',
+            self::OPPONENT_CAST => 'Quand un adversaire lance un sort',
             self::DISCARD => 'Quand vous défaussez une carte',
-        };
+            self::DRAW_STEP => 'Au début de votre étape de pioche',
+            self::NEXT_UPKEEP => 'Au début de votre prochain entretien',
+            self::NEXT_MAIN => 'Au début de votre prochaine phase principale',
+        } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
         $what = match ($this->effect) {
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'treasure' => sprintf('%d Treasure', $this->amount),
+            'self_damage' => sprintf('%d dégât%s à vous', $this->amount, $this->amount > 1 ? 's' : ''),
+            'imprint' => 'exiler une carte de votre main (imprint)',
+            'pact' => sprintf('payer %s ou perdre la partie', $this->spec),
+            'draw_unless' => sprintf('piocher %d sauf s\'il paie %s', $this->amount, $this->spec),
+            'mana' => sprintf('ajouter %s', $this->amount > 0 ? str_repeat('{C}', $this->amount) : 'rien'),
         };
 
         return "$when : $what";

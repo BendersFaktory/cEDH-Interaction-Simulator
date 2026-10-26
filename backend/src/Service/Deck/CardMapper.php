@@ -41,6 +41,9 @@ final class CardMapper
         $name = (string) ($card['name'] ?? '');
         $fail = static fn (string $reason): UnsupportedCard => new UnsupportedCard($name, $reason);
 
+        if (($card['layout'] ?? 'normal') === 'split') {
+            throw $fail('carte scindée non modélisée (choix d\'une moitié au lancement)');
+        }
         if (($card['layout'] ?? 'normal') !== 'normal') {
             throw $fail('carte à plusieurs faces ou mise en page spéciale (' . ($card['layout'] ?? '?') . ')');
         }
@@ -68,6 +71,9 @@ final class CardMapper
         $keywords = [];
         foreach ($card['keywords'] ?? [] as $keyword) {
             $key = strtolower((string) $keyword);
+            if ($key === 'imprint' || $key === 'scry') {
+                continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … ») est traité ligne par ligne
+            }
             if (!isset(self::KEYWORDS[$key])) {
                 throw $fail("mot-clé non modélisé ($keyword)");
             }
@@ -80,6 +86,8 @@ final class CardMapper
         $produces = [];
         $abilities = [];
         $triggers = [];
+        $noUntap = false; // « ~ doesn't untap during your untap step. » (Mana Vault, Grim Monolith)
+        $upkeepUntap = null; // Mana Vault : « At the beginning of your upkeep, you may pay {N}. If you do, untap ~. »
         $tapPain = 0; // « Whenever ~ becomes tapped, it deals N damage to you. » (City of Brass)
         $hasX = str_contains($manaCost, '{X}');
 
@@ -97,13 +105,34 @@ final class CardMapper
                 $altCost = CardInstance::ALT_PITCH_BLUE; // Force of Will
             } elseif ($isSpell && $line === 'If you control a commander, you may cast ~ without paying its mana cost.') {
                 $altCost = CardInstance::ALT_COMMANDER; // Fierce Guardianship
+            } elseif ($isSpell && $line === 'If it\'s not your turn, you may exile a blue card from your hand rather than pay ~\'s mana cost.') {
+                $altCost = CardInstance::ALT_PITCH_BLUE_OFF_TURN; // Force of Negation
+            } elseif ($isSpell && preg_match('/^You may return (an Island|two Islands) you control to (?:its|their) owner\'s hand rather than pay ~\'s mana cost\.$/', $line, $m)) {
+                $altCost = CardInstance::ALT_RETURN_ISLANDS . ($m[1] === 'an Island' ? 1 : 2); // Daze, Gush
             } elseif ($isSpell && $line === 'Counter target noncreature spell.') {
                 $effects[] = new SpellEffect('counter', 0, null, 'noncreature');
+            } elseif ($isSpell && preg_match('/^Counter target (noncreature )?spell unless its controller pays ((?:\{\d+\})+)\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('counter', 0, null, $m[1] !== '' ? 'noncreature' : null, payCost: $m[2]); // Daze, Mana Leak, Spell Pierce
+            } elseif ($isSpell && preg_match('/^Counter target (noncreature )?spell\. If that spell is countered this way, exile it instead of putting it into its owner\'s graveyard\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('counter', 0, null, $m[1] !== '' ? 'noncreature' : null, counterTo: SpellEffect::COUNTER_EXILE); // Force of Negation
+            } elseif ($isSpell && $line === 'Counter target spell. If that spell is countered this way, put it on top of its owner\'s library instead of into that player\'s graveyard.') {
+                $effects[] = new SpellEffect('counter', counterTo: SpellEffect::COUNTER_LIBRARY_TOP); // Memory Lapse
+            } elseif ($isSpell && preg_match('/^Counter target spell with mana value (\d+)\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('counter', manaValue: (int) $m[1]); // Mental Misstep
+            } elseif ($isSpell && $line === 'Counter target spell. At the beginning of your next main phase, add an amount of {C} equal to that spell\'s mana value.') {
+                $effects[] = new SpellEffect('counter', drainMana: true); // Mana Drain
+            } elseif ($isSpell && preg_match('/^At the beginning of your next upkeep, pay ((?:\{(?:\d+|[WUBRGC])\})+)\. If you don\'t, you lose the game\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('pact', payCost: $m[1]); // Pact of Negation
             } elseif ($isSpell && preg_match('/^Scry (\d+)\.$/', $line, $m)) {
                 $effects[] = new SpellEffect('scry', (int) $m[1]);
             } elseif ($isSpell && preg_match('/^Scry (\d+), then draw a card\.$/', $line, $m)) {
                 $effects[] = new SpellEffect('scry', (int) $m[1]); // Preordain : le rangement précède la pioche
                 $effects[] = new SpellEffect('draw', 1);
+            } elseif ($isSpell && preg_match('/^Draw (a card|one card|two cards|three cards|four cards), then put (one|two|three) cards? from your hand on top of your library in any order\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('draw', self::DRAW_COUNT[$m[1]]); // Brainstorm
+                $effects[] = new SpellEffect('put_back', self::NUMBER[$m[2]]);
+            } elseif ($isSpell && preg_match('/^Look at the top (two|three|four) cards of your library, then put them back in any order\. You may shuffle\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('arrange', self::NUMBER[$m[1]]); // Ponder (la pioche est sur la ligne suivante)
             } elseif ($isSpell && $line === 'Search your library for a card, put that card into your hand, then shuffle.') {
                 $effects[] = new SpellEffect('tutor'); // Demonic Tutor
             } elseif ($isSpell && preg_match('/^Search your library for (?:a card|an? (creature|artifact or enchantment|instant or sorcery) card)(?:, reveal it)?, then shuffle and put (?:that card|the card) on top\.( You lose 2 life\.)?$/', $line, $m)) {
@@ -121,6 +150,20 @@ final class CardMapper
                 $effects[] = new SpellEffect('counter', 0, null, implode('|', [CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY]), false, 'Bird:2/2', [CardInstance::FLYING]); // Swan Song
             } elseif ($isSpell && $line === 'Exile target creature. Its controller gains life equal to its power.') {
                 $effects[] = new SpellEffect('exile', 0, null, 'creature', true); // Swords to Plowshares
+            } elseif (!$isSpell && !$isLand && $line === "~ doesn't untap during your untap step.") {
+                $noUntap = true;
+            } elseif (!$isSpell && !$isLand && preg_match('/^At the beginning of your upkeep, you may pay ((?:\{\d+\})+)\. If you do, untap ~\.$/', $line, $m)) {
+                $upkeepUntap = $m[1]; // le paiement à l'entretien est modélisé par une capacité `{N}: dégager`, activable à l'entretien seulement
+            } elseif (!$isSpell && !$isLand && preg_match('/^(\{\d+\}): Untap ~\.$/', $line, $m)) {
+                $abilities[] = ActivatedAbility::untap($m[1]); // Grim Monolith
+            } elseif (!$isSpell && !$isLand && preg_match('/^At the beginning of your draw step, if ~ is tapped, it deals (\d+) damage to you\.$/', $line, $m)) {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::DRAW_STEP, 'self_damage', (int) $m[1], filter: TriggeredAbility::TAPPED); // Mana Vault
+            } elseif (!$isSpell && !$isLand && preg_match('/^Imprint — When ~ enters, you may exile a nonartifact, nonland card from your hand\.$/u', $line)) {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::ETB, 'imprint'); // Chrome Mox
+            } elseif (!$isSpell && $line === '{T}: Add one mana of any of the exiled card\'s colors.') {
+                $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_IMPRINT);
+            } elseif (!$isSpell && $line === '{T}: Add one mana of any color that a land an opponent controls could produce.') {
+                $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_OPPONENT_LAND); // Fellwar Stone, Exotic Orchard
             } elseif ($isLand && preg_match('/^Whenever ~ becomes tapped, it deals (\d+) damage to you\.$/', $line, $m)) {
                 $tapPain = (int) $m[1]; // City of Brass : équivaut à des dégâts à soi sur sa capacité de mana (elle seule l'engage)
             } elseif ($isSpell && preg_match('/^Add ((?:\{[WUBRG]\})+)\.$/', $line, $m)) {
@@ -152,6 +195,9 @@ final class CardMapper
         if ($isSpell && $effects === []) {
             throw $fail('sort sans effet modélisé');
         }
+        if ($upkeepUntap !== null) {
+            $abilities[] = ActivatedAbility::untap($upkeepUntap, upkeepOnly: true);
+        }
         if ($tapPain > 0) {
             // Le seul moyen d'engager le terrain est sa capacité de mana : le trigger devient un `selfDamage` (sans pile, CR 605.3b
             // le laisse en réalité sur la pile, mais rien ne peut y répondre entre l'engagement et les dégâts ici).
@@ -173,7 +219,7 @@ final class CardMapper
         return new CardDefinition(
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
             null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
-            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost, $altCost,
+            in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost, $altCost, $noUntap,
         );
     }
 
@@ -224,6 +270,7 @@ final class CardMapper
     }
 
     private const DRAW_COUNT = ['a card' => 1, 'one card' => 1, 'two cards' => 2, 'three cards' => 3, 'four cards' => 4];
+    private const NUMBER = ['one' => 1, 'two' => 2, 'three' => 3, 'four' => 4];
 
     /**
      * Capacité activée à coût (hors `{T}: Add …` seul, traité avant) : coûts séparés par des virgules parmi mana générique /
@@ -311,6 +358,9 @@ final class CardMapper
         }
         if (preg_match('/^When ~ enters, create (a|one|two|three) Treasure tokens?\.$/', $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::ETB, 'treasure', ['a' => 1, 'one' => 1, 'two' => 2, 'three' => 3][$m[1]]);
+        }
+        if (preg_match('/^Whenever an opponent casts a spell, you may draw a card unless that player pays ((?:\{\d+\})+)\.$/', $line, $m)) {
+            return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw_unless', 1, $m[1]); // Rhystic Study (« you may » : toujours)
         }
         if ($isCreature && preg_match('/^When ~ dies' . $draw, $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::DIES, 'draw', self::DRAW_COUNT[$m[1]]);

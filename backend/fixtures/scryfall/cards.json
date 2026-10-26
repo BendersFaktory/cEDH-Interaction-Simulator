@@ -498,15 +498,6 @@
         "keywords": []
     },
     {
-        "name": "Preordain",
-        "layout": "normal",
-        "type_line": "Sorcery",
-        "mana_cost": "{U}",
-        "cmc": 1,
-        "oracle_text": "Scry 2, then draw a card.",
-        "keywords": []
-    },
-    {
         "name": "Ambush Viper",
         "layout": "normal",
         "type_line": "Creature — Snake",
@@ -584,5 +575,23 @@
         "cmc": 1,
         "oracle_text": "Search your library for a card, then shuffle and put that card on top. You lose 2 life.",
         "keywords": []
-    }
+    },
+    {"name": "Mana Vault", "layout": "normal", "type_line": "Artifact", "mana_cost": "{1}", "cmc": 1, "oracle_text": "This artifact doesn't untap during your untap step.\nAt the beginning of your upkeep, you may pay {4}. If you do, untap this artifact.\nAt the beginning of your draw step, if this artifact is tapped, it deals 1 damage to you.\n{T}: Add {C}{C}{C}.", "keywords": []},
+    {"name": "Grim Monolith", "layout": "normal", "type_line": "Artifact", "mana_cost": "{2}", "cmc": 2, "oracle_text": "This artifact doesn't untap during your untap step.\n{T}: Add {C}{C}{C}.\n{4}: Untap this artifact.", "keywords": []},
+    {"name": "Chrome Mox", "layout": "normal", "type_line": "Artifact", "mana_cost": "{0}", "cmc": 0, "oracle_text": "Imprint — When this artifact enters, you may exile a nonartifact, nonland card from your hand.\n{T}: Add one mana of any of the exiled card's colors.", "keywords": ["Imprint"]},
+    {"name": "Fellwar Stone", "layout": "normal", "type_line": "Artifact", "mana_cost": "{2}", "cmc": 2, "oracle_text": "{T}: Add one mana of any color that a land an opponent controls could produce.", "keywords": []},
+    {"name": "Exotic Orchard", "layout": "normal", "type_line": "Land", "mana_cost": "", "cmc": 0, "oracle_text": "{T}: Add one mana of any color that a land an opponent controls could produce.", "keywords": []},
+    {"name": "Fire // Ice", "layout": "split", "type_line": "Instant // Instant", "mana_cost": "{1}{R} // {1}{U}", "cmc": 4, "oracle_text": null, "keywords": []},
+    {"name":"Force of Negation","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}{U}","cmc":3,"oracle_text":"If it's not your turn, you may exile a blue card from your hand rather than pay this spell's mana cost.\nCounter target noncreature spell. If that spell is countered this way, exile it instead of putting it into its owner's graveyard.","keywords":[]},
+    {"name":"Mental Misstep","layout":"normal","type_line":"Instant","mana_cost":"{U/P}","cmc":1,"oracle_text":"({U/P} can be paid with either {U} or 2 life.)\nCounter target spell with mana value 1.","keywords":[]},
+    {"name":"Mana Drain","layout":"normal","type_line":"Instant","mana_cost":"{U}{U}","cmc":2,"oracle_text":"Counter target spell. At the beginning of your next main phase, add an amount of {C} equal to that spell's mana value.","keywords":[]},
+    {"name":"Memory Lapse","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"Counter target spell. If that spell is countered this way, put it on top of its owner's library instead of into that player's graveyard.","keywords":[]},
+    {"name":"Mana Leak","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"Counter target spell unless its controller pays {3}.","keywords":[]},
+    {"name":"Daze","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"You may return an Island you control to its owner's hand rather than pay this spell's mana cost.\nCounter target spell unless its controller pays {1}.","keywords":[]},
+    {"name":"Gush","layout":"normal","type_line":"Instant","mana_cost":"{4}{U}","cmc":5,"oracle_text":"You may return two Islands you control to their owner's hand rather than pay this spell's mana cost.\nDraw two cards.","keywords":[]},
+    {"name":"Pact of Negation","layout":"normal","type_line":"Instant","mana_cost":"{0}","cmc":0,"oracle_text":"Counter target spell.\nAt the beginning of your next upkeep, pay {3}{U}{U}. If you don't, you lose the game.","keywords":[]},
+    {"name":"Brainstorm","layout":"normal","type_line":"Instant","mana_cost":"{U}","cmc":1,"oracle_text":"Draw three cards, then put two cards from your hand on top of your library in any order.","keywords":[]},
+    {"name":"Ponder","layout":"normal","type_line":"Sorcery","mana_cost":"{U}","cmc":1,"oracle_text":"Look at the top three cards of your library, then put them back in any order. You may shuffle.\nDraw a card.","keywords":[]},
+    {"name":"Preordain","layout":"normal","type_line":"Sorcery","mana_cost":"{U}","cmc":1,"oracle_text":"Scry 2, then draw a card. (To scry 2, look at the top two cards of your library, then put any number of them on the bottom and the rest on top in any order.)","keywords":["Scry"]},
+    {"name":"Rhystic Study","layout":"normal","type_line":"Enchantment","mana_cost":"{2}{U}","cmc":3,"oracle_text":"Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.","keywords":[]}
 ]

@@ -150,6 +150,31 @@ final class CardCatalogTest extends KernelTestCase
         self::assertCount(1, $this->em->getRepository(CardCache::class)->findAll());
     }
 
+    public function testFullNameOfASplitCardIsAskedByItsFrontFace(): void
+    {
+        // Scryfall répond « introuvable » à « Fire // Ice » mais trouve « Fire » : le client demande la première face.
+        $fire = ['name' => 'Fire // Ice', 'layout' => 'split'];
+        $h = static fn (array $names): MockResponse => new MockResponse(
+            json_encode($names === ['Fire'] ? ['data' => [$fire], 'not_found' => []] : ['data' => [], 'not_found' => array_map(static fn (string $n): array => ['name' => $n], $names)]),
+            ['response_headers' => ['content-type: application/json']],
+        );
+
+        $result = $this->catalog($h)->get(['Fire // Ice']);
+
+        self::assertSame([['Fire']], array_column($this->requests, 'names'));
+        self::assertSame(['Fire // Ice'], array_keys($result['cards']));
+        self::assertSame([], $result['missing']);
+    }
+
+    public function testNotFoundIsReportedUnderTheRequestedFullName(): void
+    {
+        $http = new MockHttpClient(new MockResponse(json_encode(['data' => [], 'not_found' => [['name' => 'Ghost']]]), ['response_headers' => ['content-type: application/json']]));
+
+        $result = (new ScryfallClient($http, 0))->fetchCollection(['Ghost // Card']);
+
+        self::assertSame(['Ghost // Card'], $result['not_found']);
+    }
+
     public function testClientReturnsNotFoundNames(): void
     {
         $http = new MockHttpClient(new MockResponse(json_encode([
