@@ -6,6 +6,7 @@ namespace App\Engine\Game;
 
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
+use App\Engine\Card\ReplacementEffect;
 use App\Engine\Event\GameEvent;
 
 /**
@@ -62,8 +63,10 @@ final class GameState
      * quitté la pile. Sérialisé sous `selection`, omis quand null.
      *
      * Chain of Vapor (kind `chain`) : `card` = le sort à copier (forme `CardInstance::toArray()`), une décision `ChainCopy`.
+     * Effet de remplacement d'entrée (kind `replace`, Mox Diamond) : `card` = le permanent qui devait arriver, `owner` son
+     * propriétaire s'il n'est pas `player`, une décision `ReplaceChoice` (voir `replaceEntering()`).
      *
-     * @var array{player: int, kind: string, count: int, source: string, draw: int, card?: array<string, mixed>}|null
+     * @var array{player: int, kind: string, count: int, source: string, draw: int, card?: array<string, mixed>, owner?: int}|null
      */
     public ?array $selection = null;
     /**
@@ -660,6 +663,67 @@ final class GameState
         $this->emit('CardsMilled', ['player' => $playerId, 'cards' => array_map(static fn (CardInstance $c) => $c->toPublic(), $milled), 'library' => count($p->library), 'source' => $source]);
     }
 
+    /**
+     * Effet de remplacement (CR 614) qui s'applique à `$card` pour l'événement `$event` (`ReplacementEffect::ENTERS`), ou null.
+     * Seuls les remplacements « de soi » de la carte existent (CR 614.15, Mox Diamond) ; ceux d'autres permanents (Necropotence,
+     * Opposition Agent) se chercheront ici, sur les champs de bataille.
+     */
+    public function replacementFor(CardInstance $card, string $event): ?ReplacementEffect
+    {
+        foreach ($card->replacements as $replacement) {
+            if ($replacement->event === $event) {
+                return $replacement;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Applique le remplacement d'entrée `$replacement` à `$card`, un permanent qui devait arriver sous le contrôle de
+     * `$playerId` (déjà hors de toute zone). Mox Diamond : avec une carte de terrain en main, le joueur choisit au milieu de la
+     * résolution (`$selection`, kind `replace`, décision `ReplaceChoice` : `finishReplacement()`) ; sans terrain, la carte va
+     * directement au cimetière (`ReplacementApplied`).
+     */
+    public function replaceEntering(int $playerId, int $ownerId, CardInstance $card, ReplacementEffect $replacement): void
+    {
+        $lands = array_filter($this->player($playerId)->hand, static fn (CardInstance $c) => $c->isLand());
+        if ($replacement->instead === ReplacementEffect::DISCARD_LAND && $lands !== []) {
+            $this->selection = ['player' => $playerId, 'kind' => 'replace', 'count' => 1, 'source' => $card->name, 'draw' => 0, 'card' => $card->toArray()]
+                + ($ownerId === $playerId ? [] : ['owner' => $ownerId]);
+
+            return;
+        }
+        $this->finishReplacement($playerId, $ownerId, $card, null);
+    }
+
+    /**
+     * Fin d'un remplacement d'entrée : `$discard` (id d'une carte de terrain de la main) est défaussé et la carte arrive sur le
+     * champ de bataille (ses triggers d'entrée se déclenchent) ; sans défausse, elle va au cimetière de son propriétaire `$ownerId`.
+     */
+    public function finishReplacement(int $playerId, int $ownerId, CardInstance $card, ?string $discard): void
+    {
+        $discarded = null;
+        if ($discard !== null) {
+            $land = $this->player($playerId)->findInHand($discard);
+            if ($land === null || !$land->isLand()) {
+                throw new \DomainException("Carte de terrain à défausser absente de la main : $discard");
+            }
+            $discarded = $land->toPublic();
+            $this->discard($playerId, $discard);
+            $this->enterBattlefield($playerId, $card);
+            $destination = 'battlefield';
+        } else {
+            $destination = $this->sendToGraveyard($ownerId, $card);
+        }
+        $this->emit('ReplacementApplied', [
+            'player' => $playerId,
+            'card' => $card->toPublic(),
+            'event' => ReplacementEffect::ENTERS,
+            'destination' => $destination,
+        ] + ($ownerId === $playerId ? [] : ['owner' => $ownerId]) + ($discarded === null ? [] : ['discarded' => $discarded]));
+    }
+
     public function enterBattlefield(int $playerId, CardInstance $card): void
     {
         $card->enteredTurn = $this->turn;
@@ -909,7 +973,7 @@ final class GameState
         if (isset($d['selection'])) {
             $sel = $d['selection'];
             $s->selection = ['player' => (int) $sel['player'], 'kind' => (string) $sel['kind'], 'count' => (int) $sel['count'], 'source' => (string) $sel['source'], 'draw' => (int) $sel['draw']]
-                + (isset($sel['card']) ? ['card' => $sel['card']] : []);
+                + (isset($sel['card']) ? ['card' => $sel['card']] : []) + (isset($sel['owner']) ? ['owner' => (int) $sel['owner']] : []);
         }
         $s->delayedTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['delayedTriggers'] ?? []);
         foreach ($d['spellsCast'] ?? [] as $id => $count) {

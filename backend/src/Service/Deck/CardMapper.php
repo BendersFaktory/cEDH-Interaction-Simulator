@@ -7,6 +7,7 @@ namespace App\Service\Deck;
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Card\CardDefinition;
+use App\Engine\Card\ReplacementEffect;
 use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
 use App\Engine\Mana\ManaRestriction;
@@ -94,6 +95,7 @@ final class CardMapper
         $tappedAfterOwnTurn = 0; // Starting Town
         $modal = null; // « Choose one — » : numéro du dernier mode lu
         $statics = [];
+        $replacements = []; // effets de remplacement « de soi » (Mox Diamond)
         $kicker = null; // « Kicker {W} » (Orim's Chant)
         $gift = null; // « Gift a tapped Fish » : jeton promis (Into the Flood Maw)
 
@@ -152,6 +154,8 @@ final class CardMapper
                 $statics[] = CardInstance::STATIC_OPPONENTS_MV_LANDS; // Lavinia, Azorius Renegade
             } elseif (!$isSpell && !$isLand && $line === 'Your opponents can\'t cast spells during your turn.') {
                 $statics[] = CardInstance::STATIC_OPPONENTS_NO_CAST_YOUR_TURN; // Voice of Victory
+            } elseif (!$isSpell && $line === 'If ~ would enter, you may discard a land card instead. If you do, put ~ onto the battlefield. If you don\'t, put it into its owner\'s graveyard.') {
+                $replacements[] = new ReplacementEffect(ReplacementEffect::ENTERS, ReplacementEffect::DISCARD_LAND); // Mox Diamond
             } elseif ($isCreature && preg_match('/^Mobilize (\d+)$/', $line, $m)) {
                 $triggers[] = new TriggeredAbility(TriggeredAbility::ATTACKS, 'mobilize', (int) $m[1]); // Voice of Victory
             } elseif ($isSpell && preg_match('/^~ deals (\d+|X) damage to any target\.$/', $line, $m)) {
@@ -323,7 +327,7 @@ final class CardMapper
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
             null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
             in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost, $altCost, $noUntap,
-            $extraCost, $tappedAfterOwnTurn, $statics, $kicker,
+            $extraCost, $tappedAfterOwnTurn, $statics, $kicker, $replacements,
         );
     }
 

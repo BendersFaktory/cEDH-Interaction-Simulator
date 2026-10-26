@@ -514,3 +514,32 @@ describe('reducer — pile et restrictions (lot H3)', () => {
     expect(v.players[1].battlefield[0].attacking).toBeUndefined()
   })
 })
+
+describe('reducer — effets de remplacement (Mox Diamond)', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const mox: PublicCard = { id: 'mox', name: 'Mox Diamond', type: 'artifact', cost: 0, effect: null, amount: 0 }
+  const island: PublicCard = { id: 'i1', name: 'Island', type: 'land', cost: 0, effect: null, amount: 0 }
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 10, controller: 'h' },
+          { id: 1, life: 40, library: 10, controller: 'ai' },
+        ],
+      }),
+    ])
+
+  it('SpellResolved vers `replaced` ne pose rien ; ReplacementApplied pose la carte sur le champ de bataille ou au cimetière', () => {
+    const v = start()
+    v.stack.push({ id: 's1', card: mox, controller: 0, targets: [] })
+    applyEvent(v, ev(2, 'SpellResolved', { stackId: 's1', card: mox, controller: 0, destination: 'replaced' }))
+    expect(v.stack).toEqual([])
+    expect(v.players[0].battlefield).toEqual([])
+    expect(v.players[0].graveyard).toEqual([])
+    applyEvent(v, ev(3, 'ReplacementApplied', { player: 0, card: mox, event: 'enters', destination: 'battlefield', discarded: island }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['mox'])
+    applyEvent(v, ev(4, 'ReplacementApplied', { player: 0, owner: 1, card: { ...mox, id: 'mox2' }, event: 'enters', destination: 'graveyard' }))
+    expect(v.players[1].graveyard.map((c) => c.id)).toEqual(['mox2'])
+  })
+})

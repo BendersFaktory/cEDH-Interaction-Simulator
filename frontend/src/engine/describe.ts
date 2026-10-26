@@ -86,6 +86,8 @@ export function describeEvent(e: GameEvent): string {
       const where: Record<string, string> = { command: ' et retourne en zone de commandement', exile: ' et exilé', library: ' et remis sur le dessus de la bibliothèque' }
       return `${p.card.name} (J${p.controller}) est contré${where[p.destination] ?? ''}`
     }
+    case 'ReplacementApplied':
+      return p.discarded ? `J${p.player} défausse ${p.discarded.name} : ${p.card.name} arrive sur le champ de bataille` : `${p.card.name} (J${p.player}) : aucun terrain défaussé, va au cimetière`
     case 'SpellCopied': {
       const t = (p.targets as string[]).map(target).join(', ')
       return `J${p.player} copie ${p.card.name} (${p.source})${t ? ` → ${t}` : ''}`

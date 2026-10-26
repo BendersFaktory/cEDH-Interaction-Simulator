@@ -37,6 +37,7 @@ const groups = computed(() => {
     { title: 'Remettre une carte de ta main sur ta bibliothèque', items: actions.filter((a) => a.type === 'putBack') },
     { title: 'Remettre les cartes du dessus dans l’ordre, ou mélanger', items: actions.filter((a) => a.type === 'arrange') },
     { title: 'Chain of Vapor : sacrifier un terrain pour copier le sort ?', items: actions.filter((a) => a.type === 'chain') },
+    { title: 'Effet de remplacement : défausser un terrain ?', items: actions.filter((a) => a.type === 'replace') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },

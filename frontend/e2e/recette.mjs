@@ -78,6 +78,8 @@ const DECK_G = DECK_21.replace('44 Plains', '1 Chrome Mox\n1 Brainstorm\n1 Ponde
 const DECK_G_J1 = DECK_21.replace('44 Plains', '1 Daze\n1 Rhystic Study\n42 Plains')
 // Scénario 39 (lot H4) : J0 avec Mystic Remora à la place de Divination.
 const DECK_REMORA = DECK_21.replace('1 Divination', '1 Mystic Remora')
+// Scénario 40 (effets de remplacement) : J0 avec Mox Diamond à la place de Divination.
+const DECK_MOX = DECK_21.replace('1 Divination', '1 Mox Diamond')
 const J0_J1_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
 const T0 = Date.now()
 try {
@@ -246,6 +248,7 @@ async function run() {
     ['37', (b) => scenario(b, '37', s37)],
     ['38', (b) => scenario(b, '38', s38)],
     ['39', (b) => scenario(b, '39', s39)],
+    ['40', (b) => scenario(b, '40', s40)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1902,4 +1905,27 @@ async function s39({ page, log, shot, problem, openGame }) {
   if (!refused.includes('la sacrifier')) problem(`recette Mystic Remora : le refus n'annonce pas le sacrifice (« ${refused} »)`)
   if (!line.includes('J0 sacrifie Mystic Remora')) problem(`recette Mystic Remora : sacrifice absent du journal (« ${line} »)`)
   if (age?.payload.count !== 1) problem('recette Mystic Remora : aucun marqueur d’âge posé avant le sacrifice')
+}
+
+// 40 : EFFET DE REMPLACEMENT (Mox Diamond). J0 lance Mox Diamond ; à sa résolution, il défausse une carte de terrain de sa main
+// à la place de l'arrivée, et le Mox arrive sur le champ de bataille.
+async function s40({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_MOX),
+    (p) => (p.actions.some((a) => a.type === 'replace') ? 'stop' : (castOf(p.actions, 'Mox Diamond') ?? null)),
+    { card: 'Mox Diamond' },
+  )
+  if (!found) return problem('recette Mox Diamond : aucune graine où J0 lance Mox Diamond avec un terrain en main')
+  log('40 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('40a-mox-choix')
+  const label = await clickIn(page, 'Effet de remplacement', /^\s*Défausser /)
+  const line = await logLine(page, 'Mox Diamond arrive sur le champ de bataille')
+  const events = await api.events(found.sim.id)
+  const applied = events.filter((e) => e.type === 'ReplacementApplied').at(-1)
+  log('40 choix :', label, '| journal :', line, '| destination :', applied?.payload.destination)
+  await shot('40b-mox-pose')
+  if (!label.startsWith('Défausser')) problem(`recette Mox Diamond : choix inattendu (« ${label} »)`)
+  if (!line.includes('Mox Diamond arrive sur le champ de bataille')) problem(`recette Mox Diamond : arrivée absente du journal (« ${line} »)`)
+  if (applied?.payload.destination !== 'battlefield' || !applied?.payload.discarded) problem('recette Mox Diamond : ReplacementApplied sans arrivée ni terrain défaussé')
 }

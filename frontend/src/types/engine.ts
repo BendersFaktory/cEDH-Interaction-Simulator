@@ -148,6 +148,7 @@ export interface ActionView {
     | 'putBack'
     | 'arrange'
     | 'chain'
+    | 'replace'
   player: number
   cardId?: string
   targets?: string[]

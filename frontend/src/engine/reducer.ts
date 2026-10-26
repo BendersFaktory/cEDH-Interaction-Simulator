@@ -32,6 +32,7 @@ function zoneOf(pl: PlayerView, destination: string): BoardCard[] | null {
     case 'exile':
       return pl.exile
     case 'none':
+    case 'replaced': // effet de remplacement en attente : la carte arrive avec `ReplacementApplied`
       return null
     default:
       return pl.graveyard
@@ -209,6 +210,14 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.stack = v.stack.filter((i) => i.id !== p.stackId)
       // Une copie cesse d'exister (`none`) ; un sort volé (Commandeer) va chez son propriétaire (`owner`).
       zoneOf(v.players[p.owner ?? p.controller], p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'ReplacementApplied': {
+      // Mox Diamond : le permanent sorti de la pile arrive chez son contrôleur, ou va au cimetière de son propriétaire. La
+      // défausse du terrain a son propre `CardDiscarded`.
+      const to = p.destination === 'battlefield' ? p.player : (p.owner ?? p.player)
+      zoneOf(v.players[to], p.destination)?.push(board(p.card))
       break
     }
 

@@ -23,6 +23,8 @@ use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
 use App\Engine\Action\PutBack;
 use App\Engine\Action\PutTrigger;
+use App\Engine\Action\ReplaceChoice;
+use App\Engine\Card\ReplacementEffect;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 use App\Engine\Game\Phase;
@@ -383,6 +385,22 @@ final class HeuristicAgent implements PlayerAgent
      */
     private function selectionDecision(GameState $state, int $playerId, array $legal): Action
     {
+        // Mox Diamond : défausser le terrain le plus en double dans la main (le premier à égalité) plutôt que perdre le Mox.
+        $replaces = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ReplaceChoice && $a->discardId !== null));
+        if ($replaces !== []) {
+            $hand = $state->player($playerId)->hand;
+            $copies = array_count_values(array_map(static fn (CardInstance $c) => $c->name, array_filter($hand, static fn (CardInstance $c) => $c->isLand())));
+            $best = $replaces[0];
+            foreach ($replaces as $r) {
+                $name = $state->player($playerId)->findInHand((string) $r->discardId)?->name;
+                $bestName = $state->player($playerId)->findInHand((string) $best->discardId)?->name;
+                if (($copies[$name] ?? 0) > ($copies[$bestName] ?? 0)) {
+                    $best = $r;
+                }
+            }
+
+            return $best;
+        }
         $putBacks = array_values(array_filter($legal, static fn (Action $a) => $a instanceof PutBack));
         if ($putBacks !== []) {
             return $this->discard($state, $putBacks, $playerId);
@@ -1473,6 +1491,15 @@ final class HeuristicAgent implements PlayerAgent
     private function aiSkips(GameState $state, CastSpell $action): bool
     {
         $card = $state->player($action->player())->findCastable($action->cardId);
+
+        if ($card !== null && $state->replacementFor($card, ReplacementEffect::ENTERS)?->instead === ReplacementEffect::DISCARD_LAND) {
+            // Mox Diamond : seulement avec un terrain à perdre (deux en main, ou un avec déjà trois terrains en jeu).
+            $p = $state->player($action->player());
+            $inHand = count(array_filter($p->hand, static fn (CardInstance $c) => $c->isLand()));
+            $inPlay = count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isLand()));
+
+            return !($inHand >= 2 || ($inHand >= 1 && $inPlay >= 3));
+        }
 
         return $card !== null && ($card->isModal() || $card->extraCost !== null || $card->hasEffect('bounce') || $card->hasEffect('destroy') || $card->hasEffect('grant_sac_mana')
             || $card->hasEffect('redirect') || $card->hasEffect('steal') || $card->hasEffect('exile_spells'));

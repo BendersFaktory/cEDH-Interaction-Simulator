@@ -120,3 +120,13 @@ describe('describeEvent — lot H3', () => {
     expect(describeEvent(e('TokenCreated', { player: 0, card: { name: 'Warrior' }, tapped: true, attacking: 2 }))).toBe('J0 crée un jeton Warrior engagé qui attaque J2')
   })
 })
+
+describe('describeEvent — effets de remplacement', () => {
+  const e = (type: string, payload: Record<string, unknown>): GameEvent => ({ seq: 1, type, verbose: false, payload })
+  it('Mox Diamond : terrain défaussé ou cimetière', () => {
+    expect(describeEvent(e('ReplacementApplied', { player: 0, card: { name: 'Mox Diamond' }, destination: 'battlefield', discarded: { name: 'Island' } }))).toBe(
+      'J0 défausse Island : Mox Diamond arrive sur le champ de bataille',
+    )
+    expect(describeEvent(e('ReplacementApplied', { player: 2, card: { name: 'Mox Diamond' }, destination: 'graveyard' }))).toBe('Mox Diamond (J2) : aucun terrain défaussé, va au cimetière')
+  })
+})

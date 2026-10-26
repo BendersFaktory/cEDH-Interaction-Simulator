@@ -11,6 +11,7 @@ use App\Engine\Action\ActivateAbility;
 use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\ChainCopy;
+use App\Engine\Action\ReplaceChoice;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
@@ -135,6 +136,11 @@ final class PriorityManager
 
             if ($action instanceof ChainCopy) {
                 $this->chainCopy($s, $action);
+                continue;
+            }
+
+            if ($action instanceof ReplaceChoice) {
+                $this->replaceChoice($s, $action);
                 continue;
             }
 
@@ -301,6 +307,21 @@ final class PriorityManager
             $s->stack[] = $item;
             $s->emit('SpellCopied', ['player' => $a->player(), 'card' => $card->toPublic(), 'stackId' => $item->id, 'targets' => $item->targets, 'source' => $sel['source']]);
         }
+        $this->finishSelection($s);
+    }
+
+    /**
+     * Effet de remplacement d'entrée (Mox Diamond) : le terrain choisi est défaussé et le permanent arrive, ou il va au cimetière
+     * (`GameState::finishReplacement()`). Puis la sélection se termine.
+     */
+    private function replaceChoice(GameState $s, ReplaceChoice $a): void
+    {
+        $sel = $s->selection ?? throw new \LogicException('Aucune sélection en cours');
+        $source = $sel['card'] ?? throw new \LogicException('Permanent remplacé absent de la sélection');
+        if ($a->discardId !== null && !($s->player($a->player())->findInHand($a->discardId)?->isLand() ?? false)) {
+            throw new IllegalActionException('Carte de terrain à défausser absente de la main');
+        }
+        $s->finishReplacement($a->player(), $sel['owner'] ?? $a->player(), CardInstance::fromArray($source), $a->discardId);
         $this->finishSelection($s);
     }
 

@@ -6,6 +6,7 @@ namespace App\Engine\Rules;
 
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
+use App\Engine\Card\ReplacementEffect;
 use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
@@ -152,8 +153,12 @@ final class StackResolver
         }
 
         // Permanent -> champ de bataille ; sinon cimetière de son propriétaire. Une copie cesse d'exister (CR 707.10a).
+        // Un effet de remplacement d'entrée (CR 614, Mox Diamond) : destination `replaced`, appliqué après `SpellResolved`.
+        $replacement = null;
         if ($item->copy) {
             $destination = 'none';
+        } elseif ($card->isPermanent() && ($replacement = $s->replacementFor($card, ReplacementEffect::ENTERS)) !== null) {
+            $destination = 'replaced';
         } elseif ($card->isPermanent()) {
             $s->enterBattlefield($item->controller, $card);
             $destination = 'battlefield';
@@ -167,6 +172,9 @@ final class StackResolver
             'controller' => $item->controller,
             'destination' => $destination,
         ] + ($item->ownerId() !== $item->controller ? ['owner' => $item->ownerId()] : []));
+        if ($replacement !== null) {
+            $s->replaceEntering($item->controller, $item->ownerId(), $card, $replacement);
+        }
 
         // CR 608.2b : une cible par effet ciblé, dans l'ordre du texte. Si TOUTES les cibles sont devenues illégales, le sort ne
         // fait rien (ses effets non ciblés compris) ; si seulement une partie l'est, les autres effets se résolvent quand même.

@@ -12,6 +12,7 @@ use App\Engine\Action\AssignCombatDamage;
 use App\Engine\Action\BottomCard;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\ChainCopy;
+use App\Engine\Action\ReplaceChoice;
 use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
@@ -70,7 +71,9 @@ final class LegalActionGenerator
      * dédoublonnée par nom (une décision par carte remise). Ponder (`arrange`) : un ordre par permutation des cartes regardées
      * (l'ordre actuel en premier, ce que l'agent passif choisit), puis « mélanger ».
      *
-     * @return list<PutBack|ArrangeTop|ChainCopy>
+     * Mox Diamond (`replace`) : décliner d'abord (ce que l'agent passif choisit), puis une carte de terrain de la main par nom.
+     *
+     * @return list<PutBack|ArrangeTop|ChainCopy|ReplaceChoice>
      */
     private function selectionActions(GameState $s, int $playerId): array
     {
@@ -79,6 +82,18 @@ final class LegalActionGenerator
             return [];
         }
         $p = $s->player($playerId);
+        if ($sel['kind'] === 'replace') {
+            $actions = [new ReplaceChoice($playerId)];
+            $seen = [];
+            foreach ($p->hand as $card) {
+                if ($card->isLand() && !isset($seen[$card->name])) {
+                    $seen[$card->name] = true;
+                    $actions[] = new ReplaceChoice($playerId, $card->id);
+                }
+            }
+
+            return $actions;
+        }
         if ($sel['kind'] === 'chain') {
             // Chain of Vapor : décliner d'abord (ce que l'agent passif choisit), puis un terrain par nom × un permanent non-terrain.
             $actions = [new ChainCopy($playerId)];

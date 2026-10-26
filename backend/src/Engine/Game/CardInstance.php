@@ -6,6 +6,7 @@ namespace App\Engine\Game;
 
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
+use App\Engine\Card\ReplacementEffect;
 use App\Engine\Card\SpellEffect;
 use App\Engine\Card\Subtypes;
 use App\Engine\Mana\Color;
@@ -165,6 +166,8 @@ final class CardInstance
         /** @var list<string> capacités statiques (constantes STATIC_…) */
         public readonly array $statics = [],
         public readonly ?string $kicker = null, // coût de kicker (Orim's Chant : `{W}`), null = pas de kicker
+        /** @var list<ReplacementEffect> effets de remplacement « de soi » (CR 614.15, Mox Diamond), lus par GameState::replacementFor() */
+        public readonly array $replacements = [],
     ) {
         if (array_diff($statics, self::STATICS) !== []) {
             throw new \InvalidArgumentException("$name : capacité statique inconnue");
@@ -514,7 +517,8 @@ final class CardInstance
             + ($this->extraCost === null ? [] : ['extraCost' => $this->extraCost]) // idem
             + ($this->tappedAfterOwnTurn > 0 ? ['tappedAfterOwnTurn' => $this->tappedAfterOwnTurn] : []) // idem
             + ($this->statics === [] ? [] : ['statics' => $this->statics]) // idem
-            + ($this->kicker === null ? [] : ['kicker' => $this->kicker]); // idem
+            + ($this->kicker === null ? [] : ['kicker' => $this->kicker]) // idem
+            + ($this->replacements === [] ? [] : ['replacements' => array_map(static fn (ReplacementEffect $r) => $r->toArray(), $this->replacements)]); // idem
     }
 
     public function toArray(): array
@@ -567,6 +571,7 @@ final class CardInstance
             (int) ($d['tappedAfterOwnTurn'] ?? 0),
             $d['statics'] ?? [],
             $d['kicker'] ?? null,
+            array_map([ReplacementEffect::class, 'fromArray'], $d['replacements'] ?? []),
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);
