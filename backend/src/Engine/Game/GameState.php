@@ -81,6 +81,20 @@ final class GameState
      */
     public array $spellsCast = [];
     /**
+     * Sorts non-créature lancés ce tour par joueur (Esper Sentinel : premier sort non-créature d'un adversaire), remis à zéro à
+     * chaque nouveau tour. Sérialisé sous `noncreatureCast`, omis quand vide.
+     *
+     * @var array<int, int>
+     */
+    public array $noncreatureCast = [];
+    /**
+     * Cartes piochées ce tour par joueur, hors avant-partie (Faerie Mastermind : deuxième carte d'un adversaire), remis à zéro à
+     * chaque nouveau tour. Sérialisé sous `cardsDrawn`, omis quand vide.
+     *
+     * @var array<int, int>
+     */
+    public array $cardsDrawn = [];
+    /**
      * Joueurs blessés au combat ce tour (Tymna), remis à zéro à chaque nouveau tour. Sérialisé sous `combatDamaged`, omis quand vide.
      *
      * @var list<int>
@@ -254,9 +268,11 @@ final class GameState
 
     /**
      * Pioche une carte et journalise. Retourne false si la bibliothèque est vide : le joueur perdra à la prochaine
-     * vérification des SBA (CR 704.5b), pas tout de suite.
+     * vérification des SBA (CR 704.5b), pas tout de suite. Hors avant-partie (`$setup` : main de départ, mulligan), la carte est
+     * comptée dans `$cardsDrawn` et les triggers `opponent_draw` des adversaires sont mis en file ; `$drawStep` = la pioche de
+     * l'étape de pioche (action basée sur le tour, donc toujours la première carte piochée dans cette étape).
      */
-    public function drawCard(int $playerId): bool
+    public function drawCard(int $playerId, bool $setup = false, bool $drawStep = false): bool
     {
         $p = $this->player($playerId);
         $card = array_shift($p->library);
@@ -267,8 +283,32 @@ final class GameState
         }
         $p->hand[] = $card;
         $this->emit('CardDrawn', ['player' => $playerId, 'card' => $card->toPublic(), 'library' => count($p->library)]);
+        if (!$setup) {
+            $this->cardsDrawn[$playerId] = ($this->cardsDrawn[$playerId] ?? 0) + 1;
+            foreach ($this->players as $o) {
+                if ($o->id === $playerId || $o->lost) {
+                    continue;
+                }
+                foreach ($o->battlefield as $permanent) {
+                    if ($permanent->triggers !== []) {
+                        $this->queueTriggers($o->id, $permanent, TriggeredAbility::OPPONENT_DRAW, opponent: $playerId, drawStepFirst: $drawStep);
+                    }
+                }
+            }
+        }
 
         return true;
+    }
+
+    /**
+     * Ajoute `$n` marqueurs de la sorte `$kind` (`CardInstance::PLUS_ONE`, `AGE`) au permanent `$card` de `$playerId` ;
+     * `CountersAdded` porte le total résultant et, pour une créature, sa force / endurance résultantes.
+     */
+    public function addCounters(int $playerId, CardInstance $card, string $kind, int $n): void
+    {
+        $card->counters[$kind] = ($card->counters[$kind] ?? 0) + $n;
+        $this->emit('CountersAdded', ['player' => $playerId, 'card' => $card->id, 'kind' => $kind, 'count' => $card->counters[$kind]]
+            + ($card->isCreature() ? ['power' => $card->currentPower(), 'toughness' => $card->currentToughness()] : []));
     }
 
     /**
@@ -279,6 +319,7 @@ final class GameState
     public function sendToGraveyard(int $ownerId, CardInstance $card): string
     {
         $card->grantedAbilities = [];
+        $card->counters = [];
         if ($card->token) {
             return 'none';
         }
@@ -295,6 +336,7 @@ final class GameState
     public function exile(int $ownerId, CardInstance $card): string
     {
         $card->grantedAbilities = [];
+        $card->counters = [];
         if ($card->token) {
             return 'none';
         }
@@ -630,12 +672,15 @@ final class GameState
      * `$spell` est le sort lancé : seuls les triggers dont le filtre l'accepte sont retenus. La source est copiée
      * (information de dernière connaissance, et aucun état partagé avec le champ de bataille : voir AbilityManager).
      */
-    public function queueTriggers(int $controller, CardInstance $card, string $event, ?CardInstance $spell = null, ?int $opponent = null, ?string $stackId = null, bool $manaSpent = true): void
+    public function queueTriggers(int $controller, CardInstance $card, string $event, ?CardInstance $spell = null, ?int $opponent = null, ?string $stackId = null, bool $manaSpent = true, bool $drawStepFirst = false): void
     {
         foreach ($card->triggers as $index => $trigger) {
             if ($trigger->event === $event && ($spell === null || $trigger->matches($spell))
                 && ($trigger->filter !== TriggeredAbility::TAPPED || $card->tapped)
                 && ($trigger->filter !== TriggeredAbility::SECOND_SPELL || ($this->spellsCast[$opponent] ?? 0) === 2)
+                && ($trigger->filter !== TriggeredAbility::FIRST_NONCREATURE || ($this->noncreatureCast[$opponent] ?? 0) === 1)
+                && ($trigger->filter !== TriggeredAbility::SECOND_DRAW || ($this->cardsDrawn[$opponent] ?? 0) === 2)
+                && ($trigger->filter !== TriggeredAbility::NOT_DRAW_STEP_FIRST || !$drawStepFirst)
                 && ($trigger->filter !== TriggeredAbility::NO_MANA || !$manaSpent)) {
                 $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index, opponent: $opponent, stackId: $stackId);
             }
@@ -735,6 +780,7 @@ final class GameState
         $card->powerBonus = 0;
         $card->toughnessBonus = 0;
         $card->grantedAbilities = [];
+        $card->counters = [];
         if (!$card->token) {
             $p->hand[] = $card;
         }
@@ -805,6 +851,12 @@ final class GameState
         if ($this->spellsCast !== []) {
             $d['spellsCast'] = $this->spellsCast;
         }
+        if ($this->noncreatureCast !== []) {
+            $d['noncreatureCast'] = $this->noncreatureCast;
+        }
+        if ($this->cardsDrawn !== []) {
+            $d['cardsDrawn'] = $this->cardsDrawn;
+        }
         if ($this->combatDamaged !== []) {
             $d['combatDamaged'] = $this->combatDamaged;
         }
@@ -862,6 +914,12 @@ final class GameState
         $s->delayedTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['delayedTriggers'] ?? []);
         foreach ($d['spellsCast'] ?? [] as $id => $count) {
             $s->spellsCast[(int) $id] = (int) $count;
+        }
+        foreach ($d['noncreatureCast'] ?? [] as $id => $count) {
+            $s->noncreatureCast[(int) $id] = (int) $count;
+        }
+        foreach ($d['cardsDrawn'] ?? [] as $id => $count) {
+            $s->cardsDrawn[(int) $id] = (int) $count;
         }
         $s->combatDamaged = array_map('intval', $d['combatDamaged'] ?? []);
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);

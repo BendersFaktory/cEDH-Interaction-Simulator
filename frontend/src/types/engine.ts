@@ -105,6 +105,8 @@ export interface PublicCard {
   noUntap?: boolean
   /** Couleurs (lettres) de la carte exilée par l'imprint d'un Chrome Mox ; absent = rien d'exilé. */
   imprint?: string[]
+  /** Marqueurs par sorte (`+1/+1`, `age`), posés par `CountersAdded` ; absent = aucun. */
+  counters?: Record<string, number>
 }
 
 export interface BoardCard extends PublicCard {

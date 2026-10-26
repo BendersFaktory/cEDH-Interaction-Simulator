@@ -76,7 +76,7 @@ final class TurnManager
         // CR 103.8 : seul le premier joueur d'une partie à 2 saute sa pioche ; en multijoueur, tout le monde pioche dès le tour 1.
         // Bibliothèque vide : le joueur perd à la vérification des SBA qui précède la priorité (CR 704.5b).
         if ($s->phase === Phase::Draw) {
-            $s->drawCard($s->activePlayer);
+            $s->drawCard($s->activePlayer, drawStep: true);
             // Triggers « au début de votre étape de pioche » (après la pioche de l'étape, CR 504.1 puis 504.2).
             $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::DRAW_STEP);
         }
@@ -131,6 +131,8 @@ final class TurnManager
         $s->activePlayer = $s->nextAlive($s->activePlayer);
         $s->landsPlayed = 0;
         $s->spellsCast = [];
+        $s->noncreatureCast = [];
+        $s->cardsDrawn = [];
         $s->combatDamaged = [];
         $s->phase = Phase::Untap;
         $s->stepStarted = false;

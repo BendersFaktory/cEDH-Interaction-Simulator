@@ -71,7 +71,7 @@ final class CardMapper
         $keywords = [];
         foreach ($card['keywords'] ?? [] as $keyword) {
             $key = strtolower((string) $keyword);
-            if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel', 'mill', 'kicker', 'gift', 'mobilize'], true)) {
+            if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel', 'mill', 'kicker', 'gift', 'mobilize', 'amass', 'cumulative upkeep'], true)) {
                 continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Kicker {W} », « Mobilize 2 ») est traité ligne par ligne
             }
             if (!isset(self::KEYWORDS[$key])) {
@@ -286,8 +286,8 @@ final class CardMapper
                 }
             } elseif (!$isSpell && ($ability = $this->activated($line)) !== null) {
                 $abilities[] = $ability;
-            } elseif (!$isSpell && !$isLand && ($trigger = $this->trigger($line, $isCreature)) !== null) {
-                $triggers[] = $trigger;
+            } elseif (!$isSpell && !$isLand && ($found = $this->triggers($line, $isCreature)) !== []) {
+                array_push($triggers, ...$found);
             } else {
                 throw $fail('texte non modélisé : « ' . $line . ' »');
             }
@@ -382,7 +382,7 @@ final class CardMapper
      */
     private function activated(string $line): ?ActivatedAbility
     {
-        if (!preg_match('/^((?:\{[^}]+\}|Sacrifice ~|Pay \d+ life)(?:, (?:\{[^}]+\}|Sacrifice ~|Pay \d+ life))*): (.+)$/', $line, $m)) {
+        if (!preg_match('/^((?:(?:\{[^}]+\})+|Sacrifice ~|Pay \d+ life)(?:, (?:(?:\{[^}]+\})+|Sacrifice ~|Pay \d+ life))*): (.+)$/', $line, $m)) {
             return null;
         }
         $tap = false;
@@ -413,6 +413,9 @@ final class CardMapper
         }
         if (preg_match('/^Draw (a card|one card|two cards|three cards|four cards)\.$/', $m[2], $d)) {
             return ActivatedAbility::draw(self::DRAW_COUNT[$d[1]], $cost, $tap, $sacrifice);
+        }
+        if (!$tap && !$sacrifice && $cost !== null && $m[2] === 'Each player draws a card.') {
+            return ActivatedAbility::eachDraw(1, $cost); // Faerie Mastermind
         }
         if ($tap && $sacrifice && $cost === null && $m[2] === 'Add ' . self::ANY_COLOR . '.') {
             return ActivatedAbility::treasure(); // Lotus Petal : {T}, sacrifier : un mana de la couleur de son choix
@@ -456,6 +459,35 @@ final class CardMapper
         return (string) preg_replace("/\\bone mana of any color(?: in your commander's color identity)?(?=\\.)/", self::ANY_COLOR, $line);
     }
 
+    /**
+     * Triggers d'une ligne (vide : non reconnue). Orcish Bowmasters : une ligne, deux triggers (entrée, pioche d'un adversaire).
+     *
+     * @return list<TriggeredAbility>
+     */
+    private function triggers(string $line, bool $isCreature): array
+    {
+        if ($isCreature && preg_match('/^When ~ enters and whenever an opponent draws a card except the first one they draw in each of their draw steps, ~ deals (\d+) damage to any target\. Then amass ([A-Z][a-z]+?)s? (\d+)\.$/', $line, $m)) {
+            $spec = $m[2] . ':' . $m[3];
+
+            return [
+                new TriggeredAbility(TriggeredAbility::ETB, 'ping_amass', (int) $m[1], $spec),
+                new TriggeredAbility(TriggeredAbility::OPPONENT_DRAW, 'ping_amass', (int) $m[1], $spec, TriggeredAbility::NOT_DRAW_STEP_FIRST),
+            ];
+        }
+        if (preg_match('/^Cumulative upkeep ((?:\{(?:\d+|[WUBRGC])\})+)$/', $line, $m)) {
+            return [new TriggeredAbility(TriggeredAbility::UPKEEP, 'cumulative_upkeep', spec: $m[1])]; // Mystic Remora
+        }
+        if ($line === "Whenever an opponent casts their first noncreature spell each turn, draw a card unless that player pays {X}, where X is ~'s power.") {
+            return [new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw_unless', 1, TriggeredAbility::X_POWER, TriggeredAbility::FIRST_NONCREATURE)]; // Esper Sentinel
+        }
+        if ($line === 'Whenever an opponent draws their second card each turn, you draw a card.') {
+            return [new TriggeredAbility(TriggeredAbility::OPPONENT_DRAW, 'draw', 1, filter: TriggeredAbility::SECOND_DRAW)]; // Faerie Mastermind
+        }
+        $trigger = $this->trigger($line, $isCreature);
+
+        return $trigger === null ? [] : [$trigger];
+    }
+
     /** Triggers reconnus : entrée / mort / entretien → piocher ; mort → N dégâts à n'importe quelle cible. Sinon `null`. */
     private function trigger(string $line, bool $isCreature): ?TriggeredAbility
     {
@@ -469,8 +501,9 @@ final class CardMapper
         if (preg_match('/^When ~ enters, create (a|one|two|three) Treasure tokens?\.$/', $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::ETB, 'treasure', ['a' => 1, 'one' => 1, 'two' => 2, 'three' => 3][$m[1]]);
         }
-        if (preg_match('/^Whenever an opponent casts a spell, you may draw a card unless that player pays ((?:\{\d+\})+)\.$/', $line, $m)) {
-            return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw_unless', 1, $m[1]); // Rhystic Study (« you may » : toujours)
+        if (preg_match('/^Whenever an opponent casts a (noncreature )?spell, you may draw a card unless that player pays ((?:\{\d+\})+)\.$/', $line, $m)) {
+            // Rhystic Study, Mystic Remora (non-créature) ; « you may » : toujours.
+            return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw_unless', 1, $m[2], $m[1] === '' ? '' : TriggeredAbility::NONCREATURE);
         }
         if ($line === 'Whenever an opponent casts a spell, if no mana was spent to cast it, counter that spell.') {
             return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'counter_spell', filter: TriggeredAbility::NO_MANA); // Lavinia

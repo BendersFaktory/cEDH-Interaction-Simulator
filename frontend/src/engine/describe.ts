@@ -152,6 +152,8 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} exile ${p.exiled} (imprint)${p.colors.length ? `, couleurs ${p.colors.join('')}` : ', sans couleur'}`
     case 'CommanderReturned':
       return `${p.card.name} (J${p.player}) retourne en zone de commandement`
+    case 'CountersAdded':
+      return `${p.card} (J${p.player}) : ${p.count} marqueur${p.count > 1 ? 's' : ''} ${p.kind === 'age' ? "d'âge" : p.kind}${p.power !== undefined ? `, ${p.power}/${p.toughness}` : ''}`
     case 'CreatureBoosted':
       return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
     case 'TokenCreated':

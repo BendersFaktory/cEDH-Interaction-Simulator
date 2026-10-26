@@ -55,7 +55,7 @@ final class GameFactory
 
         foreach (array_keys($s->players) as $id) {
             for ($i = 0; $i < 7; $i++) {
-                $s->drawCard($id);
+                $s->drawCard($id, setup: true);
             }
         }
         $s->mulligan = array_map(static fn () => ['taken' => 0, 'kept' => false], $s->players);

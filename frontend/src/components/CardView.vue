@@ -15,6 +15,11 @@ const art = computed(() => (props.card.token ? null : store.cardImage(props.card
 const artFailed = ref(false)
 watch(art, () => (artFailed.value = false))
 const playable = computed(() => store.playableCardIds.has(props.card.id))
+const counters = computed(() =>
+  Object.entries(props.card.counters ?? {})
+    .map(([kind, n]) => (kind === 'age' ? `âge ${n}` : `${kind} ×${n}`))
+    .join(' · '),
+)
 </script>
 
 <template>
@@ -42,6 +47,7 @@ const playable = computed(() => store.playableCardIds.has(props.card.id))
     <img v-if="art && !artFailed && !compact" class="card-art" :src="art" alt="" loading="lazy" @error="artFailed = true" />
     <span class="card-name">{{ card.name }}</span>
     <span v-if="card.token" class="card-token">jeton</span>
+    <span v-if="counters" class="card-counters">{{ counters }}</span>
     <span v-if="card.type === 'land' && card.produces?.length" class="mana-sym" :class="landColor ? `m-${landColor}` : 'hybrid'">{{ card.produces.join('') }}</span>
     <span v-if="symbols.length" class="card-mana"
       ><span v-for="(s, i) in symbols" :key="i" class="mana-sym" :class="symbolClass(s)">{{ s }}</span></span

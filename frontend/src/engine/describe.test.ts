@@ -71,6 +71,10 @@ describe('describeEvent — capacités', () => {
     expect(describeEvent(e('CardImprinted', { player: 0, exiled: 'Lightning Bolt', colors: ['R'] }))).toBe('J0 exile Lightning Bolt (imprint), couleurs R')
     expect(describeEvent(e('CardImprinted', { player: 0, exiled: 'Sol Ring', colors: [] }))).toBe('J0 exile Sol Ring (imprint), sans couleur')
   })
+  it('marqueurs', () => {
+    expect(describeEvent(e('CountersAdded', { player: 1, card: 'p1_t1', kind: '+1/+1', count: 2, power: 2, toughness: 2 }))).toBe('p1_t1 (J1) : 2 marqueurs +1/+1, 2/2')
+    expect(describeEvent(e('CountersAdded', { player: 0, card: 'rem', kind: 'age', count: 1 }))).toBe("rem (J0) : 1 marqueur d'âge")
+  })
   it('interaction gratuite (Daze, Pact of Negation, Force of Negation, Memory Lapse)', () => {
     expect(describeEvent(e('PermanentReturnedToHand', { player: 0, card: { name: 'Island' }, destination: 'hand', source: 'Daze' }))).toBe('J0 renvoie Island en main (Daze)')
     expect(describeEvent(e('CostPaid', { player: 1, cost: '{1}', source: 'Daze' }))).toBe('J1 paie {1} (Daze)')

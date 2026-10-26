@@ -42,6 +42,15 @@ use App\Engine\Game\CardInstance;
  * `next_end` d'effet `sacrifice_tokens`, `spec` = leurs ids) et `pump_untap` (Valley Floodcaller, `cast` filtré `noncreature` :
  * ses créatures des sous-types `spec` (séparés par `|`) gagnent +1/+1 jusqu'à la fin du tour et se dégagent).
  *
+ * Lot H4 : `opponent_draw` (un adversaire de son contrôleur pioche une carte, retenu par `PendingTrigger::$opponent` ; filtre
+ * `second_draw` = sa deuxième carte du tour, `GameState::$cardsDrawn` (Faerie Mastermind) ; `not_draw_step_first` = sauf la
+ * première qu'il pioche dans chacune de ses étapes de pioche (Orcish Bowmasters)). `ping_amass` (Orcish Bowmasters : `amount`
+ * dégâts à un joueur ciblé, puis Amass `spec` = `Type:N`, CR 701.47). `cumulative_upkeep` (Mystic Remora, `upkeep` : un marqueur
+ * d'âge, puis payer `spec` par marqueur d'âge ou sacrifier la source ; décision `PayCost` à la résolution). Pour `opponent_cast`,
+ * `first_noncreature` = premier sort non-créature du lanceur ce tour (Esper Sentinel, `GameState::$noncreatureCast`) et
+ * `noncreature` = tout sort non-créature (Mystic Remora). `draw_unless` accepte `spec` = `{X}` : X = force de la source (Esper
+ * Sentinel ; X = 0 : rien à payer, pas de pioche).
+ *
  * `pay_untap` (Mana Vault, `upkeep`) : son contrôleur peut payer `spec` pour dégager la source (décision `PayCost` à la
  * résolution, proposée seulement si la source est encore engagée sur le champ de bataille).
  *
@@ -66,6 +75,11 @@ final class TriggeredAbility
     public const NEXT_MAIN = 'next_main';
     /** Début de la prochaine étape de fin (Mobilize : sacrifier les jetons). */
     public const NEXT_END = 'next_end';
+    /** Un adversaire de son contrôleur pioche une carte (Faerie Mastermind, Orcish Bowmasters). */
+    public const OPPONENT_DRAW = 'opponent_draw';
+
+    /** Coût `{X}` de `draw_unless` : X = force de la source (Esper Sentinel). */
+    public const X_POWER = '{X}';
 
     /** Filtre de `cast` : le sort lancé est un éphémère ou un rituel. */
     public const INSTANT_SORCERY = 'instant_sorcery';
@@ -76,13 +90,20 @@ final class TriggeredAbility
     /** Filtre de `opponent_cast` : aucun mana n'a été dépensé pour lancer le sort (Lavinia, Azorius Renegade). */
     public const NO_MANA = 'no_mana';
 
+    /** Filtre de `opponent_cast` : premier sort non-créature du lanceur ce tour (Esper Sentinel). */
+    public const FIRST_NONCREATURE = 'first_noncreature';
+    /** Filtre de `opponent_draw` : deuxième carte piochée par cet adversaire ce tour (Faerie Mastermind). */
+    public const SECOND_DRAW = 'second_draw';
+    /** Filtre de `opponent_draw` : sauf la première carte piochée dans chacune de ses étapes de pioche (Orcish Bowmasters). */
+    public const NOT_DRAW_STEP_FIRST = 'not_draw_step_first';
+
     /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
     public const TAPPED = 'tapped';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END];
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW];
     private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor',
-        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap'];
-    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA];
+        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap', 'ping_amass', 'cumulative_upkeep'];
+    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA, self::FIRST_NONCREATURE, self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST];
 
     public function __construct(
         public readonly string $event,
@@ -99,14 +120,20 @@ final class TriggeredAbility
         }
         if (!in_array($filter, self::FILTERS, true) || ($filter === self::INSTANT_SORCERY && $event !== self::CAST)
             || ($filter === self::TAPPED && $event === self::CAST) || ($filter === self::SECOND_SPELL && $event !== self::OPPONENT_CAST)
-            || ($filter === self::NONCREATURE && $event !== self::CAST) || ($filter === self::NO_MANA && $event !== self::OPPONENT_CAST)) {
+            || ($filter === self::NONCREATURE && $event !== self::CAST && $event !== self::OPPONENT_CAST) || ($filter === self::NO_MANA && $event !== self::OPPONENT_CAST)
+            || ($filter === self::FIRST_NONCREATURE && $event !== self::OPPONENT_CAST)
+            || (in_array($filter, [self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST], true) && $event !== self::OPPONENT_DRAW)) {
             throw new \InvalidArgumentException("Filtre de trigger invalide : $filter ($event)");
         }
         if ($effect === 'token') {
             ActivatedAbility::parseTokenSpec($spec);
         }
-        if (in_array($effect, ['pact', 'draw_unless', 'pay_untap'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)) {
+        if (in_array($effect, ['pact', 'draw_unless', 'pay_untap', 'cumulative_upkeep'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)
+            && !($effect === 'draw_unless' && $spec === self::X_POWER)) {
             throw new \InvalidArgumentException("Coût de pacte invalide : $spec");
+        }
+        if ($effect === 'ping_amass' && !preg_match('/^[A-Z][a-z]+:\d+$/', $spec)) {
+            throw new \InvalidArgumentException("Amass invalide : $spec");
         }
         if ($effect === 'tutor' && !preg_match('/^(creature|artifact|enchantment|instant|sorcery|land)?<=\d+$/', $spec)) {
             throw new \InvalidArgumentException("Filtre de tuteur invalide : $spec");
@@ -118,7 +145,7 @@ final class TriggeredAbility
     {
         return match ($this->filter) {
             self::INSTANT_SORCERY => $spell->hasType(CardInstance::INSTANT) || $spell->hasType(CardInstance::SORCERY),
-            self::NONCREATURE => !$spell->isCreature(),
+            self::NONCREATURE, self::FIRST_NONCREATURE => !$spell->isCreature(),
             default => true,
         };
     }
@@ -146,7 +173,7 @@ final class TriggeredAbility
     /** La capacité cible-t-elle un joueur (à choisir en la mettant sur la pile) ? */
     public function targetsPlayer(): bool
     {
-        return $this->effect === 'damage';
+        return $this->effect === 'damage' || $this->effect === 'ping_amass';
     }
 
     /** Libellé court, ex. `Quand elle entre : piocher 1`, `Quand elle meurt : 2 dégâts`. */
@@ -166,6 +193,8 @@ final class TriggeredAbility
             self::OPPONENT_CAST => match ($this->filter) {
                 self::SECOND_SPELL => 'Quand un adversaire lance son deuxième sort du tour',
                 self::NO_MANA => 'Quand un adversaire lance un sort sans dépenser de mana',
+                self::FIRST_NONCREATURE => 'Quand un adversaire lance son premier sort non-créature du tour',
+                self::NONCREATURE => 'Quand un adversaire lance un sort non-créature',
                 default => 'Quand un adversaire lance un sort',
             },
             self::DISCARD => 'Quand vous défaussez une carte',
@@ -175,6 +204,11 @@ final class TriggeredAbility
             self::NEXT_UPKEEP => 'Au début de votre prochain entretien',
             self::NEXT_MAIN => 'Au début de votre prochaine phase principale',
             self::NEXT_END => 'Au début de la prochaine étape de fin',
+            self::OPPONENT_DRAW => match ($this->filter) {
+                self::SECOND_DRAW => 'Quand un adversaire pioche sa deuxième carte du tour',
+                self::NOT_DRAW_STEP_FIRST => 'Quand un adversaire pioche une carte (sauf la première de son étape de pioche)',
+                default => 'Quand un adversaire pioche une carte',
+            },
         } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
         $what = match ($this->effect) {
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
@@ -184,7 +218,7 @@ final class TriggeredAbility
             'self_damage' => sprintf('%d dégât%s à vous', $this->amount, $this->amount > 1 ? 's' : ''),
             'imprint' => 'exiler une carte de votre main (imprint)',
             'pact' => sprintf('payer %s ou perdre la partie', $this->spec),
-            'draw_unless' => sprintf('piocher %d sauf s\'il paie %s', $this->amount, $this->spec),
+            'draw_unless' => sprintf('piocher %d sauf s\'il paie %s', $this->amount, $this->spec === self::X_POWER ? '{X} (X = sa force)' : $this->spec),
             'pay_life_draw' => 'payer X PV et piocher X (X = adversaires blessés au combat ce tour)',
             'mana' => sprintf('ajouter %s', $this->amount > 0 ? str_repeat('{C}', $this->amount) : 'rien'),
             'sacrifice_self' => 'la sacrifier',
@@ -195,6 +229,8 @@ final class TriggeredAbility
             'sacrifice_tokens' => 'sacrifier les jetons Warrior',
             'pump_untap' => sprintf('vos %s gagnent +1/+1 et se dégagent', str_replace('|', ', ', $this->spec)),
             'pay_untap' => sprintf('vous pouvez payer %s pour la dégager', $this->spec),
+            'ping_amass' => sprintf('%d dégât%s, puis Amass %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
+            'cumulative_upkeep' => sprintf('un marqueur d\'âge, puis payer %s par marqueur ou la sacrifier', $this->spec),
         };
 
         return "$when : $what";

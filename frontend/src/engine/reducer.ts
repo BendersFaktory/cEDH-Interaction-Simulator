@@ -368,6 +368,19 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'CountersAdded': {
+      // Valeurs absolues : total de la sorte, et force / endurance résultantes d'une créature (Amass).
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) {
+        c.counters = { ...c.counters, [p.kind]: p.count }
+        if (p.power !== undefined) {
+          c.power = p.power
+          c.toughness = p.toughness
+        }
+      }
+      break
+    }
+
     case 'CreatureBoosted': {
       // Valeurs absolues : force/endurance actuelles (bonus du tour compris, ou remises à la base au cleanup).
       const c = v.players[p.player].battlefield.find((x) => x.id === p.card)

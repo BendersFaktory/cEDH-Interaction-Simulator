@@ -43,6 +43,8 @@ final class PayCost implements Action
         $outcome = match ($top?->trigger?->effect) {
             'pact' => 'perdre la partie',
             'draw_unless' => sprintf('J%d pioche', $top->controller), // Rhystic Study
+            'pay_untap' => 'elle reste engagée', // Mana Vault
+            'cumulative_upkeep' => 'la sacrifier', // Mystic Remora
             default => 'le sort est contré',
         };
 

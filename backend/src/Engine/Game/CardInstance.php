@@ -68,6 +68,9 @@ final class CardInstance
     public const DEATHTOUCH = 'deathtouch';
     public const LIFELINK = 'lifelink';
     public const FLASH = 'flash';
+    /** Sortes de marqueurs (`$counters`). */
+    public const PLUS_ONE = '+1/+1';
+    public const AGE = 'age';
     /** Partner (CR 702.124) : deux commandants si les deux l'ont (`Decks::validate()`). Sans effet en jeu. */
     public const PARTNER = 'partner';
     /** Storm (CR 702.40) : en le lançant, un trigger le copie une fois par sort lancé avant lui ce tour (`GameState::$spellsCast`). */
@@ -109,6 +112,15 @@ final class CardInstance
      * @var list<ActivatedAbility>
      */
     public array $grantedAbilities = [];
+
+    /**
+     * Marqueurs par sorte (`+1/+1`, CR 122.1a, comptés par `currentPower()` / `currentToughness()` ; `age`, Cumulative upkeep).
+     * État de partie mutable : sérialisé sous `counters` par `toArray()`, omis quand vide ; vidé quand la carte quitte le champ
+     * de bataille (CR 122.2). Seul chemin d'ajout : `GameState::addCounters()`.
+     *
+     * @var array<string, int>
+     */
+    public array $counters = [];
 
     private ?array $publicMemo = null;
     private ?array $arrayMemo = null;
@@ -436,16 +448,16 @@ final class CardInstance
         return [...array_map(static fn (string $symbol) => ActivatedAbility::mana('{' . $symbol . '}'), $produces), ...$this->abilities];
     }
 
-    /** Force actuelle (bonus du tour compris). */
+    /** Force actuelle (bonus du tour et marqueurs +1/+1 compris). */
     public function currentPower(): int
     {
-        return $this->power + $this->powerBonus;
+        return $this->power + $this->powerBonus + ($this->counters[self::PLUS_ONE] ?? 0);
     }
 
-    /** Endurance actuelle (bonus du tour compris). */
+    /** Endurance actuelle (bonus du tour et marqueurs +1/+1 compris). */
     public function currentToughness(): int
     {
-        return $this->toughness + $this->toughnessBonus;
+        return $this->toughness + $this->toughnessBonus + ($this->counters[self::PLUS_ONE] ?? 0);
     }
 
     /** Permanent : va sur le champ de bataille en se résolvant (créature, artefact) ou en étant joué (terrain). */
@@ -507,7 +519,8 @@ final class CardInstance
 
     public function toArray(): array
     {
-        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint)) . ($this->grantedAbilities === [] ? '' : '|g' . count($this->grantedAbilities));
+        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint)) . ($this->grantedAbilities === [] ? '' : '|g' . count($this->grantedAbilities))
+            . ($this->counters === [] ? '' : '|c' . json_encode($this->counters));
         if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
             return $this->arrayMemo;
         }
@@ -518,7 +531,8 @@ final class CardInstance
             + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : [])
             + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : [])
             + ($this->imprint === [] ? [] : ['imprint' => $this->imprint])
-            + ($this->grantedAbilities === [] ? [] : ['granted' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->grantedAbilities)]);
+            + ($this->grantedAbilities === [] ? [] : ['granted' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->grantedAbilities)])
+            + ($this->counters === [] ? [] : ['counters' => $this->counters]);
     }
 
     public static function fromArray(array $d): self
@@ -558,6 +572,7 @@ final class CardInstance
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);
         $card->imprint = $d['imprint'] ?? [];
         $card->grantedAbilities = array_map([ActivatedAbility::class, 'fromArray'], $d['granted'] ?? []);
+        $card->counters = array_map('intval', $d['counters'] ?? []);
 
         return $card;
     }

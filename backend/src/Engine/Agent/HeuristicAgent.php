@@ -329,6 +329,9 @@ final class HeuristicAgent implements PlayerAgent
         return array_values(array_filter($casts, static fn (CastSpell $c) => !$isExile($c) || ($best[$c->cardId][0] ?? null) === $c));
     }
 
+    /** Cumulative upkeep (Mystic Remora) : coût total au-delà duquel l'IA sacrifie la source. */
+    private const CUMULATIVE_UPKEEP_MAX = 3;
+
     /**
      * Paiement à la résolution. Daze, Mana Leak, Pact of Negation : payer dès que possible (première action proposée), sinon
      * refuser. Rhystic Study : payer seulement si le contresort gardé (`reservedCounter`) reste payable après.
@@ -348,6 +351,10 @@ final class HeuristicAgent implements PlayerAgent
         }
         if ($refuse !== null && $state->topOfStack()?->trigger?->effect === 'pay_untap') {
             return $refuse; // Mana Vault : payer {4} pour la dégager rapporte {C}{C}{C}, une perte nette d'un mana
+        }
+        if ($state->topOfStack()?->trigger?->effect === 'cumulative_upkeep' && $refuse !== null) {
+            // Mystic Remora : garder tant que le total reste ≤ CUMULATIVE_UPKEEP_MAX (seuil non calibré).
+            return $pay !== null && ManaCost::parse($pay->cost)->manaValue() <= self::CUMULATIVE_UPKEEP_MAX ? $pay : $refuse;
         }
         if ($pay === null || $refuse === null || $state->topOfStack()?->trigger?->effect !== 'draw_unless') {
             return $legal[0] ?? AutoPassAgent::pass($legal, $playerId);

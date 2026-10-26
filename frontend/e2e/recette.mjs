@@ -22,9 +22,12 @@ const S = `${FRONT}recette`
 rmSync(S, { recursive: true, force: true })
 mkdirSync(S, { recursive: true })
 
+// L'API répond 404 sur une partie inconnue (Symfony démarré) ; une page d'erreur PHP servie en 200 (worktree sans `vendor/` ni
+// `.env.local`) ou en 500 ne compte pas.
 const up = async (url) => {
   try {
-    return (await fetch(url)).status < 500
+    const r = await fetch(url)
+    return url.includes('/api/') ? r.status >= 400 && r.status < 500 : r.status < 500
   } catch {
     return false
   }
@@ -73,6 +76,8 @@ const DECK_TUTOR = DECK_21.replace('1 Divination', '1 Mystical Tutor')
 // Scénarios 33-38 (restes G1 à G3) : J0 avec Chrome Mox, Brainstorm, Ponder et Daze ; J1 (humain piloté) avec Mana Leak et Rhystic Study.
 const DECK_G = DECK_21.replace('44 Plains', '1 Chrome Mox\n1 Brainstorm\n1 Ponder\n1 Daze\n40 Plains')
 const DECK_G_J1 = DECK_21.replace('44 Plains', '1 Daze\n1 Rhystic Study\n42 Plains')
+// Scénario 39 (lot H4) : J0 avec Mystic Remora à la place de Divination.
+const DECK_REMORA = DECK_21.replace('1 Divination', '1 Mystic Remora')
 const J0_J1_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
 const T0 = Date.now()
 try {
@@ -240,6 +245,7 @@ async function run() {
     ['36', (b) => scenario(b, '36', s36)],
     ['37', (b) => scenario(b, '37', s37)],
     ['38', (b) => scenario(b, '38', s38)],
+    ['39', (b) => scenario(b, '39', s39)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1870,4 +1876,30 @@ async function s38({ page, log, shot, problem, openGame }) {
   log('38 choix :', label, '| journal :', line)
   await shot('38b-ponder-fait')
   if (!/range \d cartes du dessus \(\d dessus, 0 dessous\)/.test(line)) problem(`recette Ponder : rangement absent du journal (« ${line} »)`)
+}
+
+// 39 : CUMULATIVE UPKEEP (Mystic Remora). J0 pose Mystic Remora ; à son entretien suivant, il refuse de payer {1} : elle reçoit
+// un marqueur d'âge puis elle est sacrifiée.
+async function s39({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_REMORA),
+    (p) => {
+      if (p.actions.some((a) => a.type === 'pay' && a.label.includes('Mystic Remora'))) return 'stop'
+      return castOf(p.actions, 'Mystic Remora') ?? null
+    },
+    { card: 'Mystic Remora' },
+  )
+  if (!found) return problem('recette Mystic Remora : aucune graine où J0 doit payer son cumulative upkeep')
+  log('39 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('39a-remora-choix')
+  const refused = await clickIn(page, 'Payer pour la résolution ?', 'Ne pas payer')
+  const line = await logLine(page, 'J0 sacrifie Mystic Remora')
+  const events = await api.events(found.sim.id)
+  const age = events.filter((e) => e.type === 'CountersAdded' && e.payload.kind === 'age').at(-1)
+  log('39 choix :', refused, '| journal :', line, '| marqueurs d’âge :', age?.payload.count)
+  await shot('39b-remora-sacrifiee')
+  if (!refused.includes('la sacrifier')) problem(`recette Mystic Remora : le refus n'annonce pas le sacrifice (« ${refused} »)`)
+  if (!line.includes('J0 sacrifie Mystic Remora')) problem(`recette Mystic Remora : sacrifice absent du journal (« ${line} »)`)
+  if (age?.payload.count !== 1) problem('recette Mystic Remora : aucun marqueur d’âge posé avant le sacrifice')
 }

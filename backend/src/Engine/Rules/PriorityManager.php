@@ -500,6 +500,9 @@ final class PriorityManager
         // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
         $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);
         $s->spellsCast[$a->player()] = ($s->spellsCast[$a->player()] ?? 0) + 1;
+        if (!$card->isCreature()) {
+            $s->noncreatureCast[$a->player()] = ($s->noncreatureCast[$a->player()] ?? 0) + 1; // Esper Sentinel
+        }
         if ($card->hasKeyword(CardInstance::STORM)) {
             // Storm (CR 702.40) : trigger du sort lui-même, une copie par sort lancé avant lui ce tour (tous joueurs confondus).
             $count = array_sum($s->spellsCast) - 1;

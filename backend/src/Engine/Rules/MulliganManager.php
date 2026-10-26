@@ -104,7 +104,7 @@ final class MulliganManager
         $p->hand = [];
         $s->emit('MulliganTaken', ['player' => $playerId, 'mulligans' => $taken, 'hand' => 0, 'library' => count($p->library)]);
         for ($i = 0; $i < self::HAND_SIZE; $i++) {
-            $s->drawCard($playerId);
+            $s->drawCard($playerId, setup: true);
         }
     }
 

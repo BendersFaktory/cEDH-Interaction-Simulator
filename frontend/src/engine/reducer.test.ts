@@ -288,6 +288,18 @@ describe('reducer — capacités et réserve de mana', () => {
     applyEvent(v, ev(5, 'CreatureBoosted', { player: 0, card: 'c1', power: 2, toughness: 2 }))
     expect(v.players[0].battlefield[2].power).toBe(2)
   })
+
+  it('CountersAdded fixe le total de la sorte et la force / endurance résultantes (valeurs absolues)', () => {
+    const v = start()
+    const army = { id: 'p1_t1', name: 'Orc Army', type: 'creature' as const, cost: 0, effect: null, amount: 0, power: 0, toughness: 0, token: true }
+    const remora = { id: 'rem', name: 'Mystic Remora', type: 'enchantment' as const, cost: 1, effect: null, amount: 0 }
+    v.players[1].battlefield.push({ ...army, tapped: false }, { ...remora, tapped: false })
+    applyEvent(v, ev(4, 'CountersAdded', { player: 1, card: 'p1_t1', kind: '+1/+1', count: 2, power: 2, toughness: 2 }))
+    applyEvent(v, ev(5, 'CountersAdded', { player: 1, card: 'rem', kind: 'age', count: 1 }))
+    const [a, r] = v.players[1].battlefield.slice(-2)
+    expect([a.counters, a.power, a.toughness]).toEqual([{ '+1/+1': 2 }, 2, 2])
+    expect([r.counters, r.power]).toEqual([{ age: 1 }, undefined])
+  })
 })
 
 describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', () => {

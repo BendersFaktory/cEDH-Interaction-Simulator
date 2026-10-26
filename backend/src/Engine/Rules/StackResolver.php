@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Engine\Rules;
 
 use App\Engine\Ability\ActivatedAbility;
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
+use App\Engine\Game\StackItem;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
 
@@ -32,7 +34,16 @@ final class StackResolver
             if ($top->trigger->effect === 'draw_unless') {
                 $payer = str_starts_with($top->targets[0] ?? '', 'player:') ? (int) substr($top->targets[0], 7) : null;
 
-                return $payer === null || $s->player($payer)->lost ? null : ['player' => $payer, 'cost' => $top->trigger->spec, 'source' => $top->card->name];
+                $cost = self::drawUnlessCost($s, $top);
+
+                return $payer === null || $s->player($payer)->lost || $cost === '{0}' ? null : ['player' => $payer, 'cost' => $cost, 'source' => $top->card->name];
+            }
+
+            if ($top->trigger->effect === 'cumulative_upkeep') {
+                // Mystic Remora : payer le coût une fois par marqueur d'âge (celui que la résolution pose compris) ; partie : rien.
+                $source = $s->player($top->controller)->findOnBattlefield($top->card->id);
+
+                return $source === null ? null : ['player' => $top->controller, 'cost' => self::times($top->trigger->spec, ($source->counters[CardInstance::AGE] ?? 0) + 1), 'source' => $top->card->name];
             }
 
             if ($top->trigger->effect === 'pay_untap') {
@@ -64,6 +75,27 @@ final class StackResolver
         }
 
         return null;
+    }
+
+    /** Coût d'un `draw_unless` : `spec`, ou `{X}` avec X = force de la source (sur le champ de bataille, sinon dernière connue). */
+    private static function drawUnlessCost(GameState $s, StackItem $item): string
+    {
+        if ($item->trigger?->spec !== TriggeredAbility::X_POWER) {
+            return (string) $item->trigger?->spec;
+        }
+        $source = $s->player($item->controller)->findOnBattlefield($item->card->id) ?? $item->card;
+
+        return '{' . max(0, $source->currentPower()) . '}';
+    }
+
+    /** `$cost` répété `$n` fois, le générique additionné (`{1}` × 3 = `{3}`). */
+    private static function times(string $cost, int $n): string
+    {
+        if (preg_match('/^\{(\d+)\}$/', $cost, $m)) {
+            return '{' . ((int) $m[1] * $n) . '}';
+        }
+
+        return str_repeat($cost, $n);
     }
 
     /** @param ?bool $paid réponse au paiement demandé par `paymentDue()` (null : aucun paiement demandé) */
@@ -102,7 +134,11 @@ final class StackResolver
                 'lock_noncreature' => $this->lockNoncreature($s, $item->controller, $card->name),
                 'pact' => $paid === true ? null : (new StateBasedActions())->eliminate($s, $item->controller, 'pact_unpaid'),
                 // Rhystic Study : « you may draw » choisi, sauf bibliothèque vide (piocher ferait perdre la partie, CR 704.5b).
-                'draw_unless' => $paid === true || $s->player($item->controller)->library === [] ? null : $this->draw($s, $item->controller, $ability->amount),
+                // Esper Sentinel de force 0 : {0} est toujours payé, pas de pioche.
+                'draw_unless' => $paid === true || $s->player($item->controller)->library === [] || self::drawUnlessCost($s, $item) === '{0}' ? null : $this->draw($s, $item->controller, $ability->amount),
+                'ping_amass' => $this->pingAmass($s, $item->controller, $item->targets[0] ?? '', $ability->amount, $ability->spec, $card->name), // Orcish Bowmasters
+                'cumulative_upkeep' => $this->cumulativeUpkeep($s, $item->controller, $card->id, $paid), // Mystic Remora
+                'each_draw' => $this->eachDraw($s, $ability->amount), // Faerie Mastermind
                 'pay_life_draw' => $this->payLifeDraw($s, $item->controller, $card->name), // Tymna the Weaver
                 'storm' => $this->stormCopies($s, $item),
                 'counter_spell' => $this->counter($s, $item->targets[0] ?? '', $item, new SpellEffect('counter'), null), // Lavinia
@@ -559,6 +595,59 @@ final class StackResolver
     }
 
     /** City of Traitors : la source se sacrifie si elle est encore sur le champ de bataille. */
+    /** Orcish Bowmasters : `$amount` dégâts à la cible, puis Amass (`$spec` = `Type:N`). */
+    private function pingAmass(GameState $s, int $player, string $target, int $amount, string $spec, string $source): void
+    {
+        $this->damage($s, $target, $amount, $source);
+        [$type, $n] = explode(':', $spec, 2);
+        $this->amass($s, $player, $type, (int) $n);
+    }
+
+    /**
+     * Amass N (CR 701.47a) : sans créature Army, créer un jeton `<Type> Army` 0/0 ; puis N marqueurs +1/+1 sur une Army qu'il
+     * contrôle (la première). Limite : une Army existante ne gagne pas le type `$type` (sous-types figés), jeton incolore.
+     */
+    private function amass(GameState $s, int $player, string $type, int $n): void
+    {
+        $army = null;
+        foreach ($s->player($player)->battlefield as $permanent) {
+            if ($permanent->isCreature() && $permanent->hasSubtype('Army')) {
+                $army = $permanent;
+                break;
+            }
+        }
+        $army ??= $s->createToken($player, "$type Army", CardInstance::CREATURE, 0, 0, subtypes: [CardInstance::CREATURE => [$type, 'Army']]);
+        $s->addCounters($player, $army, CardInstance::PLUS_ONE, $n);
+    }
+
+    /**
+     * Cumulative upkeep (CR 702.24a) : un marqueur d'âge sur la source, puis la sacrifier si son contrôleur n'a pas payé (le
+     * coût a été demandé par `paymentDue()` pour le total des marqueurs). Source partie : rien.
+     */
+    private function cumulativeUpkeep(GameState $s, int $player, string $cardId, ?bool $paid): void
+    {
+        $source = $s->player($player)->findOnBattlefield($cardId);
+        if ($source === null) {
+            return;
+        }
+        $s->addCounters($player, $source, CardInstance::AGE, 1);
+        if ($paid !== true) {
+            $s->sacrifice($player, [$cardId]);
+        }
+    }
+
+    /** « Chaque joueur pioche N cartes » (Faerie Mastermind), dans l'ordre du tour à partir du joueur actif. */
+    private function eachDraw(GameState $s, int $n): void
+    {
+        $id = $s->activePlayer;
+        foreach ($s->alivePlayerIds() as $ignored) {
+            if (!$s->player($id)->lost) {
+                $this->draw($s, $id, $n);
+            }
+            $id = $s->nextAlive($id);
+        }
+    }
+
     private function sacrificeSelf(GameState $s, int $player, string $cardId): void
     {
         if ($s->player($player)->findOnBattlefield($cardId) !== null) {

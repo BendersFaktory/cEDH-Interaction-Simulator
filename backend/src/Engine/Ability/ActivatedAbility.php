@@ -225,6 +225,12 @@ final class ActivatedAbility
         return new self(false, 'draw', $tap, $cost === null ? null : ManaCost::parse($cost), [], $n, $sacrifice, sorcerySpeed: $sorcerySpeed);
     }
 
+    /** `$cost : chaque joueur pioche $n cartes` (Faerie Mastermind : `{3}{U}`), sans engagement. */
+    public static function eachDraw(int $n, string $cost): self
+    {
+        return new self(false, 'each_draw', false, ManaCost::parse($cost), [], $n);
+    }
+
     /** `[coût], [{T}] : créer $n jetons $spec` (`Nom:F/E`, ex. Kher Keep : `{1}{R}`, {T} -> `Kobold:0/1`). */
     public static function token(string $spec, int $n, ?string $cost, bool $tap = true): self
     {
@@ -332,6 +338,7 @@ final class ActivatedAbility
                 . ($this->restriction($option) === null ? '' : ' (' . $this->restriction($option)->label() . ')'),
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
+            'each_draw' => sprintf('chaque joueur pioche %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'pump' => $this->spec,
             'untap' => $this->upkeepOnly ? 'dégager (entretien)' : 'dégager',
