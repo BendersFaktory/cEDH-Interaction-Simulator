@@ -6,11 +6,11 @@ namespace App\Service\Deck;
 
 use App\Engine\Card\CardDefinition;
 
-/** Deck Commander chargé : définitions + URL d'images (pour l'affichage), instanciable pour n'importe quel siège. */
+/** Deck Commander chargé (un commandant, ou deux avec Partner) : définitions + URL d'images (pour l'affichage), instanciable pour n'importe quel siège. */
 final class LoadedDeck
 {
     /**
-     * @param list<CardDefinition> $library 99 cartes, une entrée par exemplaire
+     * @param list<CardDefinition> $library 99 cartes (98 avec un partenaire), une entrée par exemplaire
      * @param array<string, array{small: ?string, normal: ?string}> $images nom de carte => URL d'images
      */
     public function __construct(
@@ -18,20 +18,26 @@ final class LoadedDeck
         public readonly array $library,
         public readonly array $images = [],
         public readonly bool $degraded = false,
+        public readonly ?CardDefinition $partner = null, // second commandant (Partner)
     ) {
     }
 
-    /** Même forme et mêmes identifiants (`p<siège>_c<n>`, commandant d'abord) que `Decks::commanderDemo()`. */
+    /**
+     * Même forme et mêmes identifiants (`p<siège>_c<n>`, commandant d'abord, puis le partenaire) que `Decks::commanderDemo()`.
+     *
+     * @return array{commander: \App\Engine\Game\CardInstance, partner?: \App\Engine\Game\CardInstance, library: list<\App\Engine\Game\CardInstance>}
+     */
     public function instantiate(int $playerId): array
     {
         $n = 0;
         $commander = $this->commander->instantiate(sprintf('p%d_c%d', $playerId, $n++), true);
+        $partner = $this->partner?->instantiate(sprintf('p%d_c%d', $playerId, $n++), true);
         $library = [];
         foreach ($this->library as $definition) {
             $library[] = $definition->instantiate(sprintf('p%d_c%d', $playerId, $n++));
         }
 
-        return ['commander' => $commander, 'library' => $library];
+        return ['commander' => $commander] + ($partner === null ? [] : ['partner' => $partner]) + ['library' => $library];
     }
 
     /** Forme stockée en base : bibliothèque compactée en `[définition, quantité]` (les basiques se répètent). */
@@ -52,7 +58,7 @@ final class LoadedDeck
             'library' => array_map(static fn (array $g): array => [$g[0]->toArray(), $g[1]], $groups),
             'images' => $this->images,
             'degraded' => $this->degraded,
-        ];
+        ] + ($this->partner === null ? [] : ['partner' => $this->partner->toArray()]);
     }
 
     public static function fromArray(array $d): self
@@ -65,6 +71,9 @@ final class LoadedDeck
             }
         }
 
-        return new self(CardDefinition::fromArray($d['commander']), $library, $d['images'] ?? [], (bool) ($d['degraded'] ?? false));
+        return new self(
+            CardDefinition::fromArray($d['commander']), $library, $d['images'] ?? [], (bool) ($d['degraded'] ?? false),
+            isset($d['partner']) ? CardDefinition::fromArray($d['partner']) : null,
+        );
     }
 }

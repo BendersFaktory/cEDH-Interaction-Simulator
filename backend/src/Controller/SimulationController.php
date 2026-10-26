@@ -36,13 +36,13 @@ final class SimulationController extends AbstractController
             $controllers[(int) $id] = (string) $key;
         }
 
-        // Decks optionnels : {"decks": {"0": "<decklist>" | {"decklist": "...", "commander": "..."}}} ; sièges absents = deck de démo.
+        // Decks optionnels : {"decks": {"0": "<decklist>" | {"decklist": "...", "commander": "...", "partner": "..."}}} ; sièges absents = deck de démo.
         $decks = [];
         $problems = [];
         foreach (($body['decks'] ?? []) as $id => $spec) {
             $list = is_array($spec) ? (string) ($spec['decklist'] ?? '') : (string) $spec;
             try {
-                $decks[(int) $id] = $this->deckLoader->load($list, is_array($spec) ? ($spec['commander'] ?? null) : null);
+                $decks[(int) $id] = $this->deckLoader->load($list, is_array($spec) ? ($spec['commander'] ?? null) : null, is_array($spec) ? ($spec['partner'] ?? null) : null);
             } catch (DeckLoadException $e) {
                 $problems["J$id"] = $e->problems;
             }

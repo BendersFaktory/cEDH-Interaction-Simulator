@@ -436,7 +436,8 @@ final class PriorityManager
         $s->hurtByMana($a->player(), $pain);     // Ancient Tomb, Talismans, Mana Confluence
         // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
         $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);
-        $s->queueOpponentCastTriggers($a->player(), $card); // Rhystic Study
+        $s->spellsCast[$a->player()] = ($s->spellsCast[$a->player()] ?? 0) + 1;
+        $s->queueOpponentCastTriggers($a->player(), $card); // Rhystic Study, Kraum
 
         // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
         $s->priority->passed = [];

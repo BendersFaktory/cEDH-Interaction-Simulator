@@ -72,6 +72,19 @@ final class GameState
      */
     public array $delayedTriggers = [];
     /**
+     * Sorts lancés ce tour par joueur (Kraum : deuxième sort d'un adversaire), remis à zéro à chaque nouveau tour. Une copie
+     * n'est pas lancée. Sérialisé sous `spellsCast`, omis quand vide.
+     *
+     * @var array<int, int>
+     */
+    public array $spellsCast = [];
+    /**
+     * Joueurs blessés au combat ce tour (Tymna), remis à zéro à chaque nouveau tour. Sérialisé sous `combatDamaged`, omis quand vide.
+     *
+     * @var list<int>
+     */
+    public array $combatDamaged = [];
+    /**
      * Stops de l'auto-pass par joueur (voir StopConfig) ; un joueur absent garde le comportement par défaut. Sérialisé
      * sous la clé `stops`, omise quand le tableau est vide (ne gonfle pas les états des parties sans config).
      *
@@ -462,7 +475,8 @@ final class GameState
     {
         foreach ($card->triggers as $index => $trigger) {
             if ($trigger->event === $event && ($spell === null || $trigger->matches($spell))
-                && ($trigger->filter !== TriggeredAbility::TAPPED || $card->tapped)) {
+                && ($trigger->filter !== TriggeredAbility::TAPPED || $card->tapped)
+                && ($trigger->filter !== TriggeredAbility::SECOND_SPELL || ($this->spellsCast[$opponent] ?? 0) === 2)) {
                 $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index, opponent: $opponent);
             }
         }
@@ -626,6 +640,12 @@ final class GameState
         if ($this->sbaResume !== null) {
             $d['sbaResume'] = $this->sbaResume->toArray();
         }
+        if ($this->spellsCast !== []) {
+            $d['spellsCast'] = $this->spellsCast;
+        }
+        if ($this->combatDamaged !== []) {
+            $d['combatDamaged'] = $this->combatDamaged;
+        }
 
         return $d;
     }
@@ -665,6 +685,10 @@ final class GameState
             $s->selection = ['player' => (int) $sel['player'], 'kind' => (string) $sel['kind'], 'count' => (int) $sel['count'], 'source' => (string) $sel['source'], 'draw' => (int) $sel['draw']];
         }
         $s->delayedTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['delayedTriggers'] ?? []);
+        foreach ($d['spellsCast'] ?? [] as $id => $count) {
+            $s->spellsCast[(int) $id] = (int) $count;
+        }
+        $s->combatDamaged = array_map('intval', $d['combatDamaged'] ?? []);
         $s->stack = array_map([StackItem::class, 'fromArray'], $d['stack']);
         $s->landsPlayed = (int) $d['landsPlayed'];
         $s->nextStackId = (int) $d['nextStackId'];

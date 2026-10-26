@@ -9,13 +9,13 @@ use App\Engine\Card\Decks;
 final class GameFactory
 {
     /**
-     * Crée une partie Commander (40 PV, commandant en zone de commandement, main de 7).
+     * Crée une partie Commander (40 PV, commandant(s) en zone de commandement, main de 7).
      * L'avant-partie (mulligan de Londres) commence ici : `mulligan` est initialisé, MulliganManager la mène au premier advance().
      * TODO: pioche de départ configurable, ordre des sièges aléatoire.
      *
      * @param array<int, string> $controllers id joueur => clé d'agent.
      *        Exemple « tu joues J0 contre 3 IA » : [0 => 'human:auto', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic']
-     * @param (callable(int): array{commander: CardInstance, library: list<CardInstance>})|null $deckBuilder
+     * @param (callable(int): array{commander: CardInstance, partner?: ?CardInstance, library: list<CardInstance>})|null $deckBuilder
      */
     public static function create(int $seed, array $controllers, ?callable $deckBuilder = null, int $startingLife = 40): GameState
     {
@@ -31,7 +31,7 @@ final class GameFactory
             $deck = $deckBuilder($id);
             Decks::validate($deck, $id);
             $player = new PlayerState($id, $startingLife, $rng->shuffle($deck['library']));
-            $player->command[] = $deck['commander'];
+            $player->command = Decks::commanders($deck); // un partenaire (Partner) rejoint aussi la zone de commandement
             $players[$id] = $player;
         }
 

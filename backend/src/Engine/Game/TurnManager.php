@@ -36,6 +36,10 @@ final class TurnManager
         if ($s->phase->isMain()) {
             $s->fireDelayedTriggers(TriggeredAbility::NEXT_MAIN);
         }
+        // « Au début de chacune de vos phases principales d'après combat » (Tymna the Weaver).
+        if ($s->phase === Phase::Main2) {
+            $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::POSTCOMBAT_MAIN);
+        }
         // Triggers « au début de votre étape de fin » : idem, à l'étape de fin du joueur actif.
         if ($s->phase === Phase::End) {
             $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::END_STEP);
@@ -115,6 +119,8 @@ final class TurnManager
         }
         $s->activePlayer = $s->nextAlive($s->activePlayer);
         $s->landsPlayed = 0;
+        $s->spellsCast = [];
+        $s->combatDamaged = [];
         $s->phase = Phase::Untap;
         $s->stepStarted = false;
     }

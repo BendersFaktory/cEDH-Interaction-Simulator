@@ -21,26 +21,46 @@ final class Decks
     public const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes'];
 
     /**
-     * Règles de construction Commander : commandant créature légendaire (CR 903.3), 99 cartes en bibliothèque (CR 903.5a),
-     * singleton hors terrains de base
-     * (CR 903.5b) et identité de couleurs (CR 903.4) : toute carte doit avoir une identité incluse dans celle du commandant.
+     * Règles de construction Commander : commandant créature légendaire (CR 903.3), deux commandants seulement si les deux
+     * ont Partner (CR 702.124), 100 cartes commandants compris (99 en bibliothèque, 98 avec un partenaire, CR 903.5a),
+     * singleton hors terrains de base (CR 903.5b) et identité de couleurs (CR 903.4) : toute carte doit avoir une identité
+     * incluse dans celle des commandants réunis (CR 702.124c).
      *
-     * @param array{commander: CardInstance, library: list<CardInstance>} $deck
+     * @param array{commander: CardInstance, partner?: ?CardInstance, library: list<CardInstance>} $deck
      * @throws \InvalidArgumentException
      */
     public static function validate(array $deck, int $playerId): void
     {
-        if (!$deck['commander']->isLegendary() || !$deck['commander']->isCreature()) {
+        $commanders = self::commanders($deck);
+        foreach ($commanders as $commander) {
+            if (!$commander->isLegendary() || !$commander->isCreature()) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Joueur %d : le commandant « %s » doit être une créature légendaire.', $playerId, $commander->name,
+                ));
+            }
+        }
+        if (count($commanders) === 2) {
+            foreach ($commanders as $commander) {
+                if (!$commander->hasKeyword(CardInstance::PARTNER)) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Joueur %d : deux commandants exigent Partner, « %s » ne l\'a pas.', $playerId, $commander->name,
+                    ));
+                }
+            }
+            if ($commanders[0]->name === $commanders[1]->name) {
+                throw new \InvalidArgumentException(sprintf('Joueur %d : « %s » est en plusieurs exemplaires.', $playerId, $commanders[0]->name));
+            }
+        }
+        $size = self::LIBRARY_SIZE + 1 - count($commanders);
+        if (count($deck['library']) !== $size) {
             throw new \InvalidArgumentException(sprintf(
-                'Joueur %d : le commandant « %s » doit être une créature légendaire.', $playerId, $deck['commander']->name,
+                'Joueur %d : la bibliothèque compte %d cartes au lieu de %d.', $playerId, count($deck['library']), $size,
             ));
         }
-        if (count($deck['library']) !== self::LIBRARY_SIZE) {
-            throw new \InvalidArgumentException(sprintf(
-                'Joueur %d : la bibliothèque compte %d cartes au lieu de %d.', $playerId, count($deck['library']), self::LIBRARY_SIZE,
-            ));
+        $seen = [];
+        foreach ($commanders as $commander) {
+            $seen[$commander->name] = true;
         }
-        $seen = [$deck['commander']->name => true];
         foreach ($deck['library'] as $card) {
             if (isset($seen[$card->name]) && !in_array($card->name, self::BASIC_LANDS, true)) {
                 throw new \InvalidArgumentException(sprintf(
@@ -49,16 +69,33 @@ final class Decks
             }
             $seen[$card->name] = true;
         }
-        $allowed = array_map(static fn (Color $c) => $c->symbol(), $deck['commander']->colorIdentity());
+        $allowed = [];
+        foreach ($commanders as $commander) {
+            foreach ($commander->colorIdentity() as $color) {
+                $allowed[$color->symbol()] = $color->symbol();
+            }
+        }
+        $names = implode(' + ', array_map(static fn (CardInstance $c): string => $c->name, $commanders));
         foreach ($deck['library'] as $card) {
             $outside = array_diff(array_map(static fn (Color $c) => $c->symbol(), $card->colorIdentity()), $allowed);
             if ($outside !== []) {
                 throw new \InvalidArgumentException(sprintf(
                     'Joueur %d : « %s » (couleurs %s) sort de l\'identité de couleurs du commandant « %s » (%s).',
-                    $playerId, $card->name, implode('', $outside), $deck['commander']->name, implode('', $allowed) ?: 'incolore',
+                    $playerId, $card->name, implode('', $outside), $names, implode('', $allowed) ?: 'incolore',
                 ));
             }
         }
+    }
+
+    /**
+     * Commandants d'un deck (le partenaire éventuel en second).
+     *
+     * @param array{commander: CardInstance, partner?: ?CardInstance, library: list<CardInstance>} $deck
+     * @return list<CardInstance>
+     */
+    public static function commanders(array $deck): array
+    {
+        return isset($deck['partner']) ? [$deck['commander'], $deck['partner']] : [$deck['commander']];
     }
 
     /**

@@ -6,7 +6,8 @@ namespace App\Service\Deck;
 
 /**
  * Lit une decklist texte (formats Moxfield / Archidekt / MTGO) : `1 Sol Ring`, `1x Sol Ring (C21) 263 *F*`, `Sol Ring`.
- * Commandant : section `Commander` / `Commandant`, ou ligne préfixée `Commander:` / `CMDR:`.
+ * Commandant : section `Commander` / `Commandant`, ou ligne préfixée `Commander:` / `CMDR:` ; un second commandant (Partner)
+ * est rendu sous `partner`, les suivants sont ignorés (`Decks::validate()` refuse un second commandant sans Partner).
  * Les commentaires (`//`, `#`) sont ignorés ; `Sideboard` / `Maybeboard` et ce qui suit sont ignorés.
  */
 final class DecklistParser
@@ -15,10 +16,11 @@ final class DecklistParser
     private const COMMANDER_SECTIONS = ['commander', 'commandant', 'commanders'];
     private const MAIN_SECTIONS = ['deck', 'mainboard', 'main', 'maindeck'];
 
-    /** @return array{commander: ?string, entries: array<string, int>} entrées : nom => quantité (dans l'ordre d'apparition) */
+    /** @return array{commander: ?string, partner: ?string, entries: array<string, int>} entrées : nom => quantité (dans l'ordre d'apparition) */
     public static function parse(string $text): array
     {
         $commander = null;
+        $partner = null;
         $entries = [];
         $section = 'main';
 
@@ -62,12 +64,16 @@ final class DecklistParser
             }
 
             if ($isCommander) {
-                $commander ??= $name;
+                if ($commander === null) {
+                    $commander = $name;
+                } elseif ($name !== $commander) {
+                    $partner ??= $name;
+                }
                 continue;
             }
             $entries[$name] = ($entries[$name] ?? 0) + $quantity;
         }
 
-        return ['commander' => $commander, 'entries' => $entries];
+        return ['commander' => $commander, 'partner' => $partner, 'entries' => $entries];
     }
 }

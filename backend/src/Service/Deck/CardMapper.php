@@ -24,7 +24,7 @@ final class CardMapper
         'vigilance' => CardInstance::VIGILANCE, 'defender' => CardInstance::DEFENDER, 'menace' => CardInstance::MENACE,
         'first strike' => CardInstance::FIRST_STRIKE, 'double strike' => CardInstance::DOUBLE_STRIKE,
         'trample' => CardInstance::TRAMPLE, 'deathtouch' => CardInstance::DEATHTOUCH, 'lifelink' => CardInstance::LIFELINK,
-        'flash' => CardInstance::FLASH,
+        'flash' => CardInstance::FLASH, 'partner' => CardInstance::PARTNER,
     ];
     private const TYPES = [
         'land' => CardInstance::LAND, 'instant' => CardInstance::INSTANT, 'sorcery' => CardInstance::SORCERY,
@@ -361,6 +361,12 @@ final class CardMapper
         }
         if (preg_match('/^Whenever an opponent casts a spell, you may draw a card unless that player pays ((?:\{\d+\})+)\.$/', $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw_unless', 1, $m[1]); // Rhystic Study (« you may » : toujours)
+        }
+        if ($line === 'Whenever an opponent casts their second spell each turn, draw a card.') {
+            return new TriggeredAbility(TriggeredAbility::OPPONENT_CAST, 'draw', 1, filter: TriggeredAbility::SECOND_SPELL); // Kraum
+        }
+        if ($line === 'At the beginning of each of your postcombat main phases, you may pay X life, where X is the number of opponents that were dealt combat damage this turn. If you do, draw X cards.') {
+            return new TriggeredAbility(TriggeredAbility::POSTCOMBAT_MAIN, 'pay_life_draw'); // Tymna the Weaver
         }
         if ($isCreature && preg_match('/^When ~ dies' . $draw, $line, $m)) {
             return new TriggeredAbility(TriggeredAbility::DIES, 'draw', self::DRAW_COUNT[$m[1]]);

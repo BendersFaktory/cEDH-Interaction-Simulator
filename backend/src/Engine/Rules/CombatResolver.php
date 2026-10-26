@@ -111,6 +111,9 @@ final class CombatResolver
         foreach ($toPlayers as [$attacker, $defender, $amount]) {
             $victim = $s->player($defender);
             $victim->life -= $amount;
+            if ($amount > 0 && !in_array($defender, $s->combatDamaged, true)) {
+                $s->combatDamaged[] = $defender; // Tymna
+            }
             $payload = ['source' => $attacker->name, 'target' => 'player:' . $defender, 'amount' => $amount, 'life' => $victim->life, 'combat' => true];
             if ($attacker->commander) {
                 $key = $attackerOwner . ':' . $attacker->id;

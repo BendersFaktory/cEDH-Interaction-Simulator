@@ -46,6 +46,8 @@ final class CardInstance
     public const DEATHTOUCH = 'deathtouch';
     public const LIFELINK = 'lifelink';
     public const FLASH = 'flash';
+    /** Partner (CR 702.124) : deux commandants si les deux l'ont (`Decks::validate()`). Sans effet en jeu. */
+    public const PARTNER = 'partner';
 
     // Supertypes (CR 205.4).
     public const LEGENDARY = 'legendary';

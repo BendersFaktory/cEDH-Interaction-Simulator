@@ -29,8 +29,20 @@ const rows = computed(() => {
   ]
 })
 
-/** Dégâts de commandant : clé "propriétaire:idCommandant" => libellé et jauge sur 21. */
-const commanderDamage = computed(() => Object.entries(props.player.commanderDamage).map(([k, n]) => ({ k, owner: k.split(':')[0], n, pct: Math.min(100, (n / 21) * 100) })))
+/** Nom d'un commandant d'après son id, cherché dans les zones de son propriétaire (deux commandants avec Partner). */
+const commanderName = (owner: number, id: string): string => {
+  const p = store.view.players[owner]
+  const zones = p ? [p.command, p.battlefield, p.graveyard, p.exile, p.hand] : []
+  return zones.flatMap((z) => z ?? []).find((c) => c.id === id)?.name ?? `J${owner}`
+}
+
+/** Dégâts de commandant : clé "propriétaire:idCommandant" => libellé et jauge sur 21 (une jauge par commandant). */
+const commanderDamage = computed(() =>
+  Object.entries(props.player.commanderDamage).map(([k, n]) => {
+    const [owner, id] = k.split(':')
+    return { k, owner, name: commanderName(Number(owner), id), n, pct: Math.min(100, (n / 21) * 100) }
+  }),
+)
 </script>
 
 <template>
@@ -58,7 +70,7 @@ const commanderDamage = computed(() => Object.entries(props.player.commanderDama
           >{{ r.s }}<sup>*</sup></span
         >
       </span>
-      <span v-for="d in commanderDamage" :key="d.k" class="cmd-damage" :class="{ lethal: d.n >= 15 }" :title="`Dégâts du commandant de J${d.owner} : ${d.n}/21`">
+      <span v-for="d in commanderDamage" :key="d.k" class="cmd-damage" :class="{ lethal: d.n >= 15 }" :title="`Dégâts de ${d.name} (commandant de J${d.owner}) : ${d.n}/21`">
         <span class="cmd-damage-label">⚔ J{{ d.owner }} {{ d.n }}/21</span>
         <span class="cmd-damage-bar"><span :style="{ width: `${d.pct}%` }" /></span>
       </span>

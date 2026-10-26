@@ -90,6 +90,7 @@ final class StackResolver
                 'mana' => $ability->amount > 0 ? $this->addMana($s, $item->controller, str_repeat('{C}', $ability->amount), $item->id) : null,
                 'pact' => $paid === true ? null : (new StateBasedActions())->eliminate($s, $item->controller, 'pact_unpaid'),
                 'draw_unless' => $paid === true ? null : $this->draw($s, $item->controller, $ability->amount), // Rhystic Study
+                'pay_life_draw' => $this->payLifeDraw($s, $item->controller, $card->name), // Tymna the Weaver
                 default => null,
             };
 
@@ -315,6 +316,20 @@ final class StackResolver
             }
         }
         $s->loseLife($player, $effect->lifeLoss, $source);
+    }
+
+    /**
+     * Tymna the Weaver : X = adversaires du contrôleur blessés au combat ce tour (compté à la résolution) ; il paie X PV et pioche
+     * X cartes. Le « you may » est choisi si X > 0 et qu'il garde au moins 1 PV (CR 119.4 permettrait d'aller à 0).
+     */
+    private function payLifeDraw(GameState $s, int $player, string $source): void
+    {
+        $x = count(array_filter($s->combatDamaged, static fn (int $id): bool => $id !== $player));
+        if ($x === 0 || $s->player($player)->life <= $x) {
+            return;
+        }
+        $s->payLife($player, $x, $source);
+        $this->draw($s, $player, $x);
     }
 
     /** Pioche : une bibliothèque vide fait perdre le joueur à la prochaine vérification des SBA (CR 704.5b). */

@@ -22,7 +22,12 @@ use App\Engine\Game\CardInstance;
  * devient la cible `player:<id>` du trigger) avec l'effet `draw_unless` (Rhystic Study : son contrôleur pioche `amount` cartes
  * sauf si le lanceur paie `spec`, décision du lanceur à la résolution comme Daze ; le « you may » est toujours choisi).
  *
- * Filtre (`filter`) : pour `cast`, `''` = tout sort, `instant_sorcery` = éphémère ou rituel ; pour les autres événements, `tapped` =
+ * `postcombat_main` (début de chacune des phases principales d'après combat de son contrôleur) avec l'effet `pay_life_draw`
+ * (Tymna the Weaver : X = nombre d'adversaires blessés au combat ce tour, `GameState::$combatDamaged` ; son contrôleur paie X PV
+ * et pioche X cartes ; le « you may » est choisi tant que X > 0 et que les PV restent positifs).
+ *
+ * Filtre (`filter`) : pour `opponent_cast`, `second_spell` = seulement le deuxième sort du lanceur ce tour (Kraum,
+ * `GameState::$spellsCast`) ; pour `cast`, `''` = tout sort, `instant_sorcery` = éphémère ou rituel ; pour les autres événements, `tapped` =
  * seulement si la source est engagée (Mana Vault au début de l'étape de pioche).
  *
  * Triggers retardés (CR 603.7, créés par la résolution d'un sort, gardés dans `GameState::$delayedTriggers` jusqu'à leur
@@ -43,19 +48,22 @@ final class TriggeredAbility
     public const OPPONENT_CAST = 'opponent_cast';
     public const DISCARD = 'discard';
     public const DRAW_STEP = 'draw_step';
+    public const POSTCOMBAT_MAIN = 'postcombat_main';
     /** Triggers retardés (voir l'en-tête). */
     public const NEXT_UPKEEP = 'next_upkeep';
     public const NEXT_MAIN = 'next_main';
 
     /** Filtre de `cast` : le sort lancé est un éphémère ou un rituel. */
     public const INSTANT_SORCERY = 'instant_sorcery';
+    /** Filtre de `opponent_cast` : le sort est le deuxième que le lanceur lance ce tour (Kraum). */
+    public const SECOND_SPELL = 'second_spell';
 
     /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
     public const TAPPED = 'tapped';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::NEXT_UPKEEP, self::NEXT_MAIN];
-    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless'];
-    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED];
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::NEXT_UPKEEP, self::NEXT_MAIN];
+    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw'];
+    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL];
 
     public function __construct(
         public readonly string $event,
@@ -71,7 +79,7 @@ final class TriggeredAbility
             throw new \InvalidArgumentException("Effet de trigger inconnu : $effect");
         }
         if (!in_array($filter, self::FILTERS, true) || ($filter === self::INSTANT_SORCERY && $event !== self::CAST)
-            || ($filter === self::TAPPED && $event === self::CAST)) {
+            || ($filter === self::TAPPED && $event === self::CAST) || ($filter === self::SECOND_SPELL && $event !== self::OPPONENT_CAST)) {
             throw new \InvalidArgumentException("Filtre de trigger invalide : $filter ($event)");
         }
         if ($effect === 'token') {
@@ -113,9 +121,10 @@ final class TriggeredAbility
             self::ATTACKS => 'Quand elle attaque',
             self::END_STEP => 'Au début de votre étape de fin',
             self::CAST => $this->filter === self::INSTANT_SORCERY ? 'Quand vous lancez un éphémère ou un rituel' : 'Quand vous lancez un sort',
-            self::OPPONENT_CAST => 'Quand un adversaire lance un sort',
+            self::OPPONENT_CAST => $this->filter === self::SECOND_SPELL ? 'Quand un adversaire lance son deuxième sort du tour' : 'Quand un adversaire lance un sort',
             self::DISCARD => 'Quand vous défaussez une carte',
             self::DRAW_STEP => 'Au début de votre étape de pioche',
+            self::POSTCOMBAT_MAIN => 'Au début de votre phase principale d\'après combat',
             self::NEXT_UPKEEP => 'Au début de votre prochain entretien',
             self::NEXT_MAIN => 'Au début de votre prochaine phase principale',
         } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
@@ -128,6 +137,7 @@ final class TriggeredAbility
             'imprint' => 'exiler une carte de votre main (imprint)',
             'pact' => sprintf('payer %s ou perdre la partie', $this->spec),
             'draw_unless' => sprintf('piocher %d sauf s\'il paie %s', $this->amount, $this->spec),
+            'pay_life_draw' => 'payer X PV et piocher X (X = adversaires blessés au combat ce tour)',
             'mana' => sprintf('ajouter %s', $this->amount > 0 ? str_repeat('{C}', $this->amount) : 'rien'),
         };
 

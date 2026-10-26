@@ -388,7 +388,7 @@ final class LegalActionGenerator
             $ability = $pending->ability();
             $targetSets = $ability->targetsPlayer()
                 ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
-                : ($pending->opponent !== null ? [['player:' . $pending->opponent]] : [[]]); // Rhystic Study : le lanceur paiera
+                : ($pending->opponent !== null && $ability->effect === 'draw_unless' ? [['player:' . $pending->opponent]] : [[]]); // Rhystic Study : le lanceur paiera ; Kraum ne cible pas
             if ($ability->choosesHandCard()) {
                 // Imprint (Chrome Mox) : ne rien exiler, ou l'une des cartes éligibles de la main (non-artefact, non-terrain).
                 foreach ($s->player($playerId)->hand as $card) {
