@@ -126,7 +126,26 @@ export interface GameEvent {
 export interface ActionView {
   id: string
   label: string
-  type: 'pass' | 'land' | 'cast' | 'attack' | 'block' | 'done' | 'discard' | 'ability' | 'trigger' | 'assign' | 'keep' | 'mulligan' | 'bottom' | 'keepLegend' | 'scry' | 'pay' | 'putBack' | 'arrange'
+  type:
+    | 'pass'
+    | 'land'
+    | 'cast'
+    | 'attack'
+    | 'block'
+    | 'done'
+    | 'discard'
+    | 'ability'
+    | 'trigger'
+    | 'assign'
+    | 'keep'
+    | 'mulligan'
+    | 'bottom'
+    | 'keepLegend'
+    | 'scry'
+    | 'pay'
+    | 'putBack'
+    | 'arrange'
+    | 'chain'
   player: number
   cardId?: string
   targets?: string[]

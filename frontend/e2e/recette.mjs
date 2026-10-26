@@ -70,6 +70,10 @@ const DECK_21 = `CMDR: Recette, Azorius Envoy
 44 Island`
 // Même deck que le scénario 21, avec Mystical Tutor à la place de Divination (scénario 30).
 const DECK_TUTOR = DECK_21.replace('1 Divination', '1 Mystical Tutor')
+// Scénarios 33-38 (restes G1 à G3) : J0 avec Chrome Mox, Brainstorm, Ponder et Daze ; J1 (humain piloté) avec Mana Leak et Rhystic Study.
+const DECK_G = DECK_21.replace('44 Plains', '1 Chrome Mox\n1 Brainstorm\n1 Ponder\n1 Daze\n40 Plains')
+const DECK_G_J1 = DECK_21.replace('44 Plains', '1 Daze\n1 Rhystic Study\n42 Plains')
+const J0_J1_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
 const T0 = Date.now()
 try {
   await start('API', 'http://127.0.0.1:8000/api/simulations/0', 'php', ['-d', 'memory_limit=512M', '-d', 'variables_order=EGPCS', '-S', '127.0.0.1:8000', '-t', 'public'], BACK, {
@@ -230,6 +234,12 @@ async function run() {
     ['30', (b) => scenario(b, '30', s30)],
     ['31', (b) => scenario(b, '31', s31)],
     ['32', (b) => scenario(b, '32', s32)],
+    ['33', (b) => scenario(b, '33', s33)],
+    ['34', (b) => scenario(b, '34', s34)],
+    ['35', (b) => scenario(b, '35', s35)],
+    ['36', (b) => scenario(b, '36', s36)],
+    ['37', (b) => scenario(b, '37', s37)],
+    ['38', (b) => scenario(b, '38', s38)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1654,4 +1664,210 @@ async function s32({ page, log, shot, problem, openGame }) {
   log('32 vitesses : 4x / 0.5x =', slow > 0 ? (fast / slow).toFixed(2) : 'n/a')
   if (!(fast > slow)) problem(`recette vitesse : 4x n’avance pas plus vite que 0.5x (${fast} contre ${slow} événements en 1,5 s)`)
   await shot('32-clavier-vitesse')
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 33-38 : restes des lots G1 à G3, décisions vues par J0 dans l'UI. Un pilote API joue les sièges humains jusqu'à la situation
+// voulue (`want` renvoie 'stop', une action à jouer, ou null pour la politique par défaut : terrain, passer, terminer), sur une
+// graine après l'autre ; seules les graines où la carte voulue est en main de départ (`card`, du joueur `holder`) sont jouées.
+// L'UI n'ouvre que la partie trouvée.
+
+/** Action par défaut du pilote : jouer un terrain, sinon passer, sinon terminer une déclaration, sinon la première. */
+function defaultAction(acts) {
+  return acts.find((a) => a.type === 'land') ?? acts.find((a) => a.type === 'pass') ?? acts.find((a) => a.type === 'done') ?? acts[0]
+}
+
+/** Cherche une graine où `want(pending)` finit par renvoyer 'stop' ; renvoie { seed, sim } ou null. */
+async function seek(create, want, { seeds = 300, steps = 250, card = null, holder = 0 } = {}) {
+  for (let seed = 1; seed <= seeds; seed++) {
+    let sim = await create(seed)
+    if (card && !(await api.handOf(sim.id, holder)).names.includes(card)) continue
+    for (let i = 0; i < steps && sim.status === 'waiting' && sim.pending; i++) {
+      const acts = sim.pending.actions ?? []
+      const w = want(sim.pending)
+      if (w === 'stop') return { seed, sim }
+      const a = w ?? defaultAction(acts)
+      if (!a) break
+      sim = await api.decide(sim.id, a.id)
+    }
+  }
+  return null
+}
+
+/** Dernière ligne du journal contenant `text` (espaces normalisés), ou ''. */
+async function logLine(page, text) {
+  await page
+    .locator('.log ol li', { hasText: text })
+    .last()
+    .waitFor({ timeout: TIMEOUT })
+    .catch(() => {})
+  return (
+    (
+      await page
+        .locator('.log ol li', { hasText: text })
+        .last()
+        .textContent()
+        .catch(() => '')
+    )
+      ?.replace(/\s+/g, ' ')
+      .trim() ?? ''
+  )
+}
+
+/** Clique le bouton du groupe `title` dont le libellé contient `text`, puis attend la réponse du serveur. */
+async function clickIn(page, title, text) {
+  const button = page.locator(`.actions h4:has-text("${title}") ~ button:not([disabled])`, { hasText: text }).first()
+  await button.waitFor({ timeout: TIMEOUT })
+  const label = ((await button.textContent()) ?? '').replace(/\s+/g, ' ').trim()
+  await Promise.all([page.waitForResponse((r) => r.url().includes('/decisions') && r.request().method() === 'POST', { timeout: TIMEOUT }), button.click()])
+  return label
+}
+
+function castOf(acts, name) {
+  return acts.find((a) => a.type === 'cast' && a.label.includes(name))
+}
+
+// 33 : IMPRINT (Chrome Mox). J0 lance Chrome Mox ; en posant son trigger, il choisit la carte de sa main à exiler (« → exiler … »).
+async function s33({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_G),
+    (p) => {
+      if (p.actions.some((a) => a.type === 'trigger' && a.label.includes('→ exiler'))) return 'stop'
+      return castOf(p.actions, 'Chrome Mox') ?? null
+    },
+    { card: 'Chrome Mox' },
+  )
+  if (!found) return problem('recette imprint : aucune graine où J0 lance Chrome Mox avec une carte à exiler')
+  log('33 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('33a-imprint-choix')
+  const label = await clickIn(page, 'Triggers à mettre sur la pile', '→ exiler')
+  const exiled = label.split('→ exiler ')[1] ?? ''
+  const line = await logLine(page, '(imprint)')
+  log('33 choix :', label, '| journal :', line)
+  await shot('33b-imprint-fait')
+  if (!exiled || !line.includes(exiled)) problem(`recette imprint : le journal ne montre pas ${exiled} exilée par l'imprint (« ${line} »)`)
+}
+
+/** J0 et J1 humains : J1 pose Rhystic Study et lance Daze sur un sort de J0 ; J0 lance ses sorts (`castable` les filtre). */
+function pilotG(stopWhen, castable = () => true) {
+  return (p) => {
+    if (p.player === 0 && stopWhen(p)) return 'stop'
+    if (p.player === 1) {
+      const rhystic = castOf(p.actions, 'Rhystic Study')
+      const daze = p.actions.find((a) => a.type === 'cast' && a.label.includes('Daze') && p.stack.at(-1)?.controller === 0)
+      const refuse = p.actions.find((a) => a.type === 'pay' && !a.id.endsWith(':yes'))
+      return rhystic ?? daze ?? refuse ?? null
+    }
+    const pay = p.actions.find((a) => a.type === 'pay' && a.id.endsWith(':yes'))
+    if (pay) return pay
+    return p.actions.find((a) => a.type === 'cast' && !/Counterspell|Daze|Brainstorm|Ponder/.test(a.label) && castable(p, a)) ?? null
+  }
+}
+
+// 34 : PAIEMENT « SAUF SI PAIE » À LA MAIN. Daze de J1 sur un sort de J0 : J0 engage d'abord une source à la main (bouton de
+// mana pendant la décision), puis paie {1} ; le mana engagé à la main est dépensé (`CostPaid.fromPool`).
+async function s34({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createWithDecks(seed, J0_J1_HUMANS, { 0: DECK_21, 1: DECK_G_J1 }),
+    // J0 ne lance un sort qu'à partir de son troisième tour environ : il lui reste une source pour payer {1}.
+    pilotG(
+      (p) => p.actions.some((a) => a.type === 'pay' && a.id.endsWith(':yes') && a.label.includes('Daze')) && p.actions.some((a) => a.type === 'ability'),
+      (p) => p.turn >= 9,
+    ),
+    { card: 'Daze', holder: 1 },
+  )
+  if (!found) return problem('recette paiement : aucune graine où J0 peut payer le Daze de J1')
+  log('34 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('34a-paiement-choix')
+  const tapped = await clickIn(page, 'Capacités', '')
+  const paid = await clickIn(page, 'Payer pour la résolution ?', 'Payer {1}')
+  const line = await logLine(page, 'J0 paie {1} (Daze)')
+  const cost = (await api.events(found.sim.id)).filter((e) => e.type === 'CostPaid').at(-1)
+  log('34 source à la main :', tapped, '| choix :', paid, '| journal :', line, '| depuis la réserve :', JSON.stringify(cost?.payload.fromPool))
+  await shot('34b-paiement-fait')
+  if (!line.includes('J0 paie {1} (Daze)')) problem(`recette paiement : le journal ne montre pas le paiement de Daze (« ${line} »)`)
+  if (!Object.keys(cost?.payload.fromPool ?? {}).length) problem('recette paiement : le mana engagé à la main n’a pas servi au paiement')
+}
+
+// 35 : RHYSTIC STUDY. J1 contrôle Rhystic Study ; J0 lance un sort et refuse de payer {1} : J1 pioche.
+async function s35({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createWithDecks(seed, J0_J1_HUMANS, { 0: DECK_21, 1: DECK_G_J1 }),
+    pilotG((p) => p.actions.some((a) => a.type === 'pay' && a.label.includes('Rhystic Study'))),
+    { card: 'Rhystic Study', holder: 1 },
+  )
+  if (!found) return problem('recette Rhystic Study : aucune graine où J0 doit payer pour Rhystic Study')
+  log('35 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('35a-rhystic-choix')
+  const refused = await clickIn(page, 'Payer pour la résolution ?', 'Ne pas payer')
+  const line = await logLine(page, 'J0 ne paie pas {1} (Rhystic Study)')
+  const drew = (await api.events(found.sim.id)).filter((e) => e.type === 'CardDrawn').at(-1)
+  log('35 choix :', refused, '| journal :', line, '| pioche de J' + drew?.payload.player)
+  await shot('35b-rhystic-refus')
+  if (!refused.includes('J1 pioche')) problem(`recette Rhystic Study : le refus n'annonce pas la pioche de J1 (« ${refused} »)`)
+  if (!line.includes('J0 ne paie pas {1} (Rhystic Study)')) problem(`recette Rhystic Study : refus absent du journal (« ${line} »)`)
+  if (drew?.payload.player !== 1) problem('recette Rhystic Study : J1 n’a pas pioché après le refus')
+}
+
+// 36 : DAZE PAR SON COÛT ALTERNATIF. J0 répond à un sort adverse avec Daze en renvoyant une Île en main (`return:`).
+async function s36({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_G),
+    (p) => (p.actions.some((a) => a.type === 'cast' && a.label.includes('Daze') && a.label.includes('renvoyer en main')) && p.stack.at(-1)?.controller !== 0 ? 'stop' : null),
+    { card: 'Daze' },
+  )
+  if (!found) return problem('recette Daze : aucune graine où J0 peut lancer Daze en renvoyant une Île')
+  log('36 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('36a-daze-choix')
+  const label = await clickIn(page, 'Sorts', 'renvoyer en main')
+  const line = await logLine(page, 'renvoie')
+  log('36 choix :', label, '| journal :', line)
+  await shot('36b-daze-lance')
+  if (!line.includes('(Daze)')) problem(`recette Daze : le journal ne montre pas l'Île renvoyée en main par Daze (« ${line} »)`)
+}
+
+// 37 : BRAINSTORM. J0 lance Brainstorm, puis remet deux cartes de sa main sur sa bibliothèque, une à la fois.
+async function s37({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_G),
+    (p) => (p.actions.some((a) => a.type === 'putBack') ? 'stop' : (castOf(p.actions, 'Brainstorm') ?? null)),
+    { card: 'Brainstorm' },
+  )
+  if (!found) return problem('recette Brainstorm : aucune graine où J0 lance Brainstorm')
+  log('37 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('37a-brainstorm-choix')
+  const first = await clickIn(page, 'Remettre une carte de ta main', 'Remettre')
+  const second = await clickIn(page, 'Remettre une carte de ta main', 'Remettre')
+  const remise = page.locator('.log ol li', { hasText: 'remet une carte sur le dessus de sa bibliothèque (Brainstorm)' })
+  await remise
+    .nth(1)
+    .waitFor({ timeout: TIMEOUT })
+    .catch(() => {})
+  const lines = await remise.count()
+  log('37 choix :', first, '|', second, '| lignes du journal :', lines)
+  await shot('37b-brainstorm-fait')
+  if (lines < 2) problem(`recette Brainstorm : ${lines} carte(s) remise(s) au journal au lieu de 2`)
+}
+
+// 38 : PONDER. J0 lance Ponder et remet les trois cartes du dessus dans l'ordre proposé en premier, puis pioche.
+async function s38({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_G),
+    (p) => (p.actions.some((a) => a.type === 'arrange') ? 'stop' : (castOf(p.actions, 'Ponder') ?? null)),
+    { card: 'Ponder' },
+  )
+  if (!found) return problem('recette Ponder : aucune graine où J0 lance Ponder')
+  log('38 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('38a-ponder-choix')
+  const label = await clickIn(page, 'Remettre les cartes du dessus', 'Remettre dans cet ordre')
+  const line = await logLine(page, 'cartes du dessus (')
+  log('38 choix :', label, '| journal :', line)
+  await shot('38b-ponder-fait')
+  if (!/range \d cartes du dessus \(\d dessus, 0 dessous\)/.test(line)) problem(`recette Ponder : rangement absent du journal (« ${line} »)`)
 }

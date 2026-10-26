@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Agent;
 
+use App\Engine\Ability\AbilityManager;
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Action\Action;
 use App\Engine\Action\ActivateAbility;
@@ -120,12 +121,16 @@ final class HeuristicAgent implements PlayerAgent
 
         $top = $state->topOfStack();
 
-        if ($top !== null && $top->controller !== $playerId && $this->threat($state, $playerId, $top) >= $this->counterThreshold) {
+        if ($top !== null && $top->controller !== $playerId && ($threat = $this->threat($state, $playerId, $top)) >= $this->counterThreshold) {
             foreach ($legal as $action) {
                 if ($action instanceof CastSpell && $this->isCounter($state, $action) && !$this->isPitch($action)
                     && $action->targets === ['stack:' . $top->id] && $this->counterWorks($state, $playerId, $action, $top)) {
                     return $action;
                 }
+            }
+            // Faute de contresort payable : Force of Will / Force of Negation en exilant une carte, contre une menace énorme seulement.
+            if ($threat >= $this->hugeThreat && ($pitch = $this->cheapestPitch($state, $playerId, $legal, $top)) !== null) {
+                return $pitch;
             }
         }
 
@@ -341,6 +346,9 @@ final class HeuristicAgent implements PlayerAgent
                 $refuse ??= $a;
             }
         }
+        if ($refuse !== null && $state->topOfStack()?->trigger?->effect === 'pay_untap') {
+            return $refuse; // Mana Vault : payer {4} pour la dégager rapporte {C}{C}{C}, une perte nette d'un mana
+        }
         if ($pay === null || $refuse === null || $state->topOfStack()?->trigger?->effect !== 'draw_unless') {
             return $legal[0] ?? AutoPassAgent::pass($legal, $playerId);
         }
@@ -378,7 +386,7 @@ final class HeuristicAgent implements PlayerAgent
         }
         $p = $state->player($playerId);
         $lands = count(array_filter([...$p->battlefield, ...$p->hand], static fn (CardInstance $c) => $c->isLand()));
-        $potential = $this->manaPotential($p->battlefield) + count(array_filter($p->hand, static fn (CardInstance $c) => $c->isLand()));
+        $potential = $this->manaPotential($p, $p->battlefield) + count(array_filter($p->hand, static fn (CardInstance $c) => $c->isLand()));
         $useful = [];
         $rest = [];
         foreach (array_slice($p->library, 0, $state->selection['count'] ?? 0) as $card) {
@@ -950,15 +958,15 @@ final class HeuristicAgent implements PlayerAgent
         $handLandCards = array_values(array_filter($p->hand, static fn (CardInstance $c) => $c->isLand()));
         $lands = count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isLand()));
         $handLands = count($handLandCards);
-        $produced = $this->producedSymbols($p->battlefield);
-        $reachable = $this->producedSymbols([...$p->battlefield, ...$handLandCards]);
-        $potential = $this->manaPotential($p->battlefield) + $handLands;
+        $produced = $this->producedSymbols($p, $p->battlefield);
+        $reachable = $this->producedSymbols($p, [...$p->battlefield, ...$handLandCards]);
+        $potential = $this->manaPotential($p, $p->battlefield) + $handLands;
         $best = null;
         foreach ($discards as $d) {
             $card = $p->findInHand($d->cardId);
             if ($card->isLand()) {
                 if ($lands >= 5 || ($lands >= 3 && $handLands >= 3) || ($state->mulligan !== null && $handLands >= 5)) {
-                    $score = 1000 + (array_diff_key($this->producedSymbols([$card]), $produced) === [] ? 5 : 0);
+                    $score = 1000 + (array_diff_key($this->producedSymbols($p, [$card]), $produced) === [] ? 5 : 0);
                 } else {
                     $score = $lands < 4 ? -1000 : -1;
                 }
@@ -980,20 +988,20 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
-     * Symboles (WUBRGC) que ces permanents savent produire (toutes options de leurs capacités de mana ; un terrain en main
-     * compte via `abilities()`).
+     * Symboles (WUBRGC) que ces permanents savent produire (options permises de leurs capacités de mana : une capacité
+     * dynamique, Chrome Mox ou Fellwar Stone, ne compte que ses couleurs du moment ; un terrain en main compte via `abilities()`).
      *
      * @param iterable<CardInstance> $cards
      * @return array<string, true>
      */
-    private function producedSymbols(iterable $cards): array
+    private function producedSymbols(PlayerState $p, iterable $cards): array
     {
         $set = [];
         foreach ($cards as $card) {
             foreach ($card->abilities() as $ability) {
                 if ($ability->isManaAbility) {
-                    foreach ($ability->options as $option) {
-                        foreach ($option as $color) {
+                    foreach (AbilityManager::allowedOptions($p, $card, $ability) as $i) {
+                        foreach ($ability->options[$i] as $color) {
                             $set[$color->symbol()] = true;
                         }
                     }
@@ -1009,15 +1017,15 @@ final class HeuristicAgent implements PlayerAgent
      *
      * @param iterable<CardInstance> $cards
      */
-    private function manaPotential(iterable $cards): int
+    private function manaPotential(PlayerState $p, iterable $cards): int
     {
         $total = 0;
         foreach ($cards as $card) {
             $best = 0;
             foreach ($card->abilities() as $ability) {
                 if ($ability->isManaAbility) {
-                    foreach ($ability->options as $option) {
-                        $best = max($best, count($option));
+                    foreach (AbilityManager::allowedOptions($p, $card, $ability) as $i) {
+                        $best = max($best, count($ability->options[$i]));
                     }
                 }
             }
@@ -1381,6 +1389,34 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /** Coût alternatif par exil d'une carte de la main (Force of Will) : l'IA ne le paie jamais (deux cartes pour une). */
+    /**
+     * Contresort à coût alternatif par exil sur `$top` qui coûte le moins : la carte exilée de plus faible valeur de mana, un
+     * contresort gardé en dernier recours (égalité : premier proposé). Null s'il n'y en a pas.
+     *
+     * @param list<Action> $legal
+     */
+    private function cheapestPitch(GameState $state, int $playerId, array $legal, \App\Engine\Game\StackItem $top): ?CastSpell
+    {
+        $p = $state->player($playerId);
+        $best = null;
+        foreach ($legal as $action) {
+            if (!$action instanceof CastSpell || !$this->isPitch($action) || !$this->isCounter($state, $action)
+                || $action->targets !== ['stack:' . $top->id] || !$this->counterWorks($state, $playerId, $action, $top)) {
+                continue;
+            }
+            $cost = 0;
+            foreach (explode(',', substr((string) $action->alt, strlen(CastSpell::ALT_PITCH))) as $id) {
+                $card = $p->findInHand($id);
+                $cost += ($card?->cost ?? 0) + ($card?->hasEffect('counter') ? 100 : 0);
+            }
+            if ($best === null || $cost < $best[1]) {
+                $best = [$action, $cost];
+            }
+        }
+
+        return $best[0] ?? null;
+    }
+
     private function isPitch(CastSpell $action): bool
     {
         return str_starts_with((string) $action->alt, CastSpell::ALT_PITCH);
@@ -1404,10 +1440,11 @@ final class HeuristicAgent implements PlayerAgent
         }
         $pact = $card->effect('pact');
         if ($pact !== null) {
-            $battlefield = $state->player($playerId)->battlefield;
+            $p = $state->player($playerId);
+            $battlefield = $p->battlefield;
             $cost = \App\Engine\Mana\ManaCost::parse((string) $pact->payCost);
 
-            return $this->manaPotential($battlefield) >= $cost->manaValue() && isset($this->producedSymbols($battlefield)['U']);
+            return $this->manaPotential($p, $battlefield) >= $cost->manaValue() && isset($this->producedSymbols($p, $battlefield)['U']);
         }
 
         return true;

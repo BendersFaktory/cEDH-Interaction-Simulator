@@ -24,7 +24,7 @@ function act(a: ActionView): void {
 
 const groups = computed(() => {
   const actions = store.pending?.actions ?? []
-  return [
+  const listed = [
     { title: 'Main de départ', items: actions.filter((a) => a.type === 'keep' || a.type === 'mulligan') },
     { title: 'Mettre au fond', items: actions.filter((a) => a.type === 'bottom') },
     { title: 'Attaquer', items: actions.filter((a) => a.type === 'attack') },
@@ -36,13 +36,17 @@ const groups = computed(() => {
     { title: 'Scry : ranger le dessus de la bibliothèque', items: actions.filter((a) => a.type === 'scry') },
     { title: 'Remettre une carte de ta main sur ta bibliothèque', items: actions.filter((a) => a.type === 'putBack') },
     { title: 'Remettre les cartes du dessus dans l’ordre, ou mélanger', items: actions.filter((a) => a.type === 'arrange') },
+    { title: 'Chain of Vapor : sacrifier un terrain pour copier le sort ?', items: actions.filter((a) => a.type === 'chain') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },
     { title: 'Capacités', items: actions.filter((a) => a.type === 'ability') },
     { title: 'Sorts', items: actions.filter((a) => a.type === 'cast') },
     { title: 'Priorité', items: actions.filter((a) => a.type === 'pass') },
-  ].filter((g) => g.items.length)
+  ]
+  // Un type d'action que le panneau ne connaît pas reste proposé (sinon la partie serait bloquée sur une décision invisible).
+  const known = new Set(listed.flatMap((g) => g.items))
+  return [...listed, { title: 'Autres choix', items: actions.filter((a) => !known.has(a)) }].filter((g) => g.items.length)
 })
 </script>
 

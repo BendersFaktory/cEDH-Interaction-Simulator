@@ -35,6 +35,13 @@ final class StackResolver
                 return $payer === null || $s->player($payer)->lost ? null : ['player' => $payer, 'cost' => $top->trigger->spec, 'source' => $top->card->name];
             }
 
+            if ($top->trigger->effect === 'pay_untap') {
+                // Mana Vault : rien à décider si elle n'est plus engagée sur le champ de bataille.
+                $source = $s->player($top->controller)->findOnBattlefield($top->card->id);
+
+                return $source !== null && $source->tapped ? ['player' => $top->controller, 'cost' => $top->trigger->spec, 'source' => $top->card->name] : null;
+            }
+
             return $top->trigger->effect === 'pact' ? ['player' => $top->controller, 'cost' => $top->trigger->spec, 'source' => $top->card->name] : null;
         }
         if ($top->isAbility()) {
@@ -85,6 +92,7 @@ final class StackResolver
                 'pump' => $this->pump($s, $item->controller, $card->id, $item->ability),
                 'fetch' => $this->fetch($s, $item->controller, $item->ability, $item->targets),
                 'untap' => $this->untap($s, $item->controller, $card->id),
+                'pay_untap' => $paid === true ? $this->untap($s, $item->controller, $card->id) : null, // Mana Vault
                 'self_damage' => $this->selfDamage($s, $item->controller, $card->id, $item->trigger),
                 'imprint' => $this->imprint($s, $item->controller, $card->id, $item->targets[0] ?? ''),
                 'mana' => $ability->amount > 0 ? $this->addMana($s, $item->controller, str_repeat('{C}', $ability->amount), $item->id) : null,
@@ -93,7 +101,8 @@ final class StackResolver
                 'bounce' => $this->bounceAbilityTarget($s, $item->targets[0] ?? '', $card->name),
                 'lock_noncreature' => $this->lockNoncreature($s, $item->controller, $card->name),
                 'pact' => $paid === true ? null : (new StateBasedActions())->eliminate($s, $item->controller, 'pact_unpaid'),
-                'draw_unless' => $paid === true ? null : $this->draw($s, $item->controller, $ability->amount), // Rhystic Study
+                // Rhystic Study : « you may draw » choisi, sauf bibliothèque vide (piocher ferait perdre la partie, CR 704.5b).
+                'draw_unless' => $paid === true || $s->player($item->controller)->library === [] ? null : $this->draw($s, $item->controller, $ability->amount),
                 'pay_life_draw' => $this->payLifeDraw($s, $item->controller, $card->name), // Tymna the Weaver
                 'storm' => $this->stormCopies($s, $item),
                 'counter_spell' => $this->counter($s, $item->targets[0] ?? '', $item, new SpellEffect('counter'), null), // Lavinia
@@ -212,7 +221,7 @@ final class StackResolver
     {
         return match ($effect->effect) {
             'damage' => str_starts_with($target, 'player:') && !$s->player((int) substr($target, 7))->lost,
-            'counter' => $this->counterVictim($s, $target) !== null,
+            'counter' => ($v = $this->counterVictim($s, $target)) !== null && $effect->canCounter($v->card, $v->x), // filtre revérifié (CR 608.2b)
             'exile', 'bounce', 'destroy' => $this->targetPermanent($s, $target, $effect, $controller) !== null,
             'copy' => $this->copyTarget($s, $target, $controller) !== null,
             'redirect' => $this->stackObject($s, explode('>', $target, 2)[0]) !== null,
@@ -809,8 +818,8 @@ final class StackResolver
     private function counter(GameState $s, string $target, \App\Engine\Game\StackItem $by, SpellEffect $effect, ?bool $paid): void
     {
         $victim = $this->counterVictim($s, $target);
-        if ($victim === null) {
-            $s->emit('SpellFizzled', ['target' => $target]);
+        if ($victim === null || !$effect->canCounter($victim->card, $victim->x)) {
+            $s->emit('SpellFizzled', ['target' => $target]); // parti, ou plus une cible légale (type, valeur de mana)
 
             return;
         }
@@ -844,8 +853,8 @@ final class StackResolver
             'by' => $by->id,
             'destination' => $destination, // 'graveyard' (un commandant y passe avant les SBA, CR 903.9a), 'exile', 'library', 'command'
         ] + $extra);
-        if ($effect->drainMana) {
-            $amount = $victim->card->manaCost()->manaValue($victim->x);
+        $amount = $victim->card->manaCost()->manaValue($victim->x);
+        if ($effect->drainMana && $amount > 0) { // Mana Drain sur un sort de valeur 0 : rien à ajouter, pas de trigger
             $s->addDelayedTrigger($by->controller, $by->card, new \App\Engine\Ability\TriggeredAbility(\App\Engine\Ability\TriggeredAbility::NEXT_MAIN, 'mana', $amount));
         }
         if ($effect->token !== null) {

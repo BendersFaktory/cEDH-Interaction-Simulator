@@ -45,6 +45,17 @@ describe('ActionPanel', () => {
     expect(decide).toHaveBeenCalledWith('a-land')
   })
 
+  it('propose le choix de Chain of Vapor, et tout type inconnu dans « Autres choix »', () => {
+    const store = useSimulationStore()
+    store.simulation = simWith([
+      { id: 'chain:0:decline', label: 'Ne pas copier le sort', type: 'chain', player: 0 },
+      { id: 'x', label: 'Choix futur', type: 'futur' as ActionView['type'], player: 0 },
+    ])
+    const w = mount(ActionPanel)
+    expect(w.findAll('h4').map((h) => h.text())).toEqual(['Chain of Vapor : sacrifier un terrain pour copier le sort ?', 'Autres choix'])
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Ne pas copier le sort', 'Choix futur'])
+  })
+
   it('propose le choix de légende (KeepLegend) avec son titre', async () => {
     const store = useSimulationStore()
     store.simulation = simWith([

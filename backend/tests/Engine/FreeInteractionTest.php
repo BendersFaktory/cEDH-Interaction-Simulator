@@ -130,7 +130,7 @@ final class FreeInteractionTest extends TestCase
 
         $this->assertNotNull($result->pending);
         $this->assertSame(1, $result->pending->player);
-        $this->assertSame(['pay:1:yes', 'pay:1:no'], array_map(static fn ($a) => $a->id(), $result->pending->legalActions));
+        $this->assertSame(['pay:1:yes', 'pay:1:no', 'ability:1:p1_land0:0:0:'], array_map(static fn ($a) => $a->id(), $result->pending->legalActions), 'Payer, refuser, ou engager une source à la main d\'abord');
         $this->assertNotContains('PriorityGranted', array_slice(self::types($result->events), -1), 'Décision hors priorité : pas de checkpoint');
 
         // Reprise depuis un état sérialisé (comme une ancre de pause humaine).

@@ -20,7 +20,7 @@ use App\Engine\Game\CardInstance;
  *
  * `opponent_cast` (un adversaire de son contrôleur lance un sort ; le lanceur est retenu par `PendingTrigger::$opponent` et
  * devient la cible `player:<id>` du trigger) avec l'effet `draw_unless` (Rhystic Study : son contrôleur pioche `amount` cartes
- * sauf si le lanceur paie `spec`, décision du lanceur à la résolution comme Daze ; le « you may » est toujours choisi).
+ * sauf si le lanceur paie `spec`, décision du lanceur à la résolution comme Daze ; le « you may » est choisi sauf si la bibliothèque est vide).
  *
  * `postcombat_main` (début de chacune des phases principales d'après combat de son contrôleur) avec l'effet `pay_life_draw`
  * (Tymna the Weaver : X = nombre d'adversaires blessés au combat ce tour, `GameState::$combatDamaged` ; son contrôleur paie X PV
@@ -41,6 +41,9 @@ use App\Engine\Game\CardInstance;
  * jetons Warrior 1/1 rouges engagés et attaquants, sacrifiés au début de la prochaine étape de fin par un trigger retardé
  * `next_end` d'effet `sacrifice_tokens`, `spec` = leurs ids) et `pump_untap` (Valley Floodcaller, `cast` filtré `noncreature` :
  * ses créatures des sous-types `spec` (séparés par `|`) gagnent +1/+1 jusqu'à la fin du tour et se dégagent).
+ *
+ * `pay_untap` (Mana Vault, `upkeep`) : son contrôleur peut payer `spec` pour dégager la source (décision `PayCost` à la
+ * résolution, proposée seulement si la source est encore engagée sur le champ de bataille).
  *
  * Forme sérialisée (`toArray`) : `spec` et `filter` omis s'ils sont vides.
  */
@@ -78,7 +81,7 @@ final class TriggeredAbility
 
     private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END];
     private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor',
-        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap'];
+        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap'];
     private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA];
 
     public function __construct(
@@ -102,7 +105,7 @@ final class TriggeredAbility
         if ($effect === 'token') {
             ActivatedAbility::parseTokenSpec($spec);
         }
-        if (in_array($effect, ['pact', 'draw_unless'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)) {
+        if (in_array($effect, ['pact', 'draw_unless', 'pay_untap'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)) {
             throw new \InvalidArgumentException("Coût de pacte invalide : $spec");
         }
         if ($effect === 'tutor' && !preg_match('/^(creature|artifact|enchantment|instant|sorcery|land)?<=\d+$/', $spec)) {
@@ -191,6 +194,7 @@ final class TriggeredAbility
             'mobilize' => sprintf('créer %d jetons Warrior 1/1 engagés et attaquants', $this->amount),
             'sacrifice_tokens' => 'sacrifier les jetons Warrior',
             'pump_untap' => sprintf('vos %s gagnent +1/+1 et se dégagent', str_replace('|', ', ', $this->spec)),
+            'pay_untap' => sprintf('vous pouvez payer %s pour la dégager', $this->spec),
         };
 
         return "$when : $what";

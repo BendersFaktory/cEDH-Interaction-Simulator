@@ -330,9 +330,11 @@ final class LegalActionGenerator
     }
 
     /**
-     * Paiement demandé à la résolution (`StackResolver::paymentDue()`) : payer (si l'auto-paiement trouve un plan), puis refuser.
+     * Paiement demandé à la résolution (`StackResolver::paymentDue()`) : payer (si l'auto-paiement trouve un plan), refuser,
+     * puis les capacités de mana du payeur : il peut engager lui-même ses sources (le mana va dans sa réserve, que le paiement
+     * dépense d'abord) avant de payer, comme pour un sort (mana manuel). Les deux choix de paiement restent en tête (agents).
      *
-     * @return list<PayCost>
+     * @return list<PayCost|ActivateAbility>
      */
     private function paymentActions(GameState $s, int $playerId): array
     {
@@ -340,9 +342,11 @@ final class LegalActionGenerator
         if ($due === null || $due['player'] !== $playerId) {
             return [];
         }
-        $payable = ManaPayment::plan($s->player($playerId), \App\Engine\Mana\ManaCost::parse($due['cost']), 0, $s->turn) !== null;
+        $p = $s->player($playerId);
+        $payable = ManaPayment::plan($p, \App\Engine\Mana\ManaCost::parse($due['cost']), 0, $s->turn) !== null;
+        $mana = array_values(array_filter($this->abilityActions($s, $p, ManaPayment::context($p, $s->turn)), static fn (ActivateAbility $a) => $a->mana));
 
-        return [...($payable ? [new PayCost($playerId, true, $due['cost'])] : []), new PayCost($playerId, false, $due['cost'])];
+        return [...($payable ? [new PayCost($playerId, true, $due['cost'])] : []), new PayCost($playerId, false, $due['cost']), ...$mana];
     }
 
     /**

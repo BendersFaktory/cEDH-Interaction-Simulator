@@ -87,7 +87,7 @@ final class CardMapper
         $abilities = [];
         $triggers = [];
         $noUntap = false; // « ~ doesn't untap during your untap step. » (Mana Vault, Grim Monolith)
-        $upkeepUntap = null; // Mana Vault : « At the beginning of your upkeep, you may pay {N}. If you do, untap ~. »
+        // Mana Vault : « At the beginning of your upkeep, you may pay {N}. If you do, untap ~. » : trigger optionnel `pay_untap`.
         $tapPain = 0; // « Whenever ~ becomes tapped, it deals N damage to you. » (City of Brass)
         $hasX = str_contains($manaCost, '{X}');
         $extraCost = null; // coût additionnel (Culling the Weak, Diabolic Intent)
@@ -254,7 +254,7 @@ final class CardMapper
             } elseif (!$isSpell && !$isLand && $line === "~ doesn't untap during your untap step.") {
                 $noUntap = true;
             } elseif (!$isSpell && !$isLand && preg_match('/^At the beginning of your upkeep, you may pay ((?:\{\d+\})+)\. If you do, untap ~\.$/', $line, $m)) {
-                $upkeepUntap = $m[1]; // le paiement à l'entretien est modélisé par une capacité `{N}: dégager`, activable à l'entretien seulement
+                $triggers[] = new TriggeredAbility(TriggeredAbility::UPKEEP, 'pay_untap', spec: $m[1]); // décision `PayCost` à la résolution
             } elseif (!$isSpell && !$isLand && preg_match('/^(\{\d+\}): Untap ~\.$/', $line, $m)) {
                 $abilities[] = ActivatedAbility::untap($m[1]); // Grim Monolith
             } elseif (!$isSpell && !$isLand && preg_match('/^At the beginning of your draw step, if ~ is tapped, it deals (\d+) damage to you\.$/', $line, $m)) {
@@ -300,9 +300,6 @@ final class CardMapper
 
         if ($isSpell && $effects === []) {
             throw $fail('sort sans effet modélisé');
-        }
-        if ($upkeepUntap !== null) {
-            $abilities[] = ActivatedAbility::untap($upkeepUntap, upkeepOnly: true);
         }
         if ($tapPain > 0) {
             // Le seul moyen d'engager le terrain est sa capacité de mana : le trigger devient un `selfDamage` (sans pile, CR 605.3b

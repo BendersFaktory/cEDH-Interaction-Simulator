@@ -270,7 +270,7 @@ final class CardSelectionTest extends TestCase
         $result = $engine->advance($s, new CastSpell(1, 't1'));
 
         $this->assertNotNull($result->pending);
-        $this->assertSame(['pay:1:yes', 'pay:1:no'], array_map(static fn ($a) => $a->id(), $result->pending->legalActions));
+        $this->assertSame(['pay:1:yes', 'pay:1:no', 'ability:1:p1_land1:0:0:'], array_map(static fn ($a) => $a->id(), $result->pending->legalActions));
         $this->assertSame('Ne pas payer {1} (Rhystic Study) : J0 pioche', $result->pending->legalActions[1]->describe($s));
         $this->assertNotSame('PriorityGranted', $result->events[array_key_last($result->events)]->type, 'Décision hors priorité : pas de checkpoint');
 

@@ -76,10 +76,9 @@ final class ManaAccelerationTest extends TestCase
     {
         $vault = self::def('Mana Vault');
         self::assertTrue($vault->noUntap);
-        self::assertSame([['isManaAbility' => true, 'effect' => 'mana', 'tap' => true, 'manaCost' => null, 'options' => ['{C}{C}{C}'], 'amount' => 0, 'sacrifice' => false],
-            ['isManaAbility' => false, 'effect' => 'untap', 'tap' => false, 'manaCost' => '{4}', 'options' => [], 'amount' => 0, 'sacrifice' => false, 'upkeepOnly' => true]],
+        self::assertSame([['isManaAbility' => true, 'effect' => 'mana', 'tap' => true, 'manaCost' => null, 'options' => ['{C}{C}{C}'], 'amount' => 0, 'sacrifice' => false]],
             array_map(static fn (ActivatedAbility $a) => $a->toArray(), $vault->abilities));
-        self::assertSame([['event' => 'draw_step', 'effect' => 'self_damage', 'amount' => 1, 'filter' => 'tapped']],
+        self::assertSame([['event' => 'upkeep', 'effect' => 'pay_untap', 'amount' => 0, 'spec' => '{4}'], ['event' => 'draw_step', 'effect' => 'self_damage', 'amount' => 1, 'filter' => 'tapped']],
             array_map(static fn (TriggeredAbility $t) => $t->toArray(), $vault->triggers));
 
         $monolith = self::def('Grim Monolith');
@@ -129,7 +128,7 @@ final class ManaAccelerationTest extends TestCase
         self::assertTrue($vault->toArray()['noUntap']);
         $back = CardInstance::fromArray($vault->toArray());
         self::assertTrue($back->noUntap);
-        self::assertTrue($back->abilities()[1]->upkeepOnly);
+        self::assertSame('pay_untap', $back->triggers[0]->effect);
         self::assertSame($vault->toArray(), $back->toArray());
     }
 
@@ -178,18 +177,42 @@ final class ManaAccelerationTest extends TestCase
         self::assertSame(['gm'], $this->of($r->events, 'PermanentsUntapped')[0]->payload['cards']);
     }
 
-    public function testManaVaultUntapsOnlyDuringItsControllersUpkeep(): void
+    public function testManaVaultAsksAtUpkeepWhetherToPayFourToUntapIt(): void
+    {
+        foreach ([[true, 'payer'], [false, 'refuser']] as [$pay, $id]) {
+            $s = (new ScenarioBuilder())->permanent(0, self::card('Mana Vault', 'v'))->untappedLands(0, 4)->build(self::J0_HUMAN);
+            $s->player(0)->findOnBattlefield('v')->tapped = true;
+            self::assertSame([], array_filter($this->abilities($s), static fn (ActivateAbility $a) => $a->cardId === 'v'), 'Plus de capacité activée « {4} : dégager »');
+            $s->phase = Phase::Upkeep;
+            $s->stepStarted = false;
+            $engine = new GameEngine(new AgentRegistry());
+            $engine->advance($s);
+            self::assertSame('pay_untap', $s->topOfStack()?->trigger?->effect, 'Trigger d\'entretien');
+            $r = $engine->advance($s, new PassPriority(0));
+            self::assertTrue($s->paymentPending);
+            self::assertSame(['pay:0:yes', 'pay:0:no'], array_slice(array_map(static fn ($a) => $a->id(), $r->pending->legalActions), 0, 2));
+            $engine->advance($s, new \App\Engine\Action\PayCost(0, $pay, '{4}'));
+            self::assertSame(!$pay, $s->player(0)->findOnBattlefield('v')->tapped, $id);
+            self::assertSame($pay ? 4 : 0, count(array_filter($s->player(0)->battlefield, static fn (CardInstance $c) => $c->isLand() && $c->tapped)));
+        }
+    }
+
+    public function testManaVaultAsksNothingWhenUntappedAndTheAiDeclines(): void
     {
         $s = (new ScenarioBuilder())->permanent(0, self::card('Mana Vault', 'v'))->untappedLands(0, 4)->build(self::J0_HUMAN);
-        $s->player(0)->findOnBattlefield('v')->tapped = true;
-        $untap = static fn (array $as) => array_values(array_filter($as, static fn (ActivateAbility $a) => $a->abilityIndex === 1));
-        self::assertSame([], $untap($this->abilities($s)), 'Pas en phase principale');
-
         $s->phase = Phase::Upkeep;
-        self::assertCount(1, $untap($this->abilities($s)));
+        $s->stepStarted = false;
+        $engine = new GameEngine(new AgentRegistry());
+        $engine->advance($s);
+        $engine->advance($s, new PassPriority(0));
+        self::assertFalse($s->paymentPending, 'Déjà dégagée : rien à payer');
 
-        $s->activePlayer = 1;
-        self::assertSame([], $untap($this->abilities($s)), 'Ni pendant l\'entretien d\'un autre joueur');
+        $s = (new ScenarioBuilder())->permanent(0, self::card('Mana Vault', 'v'))->untappedLands(0, 4)->build([0 => 'ai:heuristic', 1 => 'ai:pass']);
+        $s->player(0)->findOnBattlefield('v')->tapped = true;
+        $s->phase = Phase::Upkeep;
+        $s->stepStarted = false;
+        $r = $engine->advance($s);
+        self::assertContains('CostNotPaid', array_map(static fn (GameEvent $e) => $e->type, $r->events), 'L\'IA ne paie pas {4} pour {C}{C}{C}');
     }
 
     public function testManaVaultDealsOneDamageAtDrawStepOnlyIfTapped(): void
