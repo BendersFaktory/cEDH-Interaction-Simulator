@@ -182,7 +182,7 @@ final class LegalActionGenerator
         $seen = [];
         $mana = ManaPayment::context($p, $s->turn); // champ de bataille scanné une seule fois pour tous les sorts et capacités
         foreach ([...$p->hand, ...$p->command] as $card) {
-            if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed)) {
+            if ($card->isLand() || (!$card->isInstantSpeed() && !$sorcerySpeed) || (!$card->isCreature() && $s->castLockedFor($playerId))) {
                 continue;
             }
             // Modes de paiement : le coût de mana (si payable avec les terrains non engagés : couleurs, hybrides), puis les coûts alternatifs.
@@ -191,7 +191,7 @@ final class LegalActionGenerator
             if ($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander()) {
                 $modes[] = CastSpell::ALT_FREE;
             }
-            if (($card->altCost === CardInstance::ALT_PITCH_BLUE && $p->life >= 1)
+            if (($card->altCost === CardInstance::ALT_PITCH_BLUE && $p->life >= 1) || $card->altCost === CardInstance::ALT_PITCH_BLUE_FREE
                 || ($card->altCost === CardInstance::ALT_PITCH_BLUE_OFF_TURN && $s->activePlayer !== $playerId)) {
                 foreach ($p->hand as $other) {
                     if ($other->id !== $card->id && $other->isBlue()) {
@@ -209,15 +209,30 @@ final class LegalActionGenerator
             }
             // Un sort à {X} offre une action par X payable, au coût de mana seulement.
             $maxX = $cost->hasX() && in_array(null, $modes, true) ? min(ManaPayment::maxX($p, $cost, $s->turn, $card, $mana), self::MAX_X) : 0;
-            foreach ($modes as $alt) {
-                foreach ($this->targetSets($s, $card, $playerId) as $targets) {
-                    for ($x = 0; $x <= ($alt === null ? $maxX : 0); $x++) {
-                        $key = $card->name . '|' . implode(',', $targets) . '|' . $x . '|' . $alt;
-                        if (isset($seen[$key])) {
-                            continue;
+            // Coût additionnel « sacrifier une créature » : une créature par nom (Culling the Weak, Diabolic Intent).
+            $sacrifices = [null];
+            if ($card->extraCost === CardInstance::EXTRA_SACRIFICE_CREATURE) {
+                $sacrifices = [];
+                foreach ($p->battlefield as $creature) {
+                    if ($creature->isCreature() && !isset($sacrifices[$creature->name])) {
+                        $sacrifices[$creature->name] = $creature->id;
+                    }
+                }
+                $sacrifices = array_values($sacrifices);
+            }
+            foreach ($card->isModal() ? $card->modes() : [0] as $mode) {
+                foreach ($modes as $alt) {
+                    foreach ($this->targetSets($s, $card, $playerId, $mode) as $targets) {
+                        foreach ($sacrifices as $sacrifice) {
+                            for ($x = 0; $x <= ($alt === null ? $maxX : 0); $x++) {
+                                $key = $card->name . '|' . implode(',', $targets) . '|' . $x . '|' . $alt . '|' . $mode . '|' . $sacrifice;
+                                if (isset($seen[$key])) {
+                                    continue;
+                                }
+                                $seen[$key] = true;
+                                $actions[] = new CastSpell($playerId, $card->id, $targets, $x, $alt, $mode, $sacrifice);
+                            }
                         }
-                        $seen[$key] = true;
-                        $actions[] = new CastSpell($playerId, $card->id, $targets, $x, $alt);
                     }
                 }
             }
@@ -298,15 +313,30 @@ final class LegalActionGenerator
     {
         $actions = [];
         $seen = [];
+        // Champ de bataille, puis capacités activables depuis la main (Simian Spirit Guide, Channel d'Otawara).
+        $sources = [];
         foreach ($p->battlefield as $card) {
+            $sources[] = [$card, false];
+        }
+        foreach ($p->hand as $card) {
+            foreach ($card->abilities as $declared) {
+                if ($declared->fromHand !== '') {
+                    $sources[] = [$card, true];
+                    break;
+                }
+            }
+        }
+        foreach ($sources as [$card, $inHand]) {
             foreach ($card->abilities() as $index => $ability) {
-                if (!AbilityManager::canActivate($s, $p, $card, $ability, $mana)) {
+                if (($ability->fromHand !== '') !== $inHand || !AbilityManager::canActivate($s, $p, $card, $ability, $mana)) {
                     continue;
                 }
                 $options = $ability->isManaAbility ? AbilityManager::allowedOptions($p, $card, $ability) : [0];
                 $targetSets = match ($ability->effect) {
                     'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
                     'fetch' => self::fetchTargets($p, $ability),
+                    // Channel : un artefact, une créature ou un enchantement (pas un terrain), de n'importe quel joueur en vie.
+                    'bounce' => self::bounceTargets($s),
                     default => [[]],
                 };
                 foreach (AbilityManager::costChoices($p, $card, $ability) as $choices) {
@@ -389,6 +419,18 @@ final class LegalActionGenerator
             $targetSets = $ability->targetsPlayer()
                 ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
                 : ($pending->opponent !== null && $ability->effect === 'draw_unless' ? [['player:' . $pending->opponent]] : [[]]); // Rhystic Study : le lanceur paiera ; Kraum ne cible pas
+            if ($ability->choosesLibraryCard()) {
+                // Tuteur à l'entrée (Ranger-Captain of Eos) : une carte qui convient par nom, ou rien à chercher.
+                $targetSets = [];
+                $names = [];
+                foreach ($s->player($playerId)->library as $card) {
+                    if ($ability->tutorMatches($card) && !isset($names[$card->name])) {
+                        $names[$card->name] = true;
+                        $targetSets[] = ['library:' . $card->id];
+                    }
+                }
+                $targetSets = $targetSets === [] ? [['library:none']] : $targetSets;
+            }
             if ($ability->choosesHandCard()) {
                 // Imprint (Chrome Mox) : ne rien exiler, ou l'une des cartes éligibles de la main (non-artefact, non-terrain).
                 foreach ($s->player($playerId)->hand as $card) {
@@ -590,10 +632,10 @@ final class LegalActionGenerator
      *
      * @return list<list<string>>
      */
-    private function targetSets(GameState $s, CardInstance $card, int $playerId): array
+    private function targetSets(GameState $s, CardInstance $card, int $playerId, int $mode = 0): array
     {
         $sets = [[]];
-        foreach ($card->targetedEffects() as $effect) {
+        foreach ($card->targetedEffects($mode) as $effect) {
             $next = [];
             foreach ($sets as $set) {
                 foreach ($this->targetCandidates($s, $effect, $playerId) as $target) {
@@ -613,7 +655,7 @@ final class LegalActionGenerator
             // Tuteur : une carte de sa bibliothèque par nom (`library:<id>`), comme une fetchland.
             'tutor' => self::libraryTargets($s->player($playerId), $effect->tutorFilter),
             // Exil : tout permanent (ou toute créature) d'un joueur en vie, le sien compris (`permanent:<id>`).
-            'exile' => self::permanentTargets($s, $effect),
+            'exile', 'bounce', 'destroy' => self::permanentTargets($s, $effect),
             // Copie : une créature que le lanceur contrôle (`permanent:<id>`).
             'copy' => array_map(static fn (CardInstance $c) => 'permanent:' . $c->id, array_values(array_filter($s->player($playerId)->battlefield, static fn (CardInstance $c) => $c->isCreature()))),
             'damage' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
@@ -643,6 +685,21 @@ final class LegalActionGenerator
         }
 
         return $out === [] ? ['library:none'] : $out;
+    }
+
+    /** @return list<list<string>> une cible par permanent non-terrain (capacité Channel), joueurs dans l'ordre du tour */
+    private static function bounceTargets(GameState $s): array
+    {
+        $out = [];
+        foreach ($s->alivePlayerIds() as $id) {
+            foreach ($s->player($id)->battlefield as $permanent) {
+                if (!$permanent->isLand()) {
+                    $out[] = ['permanent:' . $permanent->id];
+                }
+            }
+        }
+
+        return $out;
     }
 
     /** @return list<string> une cible `permanent:<id>` par permanent légal, joueurs dans l'ordre du tour */

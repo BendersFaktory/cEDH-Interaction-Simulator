@@ -27,6 +27,14 @@ export interface AbilityView {
   spec?: string
   /** Activable seulement pendant l'entretien de son contrôleur (Mana Vault : payer {4} pour la dégager). */
   upkeepOnly?: boolean
+  /** Activable depuis la main : `exile` (Simian Spirit Guide) ou `discard` (Channel d'Otawara). */
+  fromHand?: 'exile' | 'discard'
+  /** Coût : défausser toute sa main (Lion's Eye Diamond). */
+  discardHand?: boolean
+  /** Condition d'activation (`metalcraft` : Mox Opal). */
+  requires?: string
+  /** Coût réduit de {N} par créature légendaire contrôlée (Otawara). */
+  legendaryDiscount?: number
 }
 
 /** Trigger d'une carte (forme sérialisée par le moteur). */

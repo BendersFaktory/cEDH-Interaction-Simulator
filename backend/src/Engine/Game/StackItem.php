@@ -25,7 +25,18 @@ final class StackItem
         public readonly ?ActivatedAbility $ability = null,
         public readonly int $abilityIndex = 0,
         public readonly ?TriggeredAbility $trigger = null,
+        public readonly int $mode = 0, // mode choisi d'un sort modal (Pyroblast) ; 0 = sort non modal
     ) {
+    }
+
+    /**
+     * Effets du sort joués (ceux du mode choisi pour un sort modal).
+     *
+     * @return list<\App\Engine\Card\SpellEffect>
+     */
+    public function effects(): array
+    {
+        return $this->card->effectsForMode($this->mode);
     }
 
     /** Capacité activée ou trigger : un contresort ne la cible pas. */
@@ -49,11 +60,11 @@ final class StackItem
             'x' => $this->x,
             'ability' => $this->ability?->toArray(),
             'abilityIndex' => $this->abilityIndex,
-        ] + ($this->trigger === null ? [] : ['trigger' => $this->trigger->toArray()]);
+        ] + ($this->trigger === null ? [] : ['trigger' => $this->trigger->toArray()]) + ($this->mode === 0 ? [] : ['mode' => $this->mode]);
     }
 
     public static function fromArray(array $d): self
     {
-        return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets'], (int) ($d['x'] ?? 0), isset($d['ability']) ? ActivatedAbility::fromArray($d['ability']) : null, (int) ($d['abilityIndex'] ?? 0), isset($d['trigger']) ? TriggeredAbility::fromArray($d['trigger']) : null);
+        return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets'], (int) ($d['x'] ?? 0), isset($d['ability']) ? ActivatedAbility::fromArray($d['ability']) : null, (int) ($d['abilityIndex'] ?? 0), isset($d['trigger']) ? TriggeredAbility::fromArray($d['trigger']) : null, (int) ($d['mode'] ?? 0));
     }
 }

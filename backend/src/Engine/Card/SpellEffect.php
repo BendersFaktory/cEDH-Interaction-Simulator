@@ -21,6 +21,12 @@ use App\Engine\Game\CardInstance;
  * `library_top` : Memory Lapse ; null = cimetière), `drainMana` (Mana Drain : au début de la prochaine phase principale du lanceur,
  * il ajoute {C} égal à la valeur de mana du sort contré, trigger retardé).
  * `pact` (non ciblé, Pact of Negation) : trigger retardé « au début de votre prochain entretien, payez `payCost` ou perdez la partie ».
+ * Lot H2 : `bounce` (renvoie la créature ciblée dans la main de son propriétaire, Snapback), `destroy` (détruit le permanent ciblé),
+ * `blue` (Pyroblast : `if`, l'effet n'a lieu que si la cible est bleue ; Red Elemental Blast : `target`, la cible doit l'être),
+ * `mode` (sort modal : chaque effet porte son mode, le lanceur en choisit un, voir `CardInstance::effectsForMode()`),
+ * `mana` + `thresholdAdds` (Cabal Ritual) / `perGraveyardNamed` (Rite of Flame), `tutor` + `discardRandom` (Gamble).
+ * `grant_sac_mana` (non ciblé, Rain of Filth) : jusqu'à la fin du tour, les terrains que le lanceur contrôle à la résolution gagnent
+ * « sacrifier ce terrain : ajoutez `adds` » (CR 611.2c : l'ensemble est figé à la résolution ; `CardInstance::$grantedAbilities`).
  * Sélection de cartes (lot G3, décision du lanceur au milieu de la résolution, `GameState::$selection`) : `put_back` (remettre
  * `amount` cartes de sa main sur le dessus de sa bibliothèque, dans l'ordre de son choix : Brainstorm, après `draw` 3) et
  * `arrange` (regarder les `amount` cartes du dessus, les remettre dans l'ordre de son choix, mélange permis : Ponder). Seuls des
@@ -28,10 +34,10 @@ use App\Engine\Game\CardInstance;
  */
 final class SpellEffect
 {
-    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry', 'copy', 'pact', 'put_back', 'arrange'];
+    public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry', 'copy', 'pact', 'put_back', 'arrange', 'bounce', 'destroy', 'grant_sac_mana'];
     /** Effets qui demandent une décision de sélection au milieu de la résolution (voir l'en-tête). */
     public const SELECTION = ['put_back', 'arrange'];
-    public const TARGETED = ['damage', 'counter', 'exile', 'tutor', 'copy'];
+    public const TARGETED = ['damage', 'counter', 'exile', 'tutor', 'copy', 'bounce', 'destroy'];
     /** Genres de permanents qu'un effet `exile` peut cibler. */
     public const PERMANENT_TARGETS = ['creature', 'permanent'];
     /** Types de sorts qu'un effet `counter` peut viser (`target`, alternatives séparées par `|`) ; null = tout sort (Counterspell). */
@@ -40,6 +46,9 @@ final class SpellEffect
     public const TOKEN_KEYWORDS = [CardInstance::FLYING];
     /** Types qu'un filtre de tuteur peut accepter. */
     public const TUTOR_TYPES = [CardInstance::CREATURE, CardInstance::ARTIFACT, CardInstance::ENCHANTMENT, CardInstance::INSTANT, CardInstance::SORCERY];
+    /** Couleur bleue (Pyroblast, Red Elemental Blast) : `target` = la cible doit être bleue ; `if` = l'effet n'a lieu que si la cible est bleue. */
+    public const BLUE_TARGET = 'target';
+    public const BLUE_IF = 'if';
     /** Destinations d'un sort contré autres que le cimetière (`counterTo`). */
     public const COUNTER_EXILE = 'exile';
     public const COUNTER_LIBRARY_TOP = 'library_top';
@@ -59,12 +68,17 @@ final class SpellEffect
         public readonly ?int $manaValue = null, // `counter` : seulement un sort de cette valeur de mana (Mental Misstep)
         public readonly ?string $counterTo = null, // `counter` : COUNTER_EXILE | COUNTER_LIBRARY_TOP ; null = cimetière
         public readonly bool $drainMana = false, // `counter` : Mana Drain
+        public readonly ?string $thresholdAdds = null, // `mana` : mana ajouté À LA PLACE de `adds` avec sept cartes ou plus au cimetière (Cabal Ritual)
+        public readonly bool $perGraveyardNamed = false, // `mana` : +1 mana du premier symbole de `adds` par carte homonyme dans chaque cimetière (Rite of Flame)
+        public readonly bool $discardRandom = false, // `tutor` : défausse d'une carte au hasard de sa main après la recherche (Gamble)
+        public readonly ?string $blue = null, // BLUE_TARGET | BLUE_IF (`counter`, `destroy`)
+        public readonly int $mode = 0, // 0 = sort non modal ; N >= 1 : l'effet appartient au mode N (« choisissez un mode », Pyroblast)
     ) {
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
         }
         $validTarget = match ($effect) {
-            'exile' => in_array($target, self::PERMANENT_TARGETS, true),
+            'exile', 'bounce', 'destroy' => in_array($target, self::PERMANENT_TARGETS, true),
             'counter' => $target !== null && array_diff(explode('|', $target), self::COUNTER_TARGETS) === [],
             default => false,
         };
@@ -95,6 +109,18 @@ final class SpellEffect
         if ($counterTo !== null && !in_array($counterTo, [self::COUNTER_EXILE, self::COUNTER_LIBRARY_TOP], true)) {
             throw new \InvalidArgumentException("Destination de sort contré « $counterTo » invalide");
         }
+        if (($thresholdAdds !== null || $perGraveyardNamed) && $effect !== 'mana') {
+            throw new \InvalidArgumentException("Options de rituel sur l'effet « $effect »");
+        }
+        if ($discardRandom && $effect !== 'tutor') {
+            throw new \InvalidArgumentException("« discardRandom » n'a de sens que pour l'effet « tutor »");
+        }
+        if ($blue !== null && (!in_array($blue, [self::BLUE_TARGET, self::BLUE_IF], true) || !in_array($effect, ['counter', 'destroy'], true))) {
+            throw new \InvalidArgumentException("Couleur « $blue » invalide pour l'effet « $effect »");
+        }
+        if ($mode < 0) {
+            throw new \InvalidArgumentException('Mode négatif');
+        }
         if ($powerLife && $effect !== 'exile') {
             throw new \InvalidArgumentException("« powerLife » n'a de sens que pour l'effet « exile »");
         }
@@ -107,6 +133,12 @@ final class SpellEffect
         }
     }
 
+    /** Le même effet rattaché au mode `$mode` d'un sort modal. */
+    public function withMode(int $mode): self
+    {
+        return self::fromArray(['mode' => $mode] + $this->toArray());
+    }
+
     public function isTargeted(): bool
     {
         return in_array($this->effect, self::TARGETED, true);
@@ -115,7 +147,7 @@ final class SpellEffect
     /** Le permanent `$card` est-il une cible légale de cet effet `exile` (créature seulement si `target` = `creature`) ? */
     public function canTargetPermanent(CardInstance $card): bool
     {
-        return $this->target !== 'creature' || $card->isCreature();
+        return ($this->target !== 'creature' || $card->isCreature()) && ($this->blue !== self::BLUE_TARGET || $card->isBlueColored());
     }
 
     /** Le sort `$card` (sur la pile, `$x` choisi) est-il une cible légale de cet effet `counter` (Dispel : instant seulement ; Mental Misstep : valeur de mana 1) ? */
@@ -123,6 +155,9 @@ final class SpellEffect
     {
         if ($this->manaValue !== null && $card->manaCost()->manaValue($x) !== $this->manaValue) {
             return false;
+        }
+        if ($this->blue === self::BLUE_TARGET && !$card->isBlueColored()) {
+            return false; // Red Elemental Blast : « counter target blue spell »
         }
         if ($this->target === null) {
             return true;
@@ -143,7 +178,8 @@ final class SpellEffect
     public function isPrecise(): bool
     {
         return $this->target !== null || $this->powerLife || $this->token !== null || $this->tutorTop || $this->tutorFilter !== null || $this->lifeLoss !== 0
-            || $this->payCost !== null || $this->manaValue !== null || $this->counterTo !== null || $this->drainMana;
+            || $this->payCost !== null || $this->manaValue !== null || $this->counterTo !== null || $this->drainMana
+            || $this->thresholdAdds !== null || $this->perGraveyardNamed || $this->discardRandom || $this->blue !== null || $this->mode !== 0;
     }
 
     /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …, 'target' => …]`, `amount`, `adds` et `target` omis à leur défaut. */
@@ -155,13 +191,16 @@ final class SpellEffect
             + ($this->tutorTop ? ['tutorTop' => true] : []) + ($this->tutorFilter !== null ? ['tutorFilter' => $this->tutorFilter] : [])
             + ($this->lifeLoss !== 0 ? ['lifeLoss' => $this->lifeLoss] : [])
             + ($this->payCost !== null ? ['payCost' => $this->payCost] : []) + ($this->manaValue !== null ? ['manaValue' => $this->manaValue] : [])
-            + ($this->counterTo !== null ? ['counterTo' => $this->counterTo] : []) + ($this->drainMana ? ['drainMana' => true] : []);
+            + ($this->counterTo !== null ? ['counterTo' => $this->counterTo] : []) + ($this->drainMana ? ['drainMana' => true] : [])
+            + ($this->thresholdAdds !== null ? ['thresholdAdds' => $this->thresholdAdds] : []) + ($this->perGraveyardNamed ? ['perGraveyardNamed' => true] : [])
+            + ($this->discardRandom ? ['discardRandom' => true] : []) + ($this->blue !== null ? ['blue' => $this->blue] : []) + ($this->mode !== 0 ? ['mode' => $this->mode] : []);
     }
 
     public static function fromArray(array $d): self
     {
         return new self((string) $d['effect'], (int) ($d['amount'] ?? 0), $d['adds'] ?? null, $d['target'] ?? null, (bool) ($d['powerLife'] ?? false),
             $d['token'] ?? null, $d['tokenKeywords'] ?? [], (bool) ($d['tutorTop'] ?? false), $d['tutorFilter'] ?? null, (int) ($d['lifeLoss'] ?? 0),
-            $d['payCost'] ?? null, isset($d['manaValue']) ? (int) $d['manaValue'] : null, $d['counterTo'] ?? null, (bool) ($d['drainMana'] ?? false));
+            $d['payCost'] ?? null, isset($d['manaValue']) ? (int) $d['manaValue'] : null, $d['counterTo'] ?? null, (bool) ($d['drainMana'] ?? false),
+            $d['thresholdAdds'] ?? null, (bool) ($d['perGraveyardNamed'] ?? false), (bool) ($d['discardRandom'] ?? false), $d['blue'] ?? null, (int) ($d['mode'] ?? 0));
     }
 }

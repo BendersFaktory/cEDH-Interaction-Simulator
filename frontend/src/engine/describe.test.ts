@@ -59,6 +59,14 @@ describe('describeEvent — capacités', () => {
   it('bonus de force/endurance', () => {
     expect(describeEvent(e('CreatureBoosted', { player: 0, card: 'p0_c3', power: 3, toughness: 3 }))).toBe('p0_c3 (J0) passe à 3/3')
   })
+  it('lot H2 : destruction, capacités accordées, verrou de sorts non-créature', () => {
+    expect(describeEvent(e('PermanentDestroyed', { player: 1, card: { name: 'Mox Sapphire' }, destination: 'graveyard', source: 'Pyroblast' }))).toBe('Mox Sapphire (J1) est détruit par Pyroblast')
+    expect(describeEvent(e('AbilitiesGranted', { player: 0, cards: ['l1'], ability: { effect: 'mana', options: ['{B}'] } }))).toBe("Les terrains de J0 gagnent « {B} » jusqu'à la fin du tour")
+    expect(describeEvent(e('AbilitiesExpired', { player: 0, card: 'l1', count: 1 }))).toBe('Fin des capacités accordées à l1 (J0)')
+    expect(describeEvent(e('NoncreatureLockApplied', { player: 0, source: 'Ranger-Captain of Eos' }))).toBe(
+      'Ranger-Captain of Eos : les adversaires de J0 ne peuvent pas lancer de sort non-créature ce tour',
+    )
+  })
   it('imprint', () => {
     expect(describeEvent(e('CardImprinted', { player: 0, exiled: 'Lightning Bolt', colors: ['R'] }))).toBe('J0 exile Lightning Bolt (imprint), couleurs R')
     expect(describeEvent(e('CardImprinted', { player: 0, exiled: 'Sol Ring', colors: [] }))).toBe('J0 exile Sol Ring (imprint), sans couleur')

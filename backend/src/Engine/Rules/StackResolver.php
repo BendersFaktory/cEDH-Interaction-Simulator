@@ -41,7 +41,7 @@ final class StackResolver
             return null;
         }
         $k = 0;
-        foreach ($top->card->effects as $effect) {
+        foreach ($top->effects() as $effect) {
             if (!$effect->isTargeted()) {
                 continue;
             }
@@ -88,6 +88,10 @@ final class StackResolver
                 'self_damage' => $this->selfDamage($s, $item->controller, $card->id, $item->trigger),
                 'imprint' => $this->imprint($s, $item->controller, $card->id, $item->targets[0] ?? ''),
                 'mana' => $ability->amount > 0 ? $this->addMana($s, $item->controller, str_repeat('{C}', $ability->amount), $item->id) : null,
+                'sacrifice_self' => $this->sacrificeSelf($s, $item->controller, $card->id),
+                'tutor' => $this->tutorTrigger($s, $item->controller, $item->targets[0] ?? '', $item->trigger, $card->name),
+                'bounce' => $this->bounceAbilityTarget($s, $item->targets[0] ?? '', $card->name),
+                'lock_noncreature' => $this->lockNoncreature($s, $item->controller, $card->name),
                 'pact' => $paid === true ? null : (new StateBasedActions())->eliminate($s, $item->controller, 'pact_unpaid'),
                 'draw_unless' => $paid === true ? null : $this->draw($s, $item->controller, $ability->amount), // Rhystic Study
                 'pay_life_draw' => $this->payLifeDraw($s, $item->controller, $card->name), // Tymna the Weaver
@@ -114,17 +118,18 @@ final class StackResolver
 
         // CR 608.2b : une cible par effet ciblé, dans l'ordre du texte. Si TOUTES les cibles sont devenues illégales, le sort ne
         // fait rien (ses effets non ciblés compris) ; si seulement une partie l'est, les autres effets se résolvent quand même.
-        $targets = $this->targetsOfEffects($card, $item->targets);
+        $effects = $item->effects();
+        $targets = $this->targetsOfEffects($effects, $item->targets);
         $anyLegal = $targets === [];
         foreach ($targets as $i => $target) {
-            if ($this->targetLegal($s, $card->effects[$i], $target, $item->controller)) {
+            if ($this->targetLegal($s, $effects[$i], $target, $item->controller)) {
                 $anyLegal = true;
             }
         }
 
         // Effets dans l'ordre du texte (CR 608.2c). Une sélection (Brainstorm, Ponder) suspend la résolution : les pioches qui
         // suivent attendent la décision (`GameState::$selection`, `draw`).
-        foreach ($card->effects as $i => $effect) {
+        foreach ($effects as $i => $effect) {
             if (!$anyLegal && !$effect->isTargeted()) {
                 continue;
             }
@@ -139,7 +144,10 @@ final class StackResolver
             match ($effect->effect) {
                 'damage' => $this->damage($s, $target, $card->manaCost()->hasX() ? $item->x : $effect->amount, $card->name),
                 'counter' => $this->counter($s, $target, $item, $effect, $paid),
-                'mana' => $this->addMana($s, $item->controller, $effect->adds ?? '', $item->id),
+                'mana' => $this->addMana($s, $item->controller, $this->manaProduced($s, $item->controller, $card, $effect), $item->id),
+                'grant_sac_mana' => $this->grantSacrificeMana($s, $item->controller, (string) $effect->adds),
+                'bounce' => $this->bounceTarget($s, $target, $effect, $card->name),
+                'destroy' => $this->destroyTarget($s, $target, $effect, $card->name),
                 'treasure' => $s->createTreasure($item->controller),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
                 'exile' => $this->exileTarget($s, $target, $effect, $card->name),
@@ -165,14 +173,15 @@ final class StackResolver
      * Cible de chaque effet ciblé, indexée par la position de l'effet dans `$card->effects` (les cibles sont données dans
      * l'ordre des effets ciblés, voir `LegalActionGenerator::targetSets()`).
      *
+     * @param list<SpellEffect> $effects
      * @param list<string> $targets
      * @return array<int, string>
      */
-    private function targetsOfEffects(CardInstance $card, array $targets): array
+    private function targetsOfEffects(array $effects, array $targets): array
     {
         $out = [];
         $k = 0;
-        foreach ($card->effects as $i => $effect) {
+        foreach ($effects as $i => $effect) {
             if ($effect->isTargeted()) {
                 $out[$i] = $targets[$k++] ?? '';
             }
@@ -187,7 +196,7 @@ final class StackResolver
         return match ($effect->effect) {
             'damage' => str_starts_with($target, 'player:') && !$s->player((int) substr($target, 7))->lost,
             'counter' => $this->counterVictim($s, $target) !== null,
-            'exile' => $this->targetPermanent($s, $target, $effect) !== null,
+            'exile', 'bounce', 'destroy' => $this->targetPermanent($s, $target, $effect) !== null,
             'copy' => $this->copyTarget($s, $target, $controller) !== null,
             default => true, // recherche de bibliothèque : une cible absente ne fait simplement rien
         };
@@ -238,6 +247,116 @@ final class StackResolver
         if ($effect->powerLife) {
             $s->gainLife($owner, $power, $source); // Swords to Plowshares : la force est celle d'avant l'exil
         }
+    }
+
+    /** Renvoie le permanent ciblé dans la main de son propriétaire (Snapback) s'il est encore là et légal ; sinon `SpellFizzled`. */
+    private function bounceTarget(GameState $s, string $target, SpellEffect $effect, string $source): void
+    {
+        $hit = $this->targetPermanent($s, $target, $effect);
+        if ($hit === null) {
+            $s->emit('SpellFizzled', ['target' => $target]);
+
+            return;
+        }
+        $s->returnToHand($hit[0], $hit[1]->id, $source);
+    }
+
+    /** Channel (Otawara) : le permanent ciblé (hors terrain) retourne dans la main de son propriétaire ; sinon `SpellFizzled`. */
+    private function bounceAbilityTarget(GameState $s, string $target, string $source): void
+    {
+        $id = str_starts_with($target, 'permanent:') ? substr($target, 10) : null;
+        foreach ($s->players as $p) {
+            $card = $id === null || $p->lost ? null : $p->findOnBattlefield($id);
+            if ($card !== null && !$card->isLand()) {
+                $s->returnToHand($p->id, $card->id, $source);
+
+                return;
+            }
+        }
+        $s->emit('SpellFizzled', ['target' => $target]);
+    }
+
+    /** Détruit le permanent ciblé s'il est encore là ; `blue: if` (Pyroblast) : seulement s'il est bleu. */
+    private function destroyTarget(GameState $s, string $target, SpellEffect $effect, string $source): void
+    {
+        $hit = $this->targetPermanent($s, $target, $effect);
+        if ($hit === null) {
+            $s->emit('SpellFizzled', ['target' => $target]);
+
+            return;
+        }
+        if ($effect->blue === SpellEffect::BLUE_IF && !$hit[1]->isBlueColored()) {
+            return;
+        }
+        $s->destroyPermanent($hit[0], $hit[1]->id, $source);
+    }
+
+    /** Rain of Filth : les terrains du joueur gagnent « sacrifier ce terrain : ajoutez … » jusqu'à la fin du tour (`AbilitiesGranted`). */
+    private function grantSacrificeMana(GameState $s, int $player, string $adds): void
+    {
+        $ability = ActivatedAbility::sacrificeMana($adds);
+        $ids = [];
+        foreach ($s->player($player)->battlefield as $card) {
+            if ($card->isLand()) {
+                $card->grantedAbilities[] = $ability;
+                $ids[] = $card->id;
+            }
+        }
+        $s->emit('AbilitiesGranted', ['player' => $player, 'cards' => $ids, 'ability' => $ability->toArray()]);
+    }
+
+    /** City of Traitors : la source se sacrifie si elle est encore sur le champ de bataille. */
+    private function sacrificeSelf(GameState $s, int $player, string $cardId): void
+    {
+        if ($s->player($player)->findOnBattlefield($cardId) !== null) {
+            $s->sacrifice($player, [$cardId]);
+        }
+    }
+
+    /** Ranger-Captain of Eos : les adversaires de `$player` ne peuvent pas lancer de sort non-créature jusqu'à la fin du tour. */
+    private function lockNoncreature(GameState $s, int $player, string $source): void
+    {
+        if (!in_array($player, $s->noncreatureLocks, true)) {
+            $s->noncreatureLocks[] = $player;
+        }
+        $s->emit('NoncreatureLockApplied', ['player' => $player, 'source' => $source]);
+    }
+
+    /** Tuteur à l'entrée : la carte choisie (`library:<id>`) doit convenir au filtre du trigger, sinon rien n'est trouvé. */
+    private function tutorTrigger(GameState $s, int $player, string $target, \App\Engine\Ability\TriggeredAbility $trigger, string $source): void
+    {
+        $id = substr($target, strlen('library:'));
+        foreach ($s->player($player)->library as $card) {
+            if ($card->id === $id && $trigger->tutorMatches($card)) {
+                $this->tutor($s, $player, $target, new SpellEffect('tutor'), $source);
+
+                return;
+            }
+        }
+    }
+
+    /**
+     * Mana d'un rituel : `adds`, ou `thresholdAdds` avec sept cartes ou plus au cimetière (Cabal Ritual), plus un mana du premier
+     * symbole par carte homonyme dans chaque cimetière (Rite of Flame). Le sort lui-même est déjà au cimetière à ce stade, mais
+     * il est encore sur la pile pendant sa résolution : il ne compte pas.
+     */
+    private function manaProduced(GameState $s, int $controller, CardInstance $spell, SpellEffect $effect): string
+    {
+        $adds = $effect->adds ?? '';
+        if ($effect->thresholdAdds !== null) {
+            $others = count(array_filter($s->player($controller)->graveyard, static fn (CardInstance $c) => $c !== $spell));
+            return $others >= 7 ? $effect->thresholdAdds : $adds;
+        }
+        if ($effect->perGraveyardNamed && preg_match('/^\{[WUBRGC]\}/', $adds, $m)) {
+            $n = 0;
+            foreach ($s->players as $p) {
+                $n += count(array_filter($p->graveyard, static fn (CardInstance $c) => $c->name === $spell->name && $c !== $spell));
+            }
+
+            return $adds . str_repeat($m[0], $n);
+        }
+
+        return $adds;
     }
 
     /** La créature ciblée (`permanent:<id>`) si elle est encore sur le champ de bataille sous le contrôle du lanceur (CR 608.2b). */
@@ -301,6 +420,16 @@ final class StackResolver
     {
         $p = $s->player($player);
         $id = substr($target, strlen('library:'));
+        if ($effect->discardRandom) {
+            // Gamble : cherche, puis défausse une carte au hasard de sa main (celle qui vient d'être trouvée comprise).
+            $effect = new SpellEffect('tutor', tutorTop: $effect->tutorTop, tutorFilter: $effect->tutorFilter, lifeLoss: $effect->lifeLoss);
+            $this->tutor($s, $player, $target, $effect, $source);
+            if ($p->hand !== []) {
+                $s->discard($player, $p->hand[$s->rng->int(0, count($p->hand) - 1)]->id);
+            }
+
+            return;
+        }
         foreach ($p->library as $i => $card) {
             if ($card->id === $id) {
                 array_splice($p->library, $i, 1);
@@ -440,6 +569,9 @@ final class StackResolver
             $s->emit('SpellFizzled', ['target' => $target]);
 
             return;
+        }
+        if ($effect->blue === SpellEffect::BLUE_IF && !$victim->card->isBlueColored()) {
+            return; // Pyroblast : « counter target spell if it's blue »
         }
         if ($effect->payCost !== null && $paid === true) {
             return; // le contrôleur du sort visé a payé (`CostPaid`)

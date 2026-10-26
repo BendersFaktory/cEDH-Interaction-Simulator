@@ -177,6 +177,7 @@ final class HeuristicAgent implements PlayerAgent
             foreach ($legal as $action) {
                 if ($action instanceof CastSpell
                     && !$this->isCounter($state, $action)
+                    && !$this->aiSkips($state, $action)
                     && !$this->isPitch($action)
                     && !str_starts_with((string) $action->alt, CastSpell::ALT_RETURN) // Gush : jamais en renvoyant ses Îles en phase principale
                     && !in_array('player:' . $playerId, $action->targets, true)) {
@@ -841,6 +842,20 @@ final class HeuristicAgent implements PlayerAgent
             if ($t->targets === []) {
                 return $t;
             }
+            if (!str_starts_with($t->targets[0], 'player:')) {
+                // Tuteur à l'entrée (Ranger-Captain of Eos) : la carte de la bibliothèque la plus forte ; rien à chercher : tel quel.
+                $found = null;
+                foreach ($state->player($playerId)->library as $c) {
+                    if ('library:' . $c->id === $t->targets[0]) {
+                        $found = $c;
+                    }
+                }
+                $score = $found === null ? -1 : $this->cardValue($found, 0);
+                if ($best === null || $score > $best[1]) {
+                    $best = [$t, $score];
+                }
+                continue;
+            }
             $target = (int) substr($t->targets[0], 7);
             $score = [$target === $playerId ? 1 : 0, $state->player($target)->life, $target];
             if ($best === null || $score < $best[1]) {
@@ -1400,6 +1415,19 @@ final class HeuristicAgent implements PlayerAgent
 
     private function isCounter(GameState $state, CastSpell $action): bool
     {
-        return $state->player($action->player())->findCastable($action->cardId)?->hasEffect('counter') === true;
+        $card = $state->player($action->player())->findCastable($action->cardId);
+
+        return $card?->hasEffect('counter') === true && !$card->isModal(); // Pyroblast : jamais utilisé comme contresort par l'IA
+    }
+
+    /**
+     * Sorts que l'IA ne lance pas faute de jugement fin (lot H2) : modaux (Pyroblast), à coût additionnel de sacrifice (Culling
+     * the Weak, Diabolic Intent) et de renvoi en main (Snapback), qui pourraient viser ses propres permanents.
+     */
+    private function aiSkips(GameState $state, CastSpell $action): bool
+    {
+        $card = $state->player($action->player())->findCastable($action->cardId);
+
+        return $card !== null && ($card->isModal() || $card->extraCost !== null || $card->hasEffect('bounce') || $card->hasEffect('destroy') || $card->hasEffect('grant_sac_mana'));
     }
 }

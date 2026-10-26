@@ -290,10 +290,27 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'PermanentDestroyed': // même effet sur l'état affiché : champ de bataille -> cimetière
     case 'CreatureDied': {
       const pl = v.players[p.player]
       removeCard(pl.battlefield, p.card.id)
       zoneOf(pl, p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'AbilitiesGranted': {
+      // Rain of Filth : les terrains reçoivent la capacité (ajoutée après celles de la carte) jusqu'à la fin du tour.
+      const pl = v.players[p.player]
+      for (const id of p.cards as string[]) {
+        const c = pl.battlefield.find((x) => x.id === id)
+        if (c) c.abilities = [...(c.abilities ?? []), p.ability]
+      }
+      break
+    }
+
+    case 'AbilitiesExpired': {
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c?.abilities) c.abilities = c.abilities.slice(0, c.abilities.length - p.count)
       break
     }
 
@@ -377,7 +394,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.winner = p.winner
       break
 
-    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled', 'CostNotPaid', 'DelayedTriggerCreated' et autres : pas d'effet sur l'état affiché.
+    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled', 'CostNotPaid', 'DelayedTriggerCreated', 'NoncreatureLockApplied' et autres : pas d'effet sur l'état affiché.
   }
 
   return v

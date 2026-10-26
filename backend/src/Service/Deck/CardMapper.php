@@ -71,8 +71,8 @@ final class CardMapper
         $keywords = [];
         foreach ($card['keywords'] ?? [] as $keyword) {
             $key = strtolower((string) $keyword);
-            if ($key === 'imprint' || $key === 'scry') {
-                continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … ») est traité ligne par ligne
+            if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel'], true)) {
+                continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Threshold — … ») est traité ligne par ligne
             }
             if (!isset(self::KEYWORDS[$key])) {
                 throw $fail("mot-clé non modélisé ($keyword)");
@@ -90,11 +90,26 @@ final class CardMapper
         $upkeepUntap = null; // Mana Vault : « At the beginning of your upkeep, you may pay {N}. If you do, untap ~. »
         $tapPain = 0; // « Whenever ~ becomes tapped, it deals N damage to you. » (City of Brass)
         $hasX = str_contains($manaCost, '{X}');
+        $extraCost = null; // coût additionnel (Culling the Weak, Diabolic Intent)
+        $tappedAfterOwnTurn = 0; // Starting Town
+        $modal = null; // « Choose one — » : numéro du dernier mode lu
 
         foreach ($this->oracleLines((string) ($card['oracle_text'] ?? ''), $name) as $line) {
             $line = $this->anyColor($line);
             if ($this->isKeywordLine($line)) {
                 continue;
+            }
+            // Sort modal (Pyroblast) : chaque puce est un mode ; ses effets sont marqués de son numéro après le motif.
+            $mode = 0;
+            $firstEffect = count($effects);
+            if ($isSpell && $line === 'Choose one —') {
+                $modal = 0;
+                continue;
+            }
+            if ($modal !== null && preg_match('/^• (.+)$/u', $line, $bullet)) {
+                $modal++;
+                $mode = $modal;
+                $line = $bullet[1];
             }
             if ($isSpell && preg_match('/^~ deals (\d+|X) damage to any target\.$/', $line, $m)) {
                 if ($m[1] === 'X' && !$hasX) {
@@ -103,6 +118,48 @@ final class CardMapper
                 $effects[] = new SpellEffect('damage', $m[1] === 'X' ? 0 : (int) $m[1]);
             } elseif ($isSpell && $line === 'You may pay 1 life and exile a blue card from your hand rather than pay ~\'s mana cost.') {
                 $altCost = CardInstance::ALT_PITCH_BLUE; // Force of Will
+            } elseif ($isSpell && $line === 'You may exile a blue card from your hand rather than pay ~\'s mana cost.') {
+                $altCost = CardInstance::ALT_PITCH_BLUE_FREE; // Snapback, Misdirection (sans PV)
+            } elseif ($isSpell && $line === 'As an additional cost to cast ~, sacrifice a creature.') {
+                $extraCost = CardInstance::EXTRA_SACRIFICE_CREATURE; // Culling the Weak, Diabolic Intent
+            } elseif ($isSpell && $line === 'Return target creature to its owner\'s hand.') {
+                $effects[] = new SpellEffect('bounce', 0, null, 'creature'); // Snapback
+            } elseif ($isSpell && $line === 'Counter target spell if it\'s blue.') {
+                $effects[] = new SpellEffect('counter', blue: SpellEffect::BLUE_IF); // Pyroblast
+            } elseif ($isSpell && $line === 'Destroy target permanent if it\'s blue.') {
+                $effects[] = new SpellEffect('destroy', 0, null, 'permanent', blue: SpellEffect::BLUE_IF);
+            } elseif ($isSpell && $line === 'Counter target blue spell.') {
+                $effects[] = new SpellEffect('counter', blue: SpellEffect::BLUE_TARGET); // Red Elemental Blast
+            } elseif ($isSpell && $line === 'Destroy target blue permanent.') {
+                $effects[] = new SpellEffect('destroy', 0, null, 'permanent', blue: SpellEffect::BLUE_TARGET);
+            } elseif ($isSpell && preg_match('/^Add ((?:\{[WUBRG]\})+), then add (\{[WUBRG]\}) for each card named ~ in each graveyard\.$/', $line, $m)) {
+                $effects[] = new SpellEffect('mana', 0, $m[1], perGraveyardNamed: true); // Rite of Flame (le symbole ajouté est celui du début du texte)
+            } elseif ($isSpell && preg_match('/^Threshold — Add ((?:\{[WUBRG]\})+) instead if there are seven or more cards in your graveyard\.$/u', $line, $m)
+                && ($last = end($effects)) instanceof SpellEffect && $last->effect === 'mana') {
+                array_pop($effects);
+                $effects[] = new SpellEffect('mana', 0, $last->adds, thresholdAdds: $m[1]); // Cabal Ritual
+            } elseif ($isSpell && $line === 'Search your library for a card, put that card into your hand, discard a card at random, then shuffle.') {
+                $effects[] = new SpellEffect('tutor', discardRandom: true); // Gamble
+            } elseif ($isSpell && preg_match('/^Until end of turn, lands you control gain "Sacrifice ~: Add (\{[WUBRG]\})\."$/', str_replace('this land', '~', $line), $m)) {
+                $effects[] = new SpellEffect('grant_sac_mana', 0, $m[1]); // Rain of Filth
+            } elseif (!$isSpell && !$isLand && preg_match('/^Exile (?:this card|~) from your hand: Add (\{[WUBRG]\})\.$/', $line, $m)) {
+                $abilities[] = ActivatedAbility::exileFromHandMana($m[1]); // Simian Spirit Guide
+            } elseif (!$isSpell && !$isLand && preg_match('/^Discard your hand, Sacrifice ~: Add three mana of any one color\. Activate only as an instant\.$/', $line)) {
+                $abilities[] = ActivatedAbility::discardHandMana('{W}{W}{W}|{U}{U}{U}|{B}{B}{B}|{R}{R}{R}|{G}{G}{G}'); // Lion's Eye Diamond
+            } elseif (!$isSpell && !$isLand && preg_match('/^Metalcraft — \{T\}: Add ((?:\{[WUBRG]\})(?: or \{[WUBRG]\})+)\. Activate only if you control three or more artifacts\.$/u', $line, $m)) {
+                $abilities[] = ActivatedAbility::mana(implode('|', explode(' or ', $m[1])), requires: ActivatedAbility::REQ_METALCRAFT); // Mox Opal
+            } elseif (!$isSpell && !$isLand && $line === '{T}: Add one mana of any color among legendary creatures and planeswalkers you control.') {
+                $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_LEGENDARY); // Mox Amber
+            } elseif ($isLand && preg_match('/^~ enters tapped unless it\'s your first, second, or third turn of the game\.$/', $line)) {
+                $tappedAfterOwnTurn = 3; // Starting Town
+            } elseif ($isLand && $line === 'When you play another land, sacrifice ~.') {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::LAND_PLAYED, 'sacrifice_self'); // City of Traitors
+            } elseif ($isLand && preg_match('/^Channel — (\{\d+\}(?:\{[WUBRG]\})*), Discard this card: Return target artifact, creature, enchantment, or planeswalker to its owner\'s hand\. This ability costs \{1\} less to activate for each legendary creature you control\.$/u', $line, $m)) {
+                $abilities[] = ActivatedAbility::channelBounce($m[1], 1); // Otawara, Soaring City
+            } elseif (!$isSpell && !$isLand && $line === 'Sacrifice ~: Your opponents can\'t cast noncreature spells this turn.') {
+                $abilities[] = ActivatedAbility::noncreatureLock(); // Ranger-Captain of Eos
+            } elseif ($isCreature && $line === 'When ~ enters, you may search your library for a creature card with mana value 1 or less, reveal it, put it into your hand, then shuffle.') {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::ETB, 'tutor', spec: 'creature<=1'); // Ranger-Captain of Eos
             } elseif ($isSpell && $line === 'If you control a commander, you may cast ~ without paying its mana cost.') {
                 $altCost = CardInstance::ALT_COMMANDER; // Fierce Guardianship
             } elseif ($isSpell && $line === 'If it\'s not your turn, you may exile a blue card from your hand rather than pay ~\'s mana cost.') {
@@ -190,6 +247,11 @@ final class CardMapper
             } else {
                 throw $fail('texte non modélisé : « ' . $line . ' »');
             }
+            if ($mode > 0) {
+                foreach (array_keys(array_slice($effects, $firstEffect, null, true)) as $i) {
+                    $effects[$i] = $effects[$i]->withMode($mode);
+                }
+            }
         }
 
         if ($isSpell && $effects === []) {
@@ -220,6 +282,7 @@ final class CardMapper
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
             null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
             in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost, $altCost, $noUntap,
+            $extraCost, $tappedAfterOwnTurn,
         );
     }
 
@@ -327,7 +390,13 @@ final class CardMapper
      */
     private function effectList(array $effects, callable $fail): array
     {
-        if (count(array_filter($effects, static fn (SpellEffect $e) => $e->isTargeted())) > 1) {
+        $targetedPerMode = [];
+        foreach ($effects as $e) {
+            if ($e->isTargeted()) {
+                $targetedPerMode[$e->mode] = ($targetedPerMode[$e->mode] ?? 0) + 1;
+            }
+        }
+        if ($targetedPerMode !== [] && max($targetedPerMode) > 1) {
             throw $fail('plusieurs effets ciblés (motif multi-cibles non mappé)');
         }
 

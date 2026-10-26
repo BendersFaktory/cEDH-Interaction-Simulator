@@ -49,6 +49,8 @@ final class TriggeredAbility
     public const DISCARD = 'discard';
     public const DRAW_STEP = 'draw_step';
     public const POSTCOMBAT_MAIN = 'postcombat_main';
+    /** Son contrôleur joue un autre terrain (City of Traitors). */
+    public const LAND_PLAYED = 'land_played';
     /** Triggers retardés (voir l'en-tête). */
     public const NEXT_UPKEEP = 'next_upkeep';
     public const NEXT_MAIN = 'next_main';
@@ -61,8 +63,8 @@ final class TriggeredAbility
     /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
     public const TAPPED = 'tapped';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::NEXT_UPKEEP, self::NEXT_MAIN];
-    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw'];
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN];
+    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor'];
     private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL];
 
     public function __construct(
@@ -88,6 +90,9 @@ final class TriggeredAbility
         if (in_array($effect, ['pact', 'draw_unless'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)) {
             throw new \InvalidArgumentException("Coût de pacte invalide : $spec");
         }
+        if ($effect === 'tutor' && !preg_match('/^(creature|artifact|enchantment|instant|sorcery|land)?<=\d+$/', $spec)) {
+            throw new \InvalidArgumentException("Filtre de tuteur invalide : $spec");
+        }
     }
 
     /** Le sort lancé `$spell` satisfait-il le filtre (`cast`) ? Sans filtre, tout sort convient. */
@@ -103,6 +108,20 @@ final class TriggeredAbility
     public function choosesHandCard(): bool
     {
         return $this->effect === 'imprint';
+    }
+
+    /** Choisit-elle une carte de la bibliothèque en étant mise sur la pile (tuteur à l'entrée : Ranger-Captain of Eos) ? */
+    public function choosesLibraryCard(): bool
+    {
+        return $this->effect === 'tutor';
+    }
+
+    /** La carte de la bibliothèque `$card` convient-elle à ce tuteur (`spec` = `[type]<=valeur de mana`) ? */
+    public function tutorMatches(CardInstance $card): bool
+    {
+        [$type, $max] = explode('<=', $this->spec, 2);
+
+        return ($type === '' || $card->hasType($type)) && $card->manaCost()->manaValue() <= (int) $max;
     }
 
     /** La capacité cible-t-elle un joueur (à choisir en la mettant sur la pile) ? */
@@ -125,6 +144,7 @@ final class TriggeredAbility
             self::DISCARD => 'Quand vous défaussez une carte',
             self::DRAW_STEP => 'Au début de votre étape de pioche',
             self::POSTCOMBAT_MAIN => 'Au début de votre phase principale d\'après combat',
+            self::LAND_PLAYED => 'Quand vous jouez un autre terrain',
             self::NEXT_UPKEEP => 'Au début de votre prochain entretien',
             self::NEXT_MAIN => 'Au début de votre prochaine phase principale',
         } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
@@ -139,6 +159,8 @@ final class TriggeredAbility
             'draw_unless' => sprintf('piocher %d sauf s\'il paie %s', $this->amount, $this->spec),
             'pay_life_draw' => 'payer X PV et piocher X (X = adversaires blessés au combat ce tour)',
             'mana' => sprintf('ajouter %s', $this->amount > 0 ? str_repeat('{C}', $this->amount) : 'rien'),
+            'sacrifice_self' => 'la sacrifier',
+            'tutor' => sprintf('chercher une carte (%s) et la mettre dans la main', $this->spec),
         };
 
         return "$when : $what";

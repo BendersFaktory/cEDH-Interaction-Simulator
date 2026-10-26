@@ -98,6 +98,13 @@ final class GameState
      * @var array<int, array{taken: int, kept: bool}>|null
      */
     public ?array $mulligan = null;
+    /**
+     * Joueurs dont les adversaires ne peuvent pas lancer de sort non-créature ce tour (Ranger-Captain of Eos sacrifié) ; vidé au
+     * cleanup. Sérialisé sous `noncreatureLocks`, omis quand vide.
+     *
+     * @var list<int>
+     */
+    public array $noncreatureLocks = [];
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -253,6 +260,7 @@ final class GameState
      */
     public function sendToGraveyard(int $ownerId, CardInstance $card): string
     {
+        $card->grantedAbilities = [];
         if ($card->token) {
             return 'none';
         }
@@ -268,6 +276,7 @@ final class GameState
      */
     public function exile(int $ownerId, CardInstance $card): string
     {
+        $card->grantedAbilities = [];
         if ($card->token) {
             return 'none';
         }
@@ -394,7 +403,8 @@ final class GameState
     public function putLandOntoBattlefield(int $playerId, CardInstance $card, ?bool $payLife, string $event, bool $tapped = false): void
     {
         $pays = $card->untappedLifeCost > 0 && $payLife === true && $this->player($playerId)->life >= $card->untappedLifeCost;
-        $tapped = $tapped || ($card->untappedLifeCost > 0 && !$pays);
+        $tapped = $tapped || ($card->untappedLifeCost > 0 && !$pays)
+            || ($card->tappedAfterOwnTurn > 0 && $this->player($playerId)->turnsTaken > $card->tappedAfterOwnTurn); // Starting Town
         $card->tapped = $tapped;
         $this->enterBattlefield($playerId, $card);
         $this->emit($event, ['player' => $playerId, 'card' => $card->toPublic()] + ($tapped ? ['tapped' => true] : [])
@@ -457,6 +467,54 @@ final class GameState
                 $this->damageSelf($playerId, $damage, $source);
             }
         }
+    }
+
+    /**
+     * Détruit un permanent de `$playerId` (Pyroblast, Red Elemental Blast) : champ de bataille -> cimetière via `sendToGraveyard()`
+     * (un commandant y passe puis revient par les SBA), `PermanentDestroyed`, triggers « meurt » si c'est une créature. Retourne
+     * false si le permanent n'est plus là.
+     */
+    public function destroyPermanent(int $playerId, string $cardId, string $source): bool
+    {
+        $card = $this->player($playerId)->takeFromBattlefield($cardId);
+        if ($card === null) {
+            return false;
+        }
+        $card->damage = 0;
+        $card->deathtouchDamage = false;
+        $card->tapped = false;
+        $destination = $this->sendToGraveyard($playerId, $card);
+        $this->emit('PermanentDestroyed', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'source' => $source]);
+        if ($card->isCreature()) {
+            $this->queueTriggers($playerId, $card, TriggeredAbility::DIES);
+        }
+
+        return true;
+    }
+
+    /**
+     * « Quand vous jouez un autre terrain » (City of Traitors) : met en file les triggers `land_played` des permanents du joueur,
+     * sauf ceux du terrain qui vient d'être joué.
+     */
+    public function queueLandPlayedTriggers(int $playerId, CardInstance $played): void
+    {
+        foreach ($this->player($playerId)->battlefield as $card) {
+            if ($card !== $played && $card->triggers !== []) {
+                $this->queueTriggers($playerId, $card, TriggeredAbility::LAND_PLAYED);
+            }
+        }
+    }
+
+    /** Un adversaire de `$playerId` l'empêche-t-il de lancer des sorts non-créature ce tour (`$noncreatureLocks`) ? */
+    public function castLockedFor(int $playerId): bool
+    {
+        foreach ($this->noncreatureLocks as $locker) {
+            if ($locker !== $playerId && !$this->player($locker)->lost) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function enterBattlefield(int $playerId, CardInstance $card): void
@@ -573,6 +631,7 @@ final class GameState
         $card->deathtouchDamage = false;
         $card->powerBonus = 0;
         $card->toughnessBonus = 0;
+        $card->grantedAbilities = [];
         if (!$card->token) {
             $p->hand[] = $card;
         }
@@ -646,6 +705,9 @@ final class GameState
         if ($this->combatDamaged !== []) {
             $d['combatDamaged'] = $this->combatDamaged;
         }
+        if ($this->noncreatureLocks !== []) {
+            $d['noncreatureLocks'] = $this->noncreatureLocks;
+        }
 
         return $d;
     }
@@ -696,6 +758,7 @@ final class GameState
         $s->eventSeq = (int) $d['eventSeq'];
         $s->over = (bool) $d['over'];
         $s->winner = $d['winner'] === null ? null : (int) $d['winner'];
+        $s->noncreatureLocks = array_map('intval', $d['noncreatureLocks'] ?? []);
         foreach ($d['stops'] ?? [] as $id => $config) {
             $s->stops[(int) $id] = StopConfig::fromArray($config);
         }

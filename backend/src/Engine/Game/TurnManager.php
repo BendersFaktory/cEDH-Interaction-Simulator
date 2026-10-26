@@ -21,6 +21,7 @@ final class TurnManager
         $s->emit('PhaseChanged', ['turn' => $s->turn, 'phase' => $s->phase->value, 'activePlayer' => $s->activePlayer]);
 
         if ($s->phase === Phase::Untap) {
+            $s->player($s->activePlayer)->turnsTaken++;
             $untapped = $s->player($s->activePlayer)->untapAll();
             if ($untapped !== []) {
                 $s->emit('PermanentsUntapped', ['player' => $s->activePlayer, 'cards' => $untapped]);
@@ -48,10 +49,16 @@ final class TurnManager
         $this->combat->beginStep($s);
 
         if ($s->phase === Phase::Cleanup) {
+            $s->noncreatureLocks = []; // « ce tour » : Ranger-Captain of Eos
             foreach ($s->players as $p) {
                 foreach ($p->battlefield as $card) {
                     $card->damage = 0;
                     $card->deathtouchDamage = false;
+                    if ($card->grantedAbilities !== []) {
+                        $count = count($card->grantedAbilities);
+                        $card->grantedAbilities = []; // Rain of Filth : « jusqu'à la fin du tour »
+                        $s->emit('AbilitiesExpired', ['player' => $p->id, 'card' => $card->id, 'count' => $count]);
+                    }
                     // Fin des effets « jusqu'à la fin du tour » (règle 514.2).
                     if ($card->powerBonus !== 0 || $card->toughnessBonus !== 0) {
                         $card->powerBonus = 0;

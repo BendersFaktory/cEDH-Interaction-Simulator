@@ -24,6 +24,8 @@ final class CastSpell implements Action
         public readonly array $targets = [],
         public readonly int $x = 0, // valeur choisie pour {X} (0 si le sort n'en a pas)
         public readonly ?string $alt = null, // coût alternatif (ALT_FREE | ALT_PITCH . id | ALT_RETURN . ids) ; null = coût de mana
+        public readonly int $mode = 0, // mode choisi d'un sort modal (Pyroblast) ; 0 = sort non modal
+        public readonly ?string $sacrifice = null, // créature sacrifiée en coût additionnel (Culling the Weak, Diabolic Intent)
     ) {
     }
 
@@ -35,7 +37,8 @@ final class CastSpell implements Action
     public function id(): string
     {
         return sprintf('cast:%d:%s:%s', $this->player, $this->cardId, implode(',', $this->targets)) . ($this->x > 0 ? ':x=' . $this->x : '')
-            . ($this->alt === null ? '' : ':alt=' . $this->alt);
+            . ($this->alt === null ? '' : ':alt=' . $this->alt) . ($this->mode > 0 ? ':mode=' . $this->mode : '')
+            . ($this->sacrifice === null ? '' : ':sac=' . $this->sacrifice);
     }
 
     public function describe(GameState $state): string
@@ -62,6 +65,12 @@ final class CastSpell implements Action
             $pitched = $player->findHand(substr($this->alt, strlen(self::ALT_PITCH)));
             $life = $card?->altCost === \App\Engine\Game\CardInstance::ALT_PITCH_BLUE ? '1 PV et ' : '';
             $label .= ' (coût alternatif : ' . $life . 'exil de ' . ($pitched?->name ?? 'une carte bleue') . ')';
+        }
+        if ($this->mode > 0) {
+            $label .= ' (mode ' . $this->mode . ' : ' . implode(', ', array_map(static fn (\App\Engine\Card\SpellEffect $e) => $e->effect, $card?->effectsForMode($this->mode) ?? [])) . ')';
+        }
+        if ($this->sacrifice !== null) {
+            $label .= ' (sacrifier ' . ($player->findOnBattlefield($this->sacrifice)?->name ?? $this->sacrifice) . ')';
         }
         if ($this->targets !== []) {
             $label .= ' → ' . implode(', ', array_map(static fn (string $t) => self::targetLabel($state, $t), $this->targets));
@@ -102,6 +111,7 @@ final class CastSpell implements Action
     public function toArray(): array
     {
         return ['type' => 'cast', 'player' => $this->player, 'cardId' => $this->cardId, 'targets' => $this->targets, 'x' => $this->x]
-            + ($this->alt === null ? [] : ['alt' => $this->alt]);
+            + ($this->alt === null ? [] : ['alt' => $this->alt]) + ($this->mode > 0 ? ['mode' => $this->mode] : [])
+            + ($this->sacrifice === null ? [] : ['sacrifice' => $this->sacrifice]);
     }
 }

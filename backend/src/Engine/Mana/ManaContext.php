@@ -128,7 +128,7 @@ final class ManaContext
             $conv = [];
             foreach ($card->abilities() as $ai => $ability) {
                 if (!$ability->isManaAbility || $ability->effect !== 'mana' || !$ability->tap
-                    || !AbilityManager::sourceReady($card, $ability, $this->turn)) {
+                    || !AbilityManager::sourceReady($card, $ability, $this->turn) || !AbilityManager::requirementsMet($this->p, $ability)) {
                     continue;
                 }
                 // Source qui blesse (PV payés ou dégâts à soi) : jamais si elle ferait tomber son contrôleur à 0 PV ou moins

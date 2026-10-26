@@ -25,6 +25,8 @@ final class PlayerState
      * (CR 704.5b). Sérialisé sous `drewFromEmpty`, omis à faux.
      */
     public bool $drewFromEmpty = false;
+    /** Nombre de tours de ce joueur commencés (Starting Town : « votre premier, deuxième ou troisième tour »). Sérialisé sous `turnsTaken`, omis à 0. */
+    public int $turnsTaken = 0;
     /**
      * Zone d'exil du joueur (cartes dont il est le propriétaire), dans l'ordre d'arrivée. Seul chemin d'entrée :
      * `GameState::exile()`. Sérialisée sous `exile`, omise quand vide (empreintes inchangées tant que rien n'exile).
@@ -118,6 +120,19 @@ final class PlayerState
         }
         if ($ability->spec === ActivatedAbility::DYNAMIC_IMPRINT) {
             return array_fill_keys($card->imprint, true);
+        }
+        if ($ability->spec === ActivatedAbility::DYNAMIC_LEGENDARY) {
+            // Mox Amber : couleurs des créatures (et planeswalkers) légendaires que l'on contrôle.
+            $colors = [];
+            foreach ($this->battlefield as $c) {
+                if ($c->isCreature() && $c->isLegendary()) {
+                    foreach ($c->colors() as $symbol) {
+                        $colors[$symbol] = true;
+                    }
+                }
+            }
+
+            return $colors;
         }
 
         return $this->opponentColors === null ? [] : ($this->opponentColors)();
@@ -359,6 +374,7 @@ final class PlayerState
             'pool' => $this->pool->toArray(),
         ] + ($this->pool->restrictedToArray() === [] ? [] : ['poolRestricted' => $this->pool->restrictedToArray()])
             + ($this->drewFromEmpty ? ['drewFromEmpty' => true] : [])
+            + ($this->turnsTaken > 0 ? ['turnsTaken' => $this->turnsTaken] : [])
             + ($this->exile === [] ? [] : ['exile' => $map($this->exile)]);
     }
 
@@ -379,6 +395,7 @@ final class PlayerState
         );
         $p->lost = (bool) $d['lost'];
         $p->drewFromEmpty = (bool) ($d['drewFromEmpty'] ?? false);
+        $p->turnsTaken = (int) ($d['turnsTaken'] ?? 0);
         $p->exile = $map($d['exile'] ?? []);
 
         return $p;

@@ -53,7 +53,17 @@ final class ActivatedAbility
         public readonly int $lifeCost = 0,   // PV payés à l'activation (Mana Confluence, fetchlands) ; impossible avec moins de PV (CR 119.4)
         public readonly int $selfDamage = 0, // dégâts infligés à son contrôleur par la capacité (Ancient Tomb, Talismans, pain lands)
         public readonly bool $upkeepOnly = false, // activable seulement pendant l'entretien de son contrôleur (Mana Vault : « à l'entretien, payez {4} : dégagez-la »)
+        public readonly string $fromHand = '',    // capacité activée DEPUIS LA MAIN : `exile` (exiler cette carte : Simian Spirit Guide) ou `discard` (la défausser : Channel)
+        public readonly bool $discardHand = false, // coût : défausser toute sa main (Lion's Eye Diamond)
+        public readonly ?string $requires = null,  // condition d'activation : REQ_METALCRAFT (Mox Opal : trois artefacts ou plus)
+        public readonly int $legendaryDiscount = 0, // coût réduit de {N} générique par créature légendaire contrôlée (Otawara : 1)
     ) {
+        if ($fromHand !== '' && !in_array($fromHand, ['exile', 'discard'], true)) {
+            throw new \InvalidArgumentException("Coût depuis la main inconnu : $fromHand");
+        }
+        if ($requires !== null && $requires !== self::REQ_METALCRAFT) {
+            throw new \InvalidArgumentException("Condition d'activation inconnue : $requires");
+        }
         if ($effect === 'fetch') {
             $this->fetchSpec();
         }
@@ -65,24 +75,66 @@ final class ActivatedAbility
         }
     }
 
+    public const REQ_METALCRAFT = 'metalcraft';
+
     /**
      * `{T}: ajoute …` ; `$spec` = alternatives séparées par `|`, ex. `{C}{C}`, `{R}|{G}` ou `{C}{C}@eldrazi` (restreinte).
      * `$cost` = coût de mana en plus du `{T}` (Signet : `{1}`).
      */
-    public static function mana(string $spec, ?string $cost = null, int $selfDamage = 0, int $lifeCost = 0): self
+    public static function mana(string $spec, ?string $cost = null, int $selfDamage = 0, int $lifeCost = 0, ?string $requires = null): self
     {
         // Objet valeur immuable, fonction pure de ses arguments : instances partagées (poids mouche), aucun état de partie.
-        return self::$manaMemo[$spec . "\0" . $cost . "\0" . $selfDamage . "\0" . $lifeCost] ??= (function () use ($spec, $cost, $selfDamage, $lifeCost): self {
+        return self::$manaMemo[$spec . "\0" . $cost . "\0" . $selfDamage . "\0" . $lifeCost . "\0" . $requires] ??= (function () use ($spec, $cost, $selfDamage, $lifeCost, $requires): self {
             [$options, $restrictions] = self::parseOptions(explode('|', $spec));
 
             return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, restrictions: $restrictions,
-                lifeCost: $lifeCost, selfDamage: $selfDamage);
+                lifeCost: $lifeCost, selfDamage: $selfDamage, requires: $requires);
         })();
+    }
+
+    /** Simian Spirit Guide : exiler cette carte de sa main pour un mana (capacité de mana depuis la main, sans {T}). */
+    public static function exileFromHandMana(string $spec): self
+    {
+        [$options] = self::parseOptions(explode('|', $spec));
+
+        return new self(true, 'mana', false, null, $options, fromHand: 'exile');
+    }
+
+    /** Lion's Eye Diamond : défausser sa main et sacrifier la source pour trois mana d'une couleur (`$spec` = les cinq alternatives `{W}{W}{W}|…`). */
+    public static function discardHandMana(string $spec): self
+    {
+        [$options] = self::parseOptions(explode('|', $spec));
+
+        return new self(true, 'mana', false, null, $options, sacrifice: true, discardHand: true);
+    }
+
+    /**
+     * Channel (Otawara) : depuis la main, `[coût]` et défausser cette carte pour renvoyer un permanent ciblé dans la main de
+     * son propriétaire ; `$discount` = réduction de coût générique par créature légendaire contrôlée.
+     */
+    public static function channelBounce(string $cost, int $discount = 0): self
+    {
+        return new self(false, 'bounce', false, ManaCost::parse($cost), fromHand: 'discard', legendaryDiscount: $discount);
+    }
+
+    /** `Sacrifice ~: Add …` (capacité de mana accordée aux terrains par Rain of Filth, sans {T}). */
+    public static function sacrificeMana(string $spec): self
+    {
+        [$options] = self::parseOptions(explode('|', $spec));
+
+        return new self(true, 'mana', false, null, $options, sacrifice: true);
+    }
+
+    /** Ranger-Captain of Eos : sacrifier la source, les adversaires ne peuvent pas lancer de sort non-créature ce tour. */
+    public static function noncreatureLock(): self
+    {
+        return new self(false, 'lock_noncreature', false, null, sacrifice: true);
     }
 
     /** Mana produit dynamique : `spec` d'une capacité de mana dont les alternatives (les cinq couleurs) sont filtrées à l'usage. */
     public const DYNAMIC_OPPONENT_LAND = 'oppland'; // Fellwar Stone, Exotic Orchard : couleurs que produit un terrain adverse
     public const DYNAMIC_IMPRINT = 'imprint';       // Chrome Mox : couleurs de la carte exilée
+    public const DYNAMIC_LEGENDARY = 'legendary';   // Mox Amber : couleurs des créatures et planeswalkers légendaires que l'on contrôle
 
     /**
      * `{T}: un mana d'une couleur parmi celles que `$kind` autorise` : cinq alternatives à une couleur, dont seules les
@@ -90,7 +142,7 @@ final class ActivatedAbility
      */
     public static function dynamicMana(string $kind): self
     {
-        if (!in_array($kind, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT], true)) {
+        if (!in_array($kind, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY], true)) {
             throw new \InvalidArgumentException("Mana dynamique inconnu : $kind");
         }
 
@@ -100,7 +152,7 @@ final class ActivatedAbility
     /** Vrai pour une capacité de mana dont les couleurs dépendent de l'état de la partie (`dynamicMana()`). */
     public function isDynamicMana(): bool
     {
-        return $this->isManaAbility && ($this->spec === self::DYNAMIC_OPPONENT_LAND || $this->spec === self::DYNAMIC_IMPRINT);
+        return $this->isManaAbility && ($this->spec === self::DYNAMIC_OPPONENT_LAND || $this->spec === self::DYNAMIC_IMPRINT || $this->spec === self::DYNAMIC_LEGENDARY);
     }
 
     /** `[coût] : dégager la source` (Grim Monolith : `{4}` ; Mana Vault : `{4}` pendant son entretien seulement). Non-mana, passe par la pile. */
@@ -267,6 +319,9 @@ final class ActivatedAbility
         $cost = implode(', ', array_filter([
             $this->manaCost !== null ? (string) $this->manaCost : '',
             $this->tap ? '{T}' : '',
+            $this->fromHand === 'exile' ? 'exiler cette carte de votre main' : '',
+            $this->fromHand === 'discard' ? 'défausser cette carte' : '',
+            $this->discardHand ? 'défausser votre main' : '',
             $this->sacrifice ? 'sacrifier' : '',
             $this->sacrificeCreature ? 'sacrifier une créature' : '',
             $this->discard > 0 ? "défausser {$this->discard}" : '',
@@ -280,6 +335,8 @@ final class ActivatedAbility
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'pump' => $this->spec,
             'untap' => $this->upkeepOnly ? 'dégager (entretien)' : 'dégager',
+            'bounce' => 'renvoyer en main' . ($this->legendaryDiscount > 0 ? ' (moins cher par créature légendaire)' : ''),
+            'lock_noncreature' => 'les adversaires ne peuvent pas lancer de sort non-créature ce tour',
             'fetch' => 'chercher ' . ($this->fetchSpec()['basic'] ? 'un terrain de base' : implode(' ou ', $this->fetchSpec()['types'])) . ($this->fetchSpec()['tapped'] ? ' (engagé)' : ''),
             default => $this->effect,
         };
@@ -306,6 +363,10 @@ final class ActivatedAbility
             'lifeCost' => $this->lifeCost,
             'selfDamage' => $this->selfDamage,
             'upkeepOnly' => $this->upkeepOnly,
+            'fromHand' => $this->fromHand,
+            'discardHand' => $this->discardHand,
+            'requires' => $this->requires,
+            'legendaryDiscount' => $this->legendaryDiscount,
         ]);
     }
 
@@ -329,6 +390,10 @@ final class ActivatedAbility
             (int) ($d['lifeCost'] ?? 0),
             (int) ($d['selfDamage'] ?? 0),
             (bool) ($d['upkeepOnly'] ?? false),
+            (string) ($d['fromHand'] ?? ''),
+            (bool) ($d['discardHand'] ?? false),
+            $d['requires'] ?? null,
+            (int) ($d['legendaryDiscount'] ?? 0),
         );
     }
 

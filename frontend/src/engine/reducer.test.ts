@@ -236,6 +236,21 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[1].command.map((c) => c.id)).toContain('cmd')
   })
 
+  it('PermanentDestroyed envoie le permanent au cimetière ; AbilitiesGranted / AbilitiesExpired ajoutent puis retirent la capacité accordée', () => {
+    const v = start()
+    applyEvent(v, ev(4, 'PermanentDestroyed', { player: 0, card: pinger, destination: 'graveyard', source: 'Pyroblast' }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1'])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
+
+    const grant = { isManaAbility: true, effect: 'mana', tap: false, options: ['{B}'], sacrifice: true }
+    const before = v.players[0].battlefield[0].abilities?.length ?? 0
+    applyEvent(v, ev(5, 'AbilitiesGranted', { player: 0, cards: ['l1'], ability: grant }))
+    expect(v.players[0].battlefield[0].abilities).toHaveLength(before + 1)
+    expect(v.players[0].battlefield[0].abilities?.at(-1)).toEqual(grant)
+    applyEvent(v, ev(6, 'AbilitiesExpired', { player: 0, card: 'l1', count: 1 }))
+    expect(v.players[0].battlefield[0].abilities ?? []).toHaveLength(before)
+  })
+
   it('interaction gratuite : Île renvoyée en main, coût payé à la résolution, sort contré exilé ou remis sur la bibliothèque', () => {
     const v = start()
     applyEvent(v, ev(4, 'PermanentReturnedToHand', { player: 0, card: land, destination: 'hand', hand: 1, source: 'Daze' }))

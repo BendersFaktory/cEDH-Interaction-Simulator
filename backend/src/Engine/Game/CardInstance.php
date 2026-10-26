@@ -33,6 +33,12 @@ final class CardInstance
     /** Daze (`return_islands:1`), Gush (`return_islands:2`) : renvoyer N Îles que l'on contrôle dans la main de leur propriétaire. */
     public const ALT_RETURN_ISLANDS = 'return_islands:';
 
+    /** Misdirection / Snapback / Commandeer : exiler une carte bleue de sa main, sans PV (`ALT_PITCH_BLUE` en demande 1). */
+    public const ALT_PITCH_BLUE_FREE = 'pitch_blue_free';
+
+    /** Coût additionnel (`extraCost`) : sacrifier une créature que l'on contrôle (Culling the Weak, Diabolic Intent). */
+    public const EXTRA_SACRIFICE_CREATURE = 'sacrifice_creature';
+
     // Mots-clés de combat (CR 702).
     public const FLYING = 'flying';
     public const REACH = 'reach';
@@ -78,6 +84,14 @@ final class CardInstance
      */
     public array $imprint = [];
 
+    /**
+     * Capacités accordées jusqu'à la fin du tour (Rain of Filth), placées après les capacités de la carte dans `abilities()` ;
+     * vidées au cleanup et quand la carte quitte le champ de bataille. Sérialisé sous `granted` par `toArray()`, omis quand vide.
+     *
+     * @var list<ActivatedAbility>
+     */
+    public array $grantedAbilities = [];
+
     private ?array $publicMemo = null;
     private ?array $arrayMemo = null;
     private string $arrayMemoKey = '';
@@ -116,6 +130,8 @@ final class CardInstance
         public readonly int $untappedLifeCost = 0,
         public readonly ?string $altCost = null, // coût alternatif (ALT_PITCH_BLUE | ALT_COMMANDER | ALT_PITCH_BLUE_OFF_TURN | ALT_RETURN_ISLANDS . N), null = coût de mana seul
         public readonly bool $noUntap = false,   // « ne se dégage pas pendant votre étape de dégagement » (Mana Vault, Grim Monolith)
+        public readonly ?string $extraCost = null, // coût additionnel du sort (EXTRA_SACRIFICE_CREATURE), null = aucun
+        public readonly int $tappedAfterOwnTurn = 0, // terrain qui arrive engagé après son N-ième tour (Starting Town : 3), 0 = jamais
     ) {
         $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
         $this->types = is_array($type) ? array_values($type) : [$type];
@@ -154,9 +170,47 @@ final class CardInstance
      *
      * @return list<SpellEffect>
      */
-    public function targetedEffects(): array
+    public function targetedEffects(int $mode = 0): array
     {
-        return array_values(array_filter($this->effects, static fn (SpellEffect $e) => $e->isTargeted()));
+        return array_values(array_filter($this->effectsForMode($mode), static fn (SpellEffect $e) => $e->isTargeted()));
+    }
+
+    /** Sort modal (« choisissez un mode ») : au moins un de ses effets porte un mode (`SpellEffect::$mode`). */
+    public function isModal(): bool
+    {
+        foreach ($this->effects as $e) {
+            if ($e->mode > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return list<int> modes du sort (1, 2...), vide s'il n'est pas modal */
+    public function modes(): array
+    {
+        return array_values(array_unique(array_filter(array_map(static fn (SpellEffect $e) => $e->mode, $this->effects))));
+    }
+
+    /**
+     * Effets joués pour le mode choisi : ceux du mode `$mode` d'un sort modal, tous les effets sinon.
+     *
+     * @return list<SpellEffect>
+     */
+    public function effectsForMode(int $mode = 0): array
+    {
+        if ($mode === 0 || !$this->isModal()) {
+            return $this->effects;
+        }
+
+        return array_values(array_filter($this->effects, static fn (SpellEffect $e) => $e->mode === $mode));
+    }
+
+    /** Bleue (CR 105.2) : un symbole bleu dans son coût de mana (Pyroblast ; ≠ identité de couleurs, voir `isBlue()`). */
+    public function isBlueColored(): bool
+    {
+        return in_array('U', $this->colors(), true);
     }
 
     /** Sous-type porté par la carte, sous le type `$type` s'il est donné (sinon sous n'importe lequel de ses types). */
@@ -215,10 +269,10 @@ final class CardInstance
     }
 
 
-    /** @param list<list<Color>> $options vrai si ce sont exactement les cinq couleurs, une par alternative */
+    /** @param list<list<Color>> $options vrai si ce sont exactement les cinq couleurs, chaque alternative d'une seule couleur (un ou plusieurs mana) */
     private static function isAnyColor(array $options): bool
     {
-        $symbols = array_map(static fn (array $o): string => count($o) === 1 ? $o[0]->symbol() : '', $options);
+        $symbols = array_map(static fn (array $o): string => $o !== [] && count(array_unique(array_map(static fn (Color $c) => $c->symbol(), $o))) === 1 ? $o[0]->symbol() : '', $options);
         sort($symbols);
 
         return $symbols === ['B', 'G', 'R', 'U', 'W'];
@@ -325,6 +379,14 @@ final class CardInstance
      */
     public function abilities(): array
     {
+        $base = $this->declaredAbilities();
+
+        return $this->grantedAbilities === [] ? $base : [...$base, ...$this->grantedAbilities];
+    }
+
+    /** @return list<ActivatedAbility> */
+    private function declaredAbilities(): array
+    {
         if (!$this->isLand()) {
             return $this->abilities;
         }
@@ -407,12 +469,14 @@ final class CardInstance
             + (count($this->effects) > 1 || ($this->effects[0] ?? null)?->isPrecise() === true ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []) // idem
             + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []) // idem
             + ($this->altCost === null ? [] : ['altCost' => $this->altCost]) // idem
-            + ($this->noUntap ? ['noUntap' => true] : []); // idem
+            + ($this->noUntap ? ['noUntap' => true] : []) // idem
+            + ($this->extraCost === null ? [] : ['extraCost' => $this->extraCost]) // idem
+            + ($this->tappedAfterOwnTurn > 0 ? ['tappedAfterOwnTurn' => $this->tappedAfterOwnTurn] : []); // idem
     }
 
     public function toArray(): array
     {
-        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint));
+        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint)) . ($this->grantedAbilities === [] ? '' : '|g' . count($this->grantedAbilities));
         if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
             return $this->arrayMemo;
         }
@@ -422,7 +486,8 @@ final class CardInstance
         return $this->arrayMemo = $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
             + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : [])
             + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : [])
-            + ($this->imprint === [] ? [] : ['imprint' => $this->imprint]);
+            + ($this->imprint === [] ? [] : ['imprint' => $this->imprint])
+            + ($this->grantedAbilities === [] ? [] : ['granted' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->grantedAbilities)]);
     }
 
     public static function fromArray(array $d): self
@@ -453,10 +518,13 @@ final class CardInstance
             (int) ($d['untappedLifeCost'] ?? 0),
             $d['altCost'] ?? null,
             (bool) ($d['noUntap'] ?? false),
+            $d['extraCost'] ?? null,
+            (int) ($d['tappedAfterOwnTurn'] ?? 0),
         );
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);
         $card->imprint = $d['imprint'] ?? [];
+        $card->grantedAbilities = array_map([ActivatedAbility::class, 'fromArray'], $d['granted'] ?? []);
 
         return $card;
     }

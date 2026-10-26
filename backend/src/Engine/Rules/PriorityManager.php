@@ -340,12 +340,28 @@ final class PriorityManager
         $card = $p->takeFromHand($a->cardId) ?? throw new IllegalActionException('Terrain absent de la main');
         $s->landsPlayed++;
         $s->putLandOntoBattlefield($a->player(), $card, $a->payLife, 'LandPlayed');
+        $s->queueLandPlayedTriggers($a->player(), $card); // City of Traitors
     }
 
     private function cast(GameState $s, CastSpell $a): void
     {
         $p = $s->player($a->player());
         $card = $p->findCastable($a->cardId) ?? throw new IllegalActionException('Carte absente de la main et de la zone de commandement');
+        if ($card->isModal() ? !in_array($a->mode, $card->modes(), true) : $a->mode !== 0) {
+            throw new IllegalActionException('Mode invalide pour ce sort');
+        }
+        if (!$card->isCreature() && $s->castLockedFor($a->player())) {
+            throw new IllegalActionException('Un adversaire vous interdit les sorts non-créature ce tour');
+        }
+        $sacrificed = null; // coût additionnel : créature sacrifiée (Culling the Weak, Diabolic Intent)
+        if ($card->extraCost === CardInstance::EXTRA_SACRIFICE_CREATURE) {
+            $sacrificed = $a->sacrifice !== null ? $p->findOnBattlefield($a->sacrifice) : null;
+            if ($sacrificed === null || !$sacrificed->isCreature()) {
+                throw new IllegalActionException('Créature à sacrifier introuvable');
+            }
+        } elseif ($a->sacrifice !== null) {
+            throw new IllegalActionException('Ce sort n\'a pas de coût de sacrifice');
+        }
 
         // Coût calculé AVANT d'incrémenter le compteur de lancements (taxe de commandant).
         $cost = $p->castCost($card);
@@ -381,7 +397,7 @@ final class PriorityManager
         } elseif ($a->alt !== null) {
             $pitch = $p->findHand(substr($a->alt, strlen(CastSpell::ALT_PITCH)));
             $pitchLife = $card->altCost === CardInstance::ALT_PITCH_BLUE ? 1 : 0;
-            $allowed = $card->altCost === CardInstance::ALT_PITCH_BLUE
+            $allowed = $card->altCost === CardInstance::ALT_PITCH_BLUE || $card->altCost === CardInstance::ALT_PITCH_BLUE_FREE
                 || ($card->altCost === CardInstance::ALT_PITCH_BLUE_OFF_TURN && $s->activePlayer !== $a->player()); // Force of Negation
             if (!$allowed || !str_starts_with($a->alt, CastSpell::ALT_PITCH) || $p->life < $pitchLife || $pitch === null || !$pitch->isBlue() || $pitch->id === $card->id) {
                 throw new IllegalActionException('Coût alternatif par exil indisponible');
@@ -414,7 +430,7 @@ final class PriorityManager
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
 
-        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x);
+        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode);
         $s->stack[] = $item;
 
         $s->emit('SpellCast', [
@@ -431,8 +447,11 @@ final class PriorityManager
             'pool' => $p->pool->toArray(),
         ] + $p->pool->restrictedField() + [
             'fromCommand' => $fromCommand,
-        ]);
-        $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût
+        ] + ($a->mode > 0 ? ['mode' => $a->mode] : []));
+        if ($sacrificed !== null && !in_array($sacrificed->id, $sacrifice, true)) {
+            $sacrifice[] = $sacrificed->id;
+        }
+        $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût, créature sacrifiée en coût additionnel
         $s->hurtByMana($a->player(), $pain);     // Ancient Tomb, Talismans, Mana Confluence
         // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
         $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);

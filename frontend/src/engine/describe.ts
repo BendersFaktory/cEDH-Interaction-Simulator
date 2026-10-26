@@ -108,6 +108,14 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
     case 'CreatureDied':
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'PermanentDestroyed':
+      return `${p.card.name} (J${p.player}) est détruit par ${p.source}`
+    case 'AbilitiesGranted':
+      return `Les terrains de J${p.player} gagnent « ${p.ability.options?.join(' ou ') ?? p.ability.effect} » jusqu'à la fin du tour`
+    case 'AbilitiesExpired':
+      return `Fin des capacités accordées à ${p.card} (J${p.player})`
+    case 'NoncreatureLockApplied':
+      return `${p.source} : les adversaires de J${p.player} ne peuvent pas lancer de sort non-créature ce tour`
     case 'CardExiled':
       return `${p.card.name} (J${p.player}) est exilé par ${p.source}${p.destination === 'none' ? " (le jeton cesse d'exister)" : ''}`
     case 'CardImprinted':

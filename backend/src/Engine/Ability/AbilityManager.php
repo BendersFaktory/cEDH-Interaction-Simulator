@@ -41,6 +41,9 @@ final class AbilityManager
         if ($ability->upkeepOnly && !($p->id === $s->activePlayer && $s->phase === Phase::Upkeep)) {
             return false;
         }
+        if (!self::requirementsMet($p, $ability)) {
+            return false; // Mox Opal sans métalcraft
+        }
         if ($ability->isDynamicMana() && self::allowedOptions($p, $card, $ability) === []) {
             return false; // aucune couleur utilisable (Fellwar Stone sans terrain adverse, Chrome Mox sans carte colorée exilée)
         }
@@ -59,6 +62,27 @@ final class AbilityManager
         }
 
         return true;
+    }
+
+    /** Condition d'activation de la capacité remplie (`requires`) : métalcraft = trois artefacts ou plus (Mox Opal compris). */
+    public static function requirementsMet(PlayerState $p, ActivatedAbility $ability): bool
+    {
+        if ($ability->requires === ActivatedAbility::REQ_METALCRAFT) {
+            return count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->hasType(CardInstance::ARTIFACT))) >= 3;
+        }
+
+        return true;
+    }
+
+    /** Coût de mana réel de la capacité : réduit de `legendaryDiscount` générique par créature légendaire contrôlée (Otawara). */
+    public static function effectiveCost(PlayerState $p, ActivatedAbility $ability): ?\App\Engine\Mana\ManaCost
+    {
+        if ($ability->manaCost === null || $ability->legendaryDiscount === 0) {
+            return $ability->manaCost;
+        }
+        $legends = count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isCreature() && $c->isLegendary()));
+
+        return $ability->manaCost->withExtraGeneric(-min($ability->manaCost->generic, $legends * $ability->legendaryDiscount));
     }
 
     /**
@@ -142,14 +166,17 @@ final class AbilityManager
     /** Plan de paiement du coût de mana d'une capacité ; la source ne paie jamais son propre coût. */
     private static function costPlan(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability, ?ManaContext $mana = null): ?ManaPlan
     {
-        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id, $card, $mana ?? new ManaContext($p, $s->turn, false));
+        return ManaPayment::plan($p, self::effectiveCost($p, $ability), 0, $s->turn, $card->id, $card, $mana ?? new ManaContext($p, $s->turn, false));
     }
 
     public static function activate(GameState $s, ActivateAbility $a): void
     {
         $p = $s->player($a->player());
-        $card = $p->findOnBattlefield($a->cardId) ?? throw new IllegalActionException('Source de la capacité absente du champ de bataille');
+        $card = $p->findOnBattlefield($a->cardId) ?? $p->findInHand($a->cardId) ?? throw new IllegalActionException('Source de la capacité absente du champ de bataille');
         $ability = $card->abilities()[$a->abilityIndex] ?? throw new IllegalActionException('Capacité inconnue');
+        if (($ability->fromHand !== '') !== ($p->findOnBattlefield($a->cardId) === null)) {
+            throw new IllegalActionException('Capacité activable depuis la main seulement (ou du champ de bataille seulement)');
+        }
         if (!self::canActivate($s, $p, $card, $ability)) {
             throw new IllegalActionException('Capacité non activable');
         }
@@ -190,6 +217,9 @@ final class AbilityManager
         if ($ability->sacrificeCreature) {
             $sacrifice[] = array_shift($discard);
         }
+        if ($ability->discardHand) {
+            $discard = array_map(static fn (CardInstance $c) => $c->id, $p->hand); // Lion's Eye Diamond : toute la main (la source est sur le champ de bataille)
+        }
 
         if ($ability->isManaAbility) {
             $mana = $p->activateManaSource($card, $ability, $a->option);
@@ -203,7 +233,7 @@ final class AbilityManager
                 'tapped' => $tapped,
                 'pool' => $p->pool->toArray(),
             ] + $p->pool->restrictedField(), verbose: true);
-            self::payCardCosts($s, $a->player(), $discard, $sacrifice);
+            self::payCardCosts($s, $a->player(), $discard, $sacrifice, $card, $ability);
             $s->hurtByMana($a->player(), $pain);
 
             return; // résolue sur-le-champ : la pile et les passes ne sont pas touchées
@@ -225,7 +255,7 @@ final class AbilityManager
             'targets' => $a->targets,
             'tapped' => $tapped,
         ]);
-        self::payCardCosts($s, $a->player(), $discard, $sacrifice);
+        self::payCardCosts($s, $a->player(), $discard, $sacrifice, $card, $ability);
         $s->hurtByMana($a->player(), $pain);
 
         $s->priority->passed = [];
@@ -238,8 +268,14 @@ final class AbilityManager
      * @param list<string> $discard
      * @param list<string> $sacrifice
      */
-    private static function payCardCosts(GameState $s, int $player, array $discard, array $sacrifice): void
+    private static function payCardCosts(GameState $s, int $player, array $discard, array $sacrifice, CardInstance $card, ActivatedAbility $ability): void
     {
+        // Coût « depuis la main » : la source quitte la main (exil : Simian Spirit Guide ; défausse : Channel).
+        if ($ability->fromHand === 'exile') {
+            $s->exileFromHand($player, $s->player($player)->takeFromHand($card->id) ?? throw new \DomainException("Source absente de la main : {$card->id}"), $card->name);
+        } elseif ($ability->fromHand === 'discard') {
+            $s->discard($player, $card->id);
+        }
         foreach ($discard as $id) {
             $s->discard($player, $id);
         }
