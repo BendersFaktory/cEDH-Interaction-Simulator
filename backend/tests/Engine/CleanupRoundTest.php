@@ -14,15 +14,16 @@ use App\Engine\Event\GameEvent;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameFactory;
 use App\Engine\Game\GameState;
+use App\Engine\Mana\Color;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Règle 514.3a en PARTIE RÉELLE (4 IA, pas de scénario construit) : la graine 205 (depuis les decks de 100 cartes ; 373 après le mulligan de Londres, 777 avant) voit un trigger de défausse
+ * Règle 514.3a en PARTIE RÉELLE (4 IA, pas de scénario construit) : la graine 1383 (depuis Reflet de Légende ; 205 avant, depuis les decks de 100 cartes ; 373 après le mulligan de Londres, 777 avant) voit un trigger de défausse
  * (Cendrier des Regrets) attendre au cleanup, ce qui ouvre une ronde de priorité complète.
  */
 final class CleanupRoundTest extends TestCase
 {
-    private const SEED = 205;
+    private const SEED = 1383;
     private const FOUR_AI = [0 => 'ai:heuristic', 1 => 'ai:heuristic', 2 => 'ai:heuristic', 3 => 'ai:heuristic'];
 
     /** @return array{GameState, list<GameEvent>} */
@@ -131,5 +132,48 @@ final class CleanupRoundTest extends TestCase
         );
         $ser = static fn (array $events) => json_encode(array_map(static fn (GameEvent $e) => [$e->seq, $e->type, $e->payload], $events));
         $this->assertSame($ser($expectedEvents), $ser([...$first->events, ...$second->events]));
+    }
+
+    /** Règle 500.4 : le mana flottant pendant une ronde de cleanup disparaît avant la seconde étape de cleanup. */
+    public function testPoolIsEmptiedBetweenTheTwoCleanupSteps(): void
+    {
+        $injector = new class () implements PlayerAgent {
+            public bool $injected = false;
+            public int $turn = 0;
+            private readonly HeuristicAgent $inner;
+
+            public function __construct()
+            {
+                $this->inner = new HeuristicAgent();
+            }
+
+            public function decide(GameState $state, int $playerId, array $legal): Action
+            {
+                if (!$this->injected && $state->cleanupRound) {
+                    $this->injected = true;
+                    $this->turn = $state->turn;
+                    $state->player($playerId)->pool->add(Color::Red, 2);
+                }
+
+                return $this->inner->decide($state, $playerId, $legal);
+            }
+        };
+        $s = GameFactory::create(self::SEED, self::FOUR_AI);
+        $result = (new GameEngine(new AgentRegistry(['ai:heuristic' => $injector])))->advance($s);
+        $this->assertTrue($result->over);
+        $this->assertTrue($injector->injected);
+
+        $cleanups = [];
+        foreach ($result->events as $i => $e) {
+            if ($e->type === 'PhaseChanged' && $e->payload['phase'] === 'cleanup' && $e->payload['turn'] === $injector->turn) {
+                $cleanups[] = $i;
+            }
+        }
+        $this->assertCount(2, $cleanups);
+        $emptied = array_filter(
+            array_slice($result->events, $cleanups[0] + 1, $cleanups[1] - $cleanups[0] - 1),
+            static fn (GameEvent $e) => $e->type === 'ManaPoolEmptied' && ($e->payload['lost']['R'] ?? 0) >= 2,
+        );
+        $this->assertNotEmpty($emptied, 'Le pool doit être vidé et journalisé entre les deux cleanups.');
     }
 }

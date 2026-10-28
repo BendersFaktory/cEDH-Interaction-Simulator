@@ -36,13 +36,13 @@ final class SimulationController extends AbstractController
             $controllers[(int) $id] = (string) $key;
         }
 
-        // Decks optionnels : {"decks": {"0": "<decklist>" | {"decklist": "...", "commander": "..."}}} ; sièges absents = deck de démo.
+        // Decks optionnels : {"decks": {"0": "<decklist>" | {"decklist": "...", "commander": "...", "partner": "..."}}} ; sièges absents = deck de démo.
         $decks = [];
         $problems = [];
         foreach (($body['decks'] ?? []) as $id => $spec) {
             $list = is_array($spec) ? (string) ($spec['decklist'] ?? '') : (string) $spec;
             try {
-                $decks[(int) $id] = $this->deckLoader->load($list, is_array($spec) ? ($spec['commander'] ?? null) : null);
+                $decks[(int) $id] = $this->deckLoader->load($list, is_array($spec) ? ($spec['commander'] ?? null) : null, is_array($spec) ? ($spec['partner'] ?? null) : null);
             } catch (DeckLoadException $e) {
                 $problems["J$id"] = $e->problems;
             }
@@ -58,6 +58,22 @@ final class SimulationController extends AbstractController
     public function show(Simulation $simulation): JsonResponse
     {
         return $this->json($this->view($simulation));
+    }
+
+    /** Arbre des branches auquel appartient la simulation : `current` = celle demandée, `branches` = racine d'abord. */
+    #[Route('/{id}/branches', methods: ['GET'], requirements: ['id' => '\d+'])]
+    public function branches(Simulation $simulation): JsonResponse
+    {
+        $branches = array_map(fn (Simulation $s) => [
+            'id' => $s->getId(),
+            'parentId' => $s->getParent()?->getId(),
+            'forkEventSeq' => $s->getForkEventSeq(),
+            'status' => $s->getStatus(),
+            'eventCount' => $s->getState()['eventSeq'] ?? 0,
+            'humans' => array_values(array_keys(array_filter($s->getState()['controllers'] ?? [], static fn (string $key) => str_starts_with($key, 'human')))),
+        ], $this->simulations->branches($simulation));
+
+        return $this->json(['current' => $simulation->getId(), 'branches' => $branches]);
     }
 
     #[Route('/{id}/events', methods: ['GET'], requirements: ['id' => '\d+'])]

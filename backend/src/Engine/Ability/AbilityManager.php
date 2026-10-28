@@ -8,6 +8,7 @@ use App\Engine\Action\ActivateAbility;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
+use App\Engine\Game\Phase;
 use App\Engine\Game\PlayerState;
 use App\Engine\Game\StackItem;
 use App\Engine\Mana\ManaContext;
@@ -19,8 +20,9 @@ use App\Engine\Mana\ManaPlan;
  * immédiatement (règle 605 : ni pile, ni nouvelle ronde, la priorité reste au joueur) ; toute autre capacité
  * va sur la pile et remet les passes à zéro.
  *
- * Coûts payés à l'activation, dans cet ordre : mana (les autres sources), {T}, défausse, sacrifices. Les événements
- * de coût (`CardDiscarded`, `PermanentSacrificed`) suivent l'événement d'activation.
+ * Coûts payés à l'activation, dans cet ordre : mana (les autres sources), {T}, défausse, sacrifices, PV. Les événements
+ * de coût (`CardDiscarded`, `PermanentSacrificed`, `LifePaid`) suivent l'événement d'activation, puis les dégâts qu'une
+ * capacité de mana inflige à son contrôleur (`DamageDealt`, Ancient Tomb).
  */
 final class AbilityManager
 {
@@ -33,6 +35,21 @@ final class AbilityManager
         if (!self::sourceReady($card, $ability, $s->turn)) {
             return false;
         }
+        if ($ability->effect === 'untap' && !$card->tapped) {
+            return false; // rien à dégager
+        }
+        if ($ability->upkeepOnly && !($p->id === $s->activePlayer && $s->phase === Phase::Upkeep)) {
+            return false;
+        }
+        if (!self::requirementsMet($p, $ability, $s)) {
+            return false; // Mox Opal sans métalcraft, Wishclaw Talisman hors de son tour
+        }
+        if ($ability->removeCounter !== '' && ($card->counters[$ability->removeCounter] ?? 0) < 1) {
+            return false; // Wishclaw Talisman sans marqueur de souhait
+        }
+        if ($ability->isDynamicMana() && self::allowedOptions($p, $card, $ability) === []) {
+            return false; // aucune couleur utilisable (Fellwar Stone sans terrain adverse, Chrome Mox sans carte colorée exilée)
+        }
         if ($ability->sorcerySpeed
             && !($p->id === $s->activePlayer && $s->phase->isMain() && $s->stack === [] && $s->combat->declaring === null)) {
             return false;
@@ -40,11 +57,55 @@ final class AbilityManager
         if (self::costChoices($p, $card, $ability) === []) {
             return false;
         }
+        if ($ability->lifeCost > $p->life) {
+            return false; // on ne peut payer que des PV qu'on a (CR 119.4)
+        }
         if ($ability->manaCost !== null && self::costPlan($s, $p, $card, $ability, $mana) === null) {
             return false;
         }
 
         return true;
+    }
+
+    /** Condition d'activation de la capacité remplie (`requires`) : métalcraft = trois artefacts ou plus (Mox Opal compris). */
+    public static function requirementsMet(PlayerState $p, ActivatedAbility $ability, ?GameState $s = null): bool
+    {
+        if ($ability->requires === ActivatedAbility::REQ_METALCRAFT) {
+            return count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->hasType(CardInstance::ARTIFACT))) >= 3;
+        }
+        if ($ability->requires === ActivatedAbility::REQ_YOUR_TURN) {
+            return $s !== null && $p->id === $s->activePlayer; // Wishclaw Talisman
+        }
+
+        return true;
+    }
+
+    /** Coût de mana réel de la capacité : réduit de `legendaryDiscount` générique par créature légendaire contrôlée (Otawara). */
+    public static function effectiveCost(PlayerState $p, ActivatedAbility $ability): ?\App\Engine\Mana\ManaCost
+    {
+        if ($ability->manaCost === null || $ability->legendaryDiscount === 0) {
+            return $ability->manaCost;
+        }
+        $legends = count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isCreature() && $c->isLegendary()));
+
+        return $ability->manaCost->withExtraGeneric(-min($ability->manaCost->generic, $legends * $ability->legendaryDiscount));
+    }
+
+    /**
+     * Alternatives de mana utilisables d'une capacité de mana (toutes, sauf couleur interdite d'une capacité dynamique).
+     *
+     * @return list<int>
+     */
+    public static function allowedOptions(PlayerState $p, CardInstance $card, ActivatedAbility $ability): array
+    {
+        if (!$ability->isDynamicMana()) {
+            return array_keys($ability->options);
+        }
+
+        return array_values(array_filter(
+            array_keys($ability->options),
+            static fn (int $option) => $p->optionAllowed($card, $ability, $option),
+        ));
     }
 
     /**
@@ -111,19 +172,25 @@ final class AbilityManager
     /** Plan de paiement du coût de mana d'une capacité ; la source ne paie jamais son propre coût. */
     private static function costPlan(GameState $s, PlayerState $p, CardInstance $card, ActivatedAbility $ability, ?ManaContext $mana = null): ?ManaPlan
     {
-        return ManaPayment::plan($p, $ability->manaCost, 0, $s->turn, $card->id, $card, $mana);
+        return ManaPayment::plan($p, self::effectiveCost($p, $ability), 0, $s->turn, $card->id, $card, $mana ?? new ManaContext($p, $s->turn, false));
     }
 
     public static function activate(GameState $s, ActivateAbility $a): void
     {
         $p = $s->player($a->player());
-        $card = $p->findOnBattlefield($a->cardId) ?? throw new IllegalActionException('Source de la capacité absente du champ de bataille');
+        $card = $p->findOnBattlefield($a->cardId) ?? $p->findInHand($a->cardId) ?? throw new IllegalActionException('Source de la capacité absente du champ de bataille');
         $ability = $card->abilities()[$a->abilityIndex] ?? throw new IllegalActionException('Capacité inconnue');
+        if (($ability->fromHand !== '') !== ($p->findOnBattlefield($a->cardId) === null)) {
+            throw new IllegalActionException('Capacité activable depuis la main seulement (ou du champ de bataille seulement)');
+        }
         if (!self::canActivate($s, $p, $card, $ability)) {
             throw new IllegalActionException('Capacité non activable');
         }
         if ($ability->isManaAbility && !isset($ability->options[$a->option])) {
             throw new IllegalActionException('Alternative de mana inconnue');
+        }
+        if ($ability->isManaAbility && !$p->optionAllowed($card, $ability, $a->option)) {
+            throw new IllegalActionException('Couleur de mana non permise');
         }
         $valid = array_map(
             static fn (array $choice) => array_map(static fn (CardInstance $c) => $c->id, $choice),
@@ -136,9 +203,17 @@ final class AbilityManager
         // Mana : payé par les autres sources (Signet, Mind Stone) ; elles sont journalisées dans `tapped`.
         $payers = [];
         $sacrifice = [];
+        $pain = [];
         if ($ability->manaCost !== null) {
             $plan = self::costPlan($s, $p, $card, $ability) ?? throw new IllegalActionException('Mana insuffisant pour la capacité');
-            ['tapped' => $payers, 'sacrifice' => $sacrifice] = $p->payWithPlan($plan);
+            ['tapped' => $payers, 'sacrifice' => $sacrifice, 'pain' => $pain] = $p->payWithPlan($plan);
+            if ($plan->lifeCost > 0) {
+                $pain[] = ['source' => $card->name, 'lifeCost' => $plan->lifeCost, 'selfDamage' => 0];
+            }
+        }
+        // PV payés à l'activation (fetchland, Mana Confluence), et dégâts d'une capacité de mana à elle-même (Ancient Tomb).
+        if ($ability->lifeCost > 0 || ($ability->isManaAbility && $ability->selfDamage > 0)) {
+            $pain[] = ['source' => $card->name, 'lifeCost' => $ability->lifeCost, 'selfDamage' => $ability->isManaAbility ? $ability->selfDamage : 0];
         }
         $tapped = [...($ability->tap ? [$card->id] : []), ...$payers];
         if ($ability->sacrifice) {
@@ -147,6 +222,9 @@ final class AbilityManager
         $discard = $a->costChoices;
         if ($ability->sacrificeCreature) {
             $sacrifice[] = array_shift($discard);
+        }
+        if ($ability->discardHand) {
+            $discard = array_map(static fn (CardInstance $c) => $c->id, $p->hand); // Lion's Eye Diamond : toute la main (la source est sur le champ de bataille)
         }
 
         if ($ability->isManaAbility) {
@@ -161,13 +239,17 @@ final class AbilityManager
                 'tapped' => $tapped,
                 'pool' => $p->pool->toArray(),
             ] + $p->pool->restrictedField(), verbose: true);
-            self::payCardCosts($s, $a->player(), $discard, $sacrifice);
+            self::payCardCosts($s, $a->player(), $discard, $sacrifice, $card, $ability);
+            $s->hurtByMana($a->player(), $pain);
 
             return; // résolue sur-le-champ : la pile et les passes ne sont pas touchées
         }
 
         if ($ability->tap) {
             $card->tapped = true;
+        }
+        if ($ability->removeCounter !== '') {
+            $s->removeCounter($a->player(), $card, $ability->removeCounter); // Wishclaw Talisman, avant la copie mise sur la pile
         }
         // Copie de la source : l'objet sur la pile ne doit pas partager l'état de la carte du champ de bataille (sinon un
         // bonus ultérieur le modifierait en partie réelle mais pas dans un état reconstruit depuis une ancre).
@@ -182,7 +264,8 @@ final class AbilityManager
             'targets' => $a->targets,
             'tapped' => $tapped,
         ]);
-        self::payCardCosts($s, $a->player(), $discard, $sacrifice);
+        self::payCardCosts($s, $a->player(), $discard, $sacrifice, $card, $ability);
+        $s->hurtByMana($a->player(), $pain);
 
         $s->priority->passed = [];
         $s->priority->announced = false; // l'activateur reçoit la priorité en premier
@@ -194,8 +277,14 @@ final class AbilityManager
      * @param list<string> $discard
      * @param list<string> $sacrifice
      */
-    private static function payCardCosts(GameState $s, int $player, array $discard, array $sacrifice): void
+    private static function payCardCosts(GameState $s, int $player, array $discard, array $sacrifice, CardInstance $card, ActivatedAbility $ability): void
     {
+        // Coût « depuis la main » : la source quitte la main (exil : Simian Spirit Guide ; défausse : Channel).
+        if ($ability->fromHand === 'exile') {
+            $s->exileFromHand($player, $s->player($player)->takeFromHand($card->id) ?? throw new \DomainException("Source absente de la main : {$card->id}"), $card->name);
+        } elseif ($ability->fromHand === 'discard') {
+            $s->discard($player, $card->id);
+        }
         foreach ($discard as $id) {
             $s->discard($player, $id);
         }

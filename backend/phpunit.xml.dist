@@ -28,4 +28,15 @@
             <directory>tests/Doctrine</directory>
         </testsuite>
     </testsuites>
+    <!-- Graines supplémentaires d'InvariantsTest (~35 s), exclues par défaut : les lancer avec l'option group slow de PHPUnit -->
+    <groups>
+        <exclude>
+            <group>slow</group>
+        </exclude>
+    </groups>
+    <source>
+        <include>
+            <directory suffix=".php">src</directory>
+        </include>
+    </source>
 </phpunit>

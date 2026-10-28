@@ -64,7 +64,7 @@ function auditSeed(int $seed): array
                 $currentTurn = (int) ($p['turn'] ?? $currentTurn);
                 break;
             case 'ManaPoolEmptied':
-                $stats['manaLost'] += (int) ($p['lost'] ?? 0);
+                $stats['manaLost'] += array_sum(array_map('intval', $p['lost'] ?? []));
                 break;
             case 'SpellCast':
                 $stats['spellsCast']++;

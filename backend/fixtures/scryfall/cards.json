@@ -1,0 +1,655 @@
+[
+    {
+        "name": "Plains",
+        "layout": "normal",
+        "type_line": "Basic Land — Plains",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {W}.)",
+        "keywords": []
+    },
+    {
+        "name": "Forest",
+        "layout": "normal",
+        "type_line": "Basic Land — Forest",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {G}.)",
+        "keywords": []
+    },
+    {
+        "name": "Sol Ring",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{1}",
+        "cmc": 1,
+        "oracle_text": "{T}: Add {C}{C}.",
+        "keywords": []
+    },
+    {
+        "name": "Lightning Bolt",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{R}",
+        "cmc": 1,
+        "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Blaze",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{X}{R}",
+        "cmc": 1,
+        "oracle_text": "Blaze deals X damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Counterspell",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}{U}",
+        "cmc": 2,
+        "oracle_text": "Counter target spell.",
+        "keywords": []
+    },
+    {
+        "name": "Dark Ritual",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{B}",
+        "cmc": 1,
+        "oracle_text": "Add {B}{B}{B}.",
+        "keywords": []
+    },
+    {
+        "power": "1",
+        "toughness": "1",
+        "name": "Llanowar Elves",
+        "layout": "normal",
+        "type_line": "Creature — Elf Druid",
+        "mana_cost": "{G}",
+        "cmc": 1,
+        "oracle_text": "{T}: Add {G}.",
+        "keywords": []
+    },
+    {
+        "power": "1",
+        "toughness": "1",
+        "name": "Elvish Visionary",
+        "layout": "normal",
+        "type_line": "Creature — Elf Shaman",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "oracle_text": "When this creature enters, draw a card.",
+        "keywords": []
+    },
+    {
+        "power": "2",
+        "toughness": "2",
+        "keywords": [
+            "Flying"
+        ],
+        "name": "Wind Drake",
+        "layout": "normal",
+        "type_line": "Creature — Drake",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "Flying"
+    },
+    {
+        "power": "2",
+        "toughness": "2",
+        "name": "Isamaru, Hound of Konda",
+        "layout": "normal",
+        "type_line": "Legendary Creature — Dog",
+        "mana_cost": "{W}",
+        "cmc": 1,
+        "oracle_text": "",
+        "keywords": []
+    },
+    {
+        "power": "5",
+        "toughness": "3",
+        "name": "Juggernaut",
+        "layout": "normal",
+        "type_line": "Artifact Creature — Juggernaut",
+        "mana_cost": "{4}",
+        "cmc": 4,
+        "oracle_text": "Juggernaut attacks each combat if able.\nJuggernaut can't be blocked by Walls.",
+        "keywords": []
+    },
+    {
+        "name": "Rhystic Study",
+        "layout": "normal",
+        "type_line": "Enchantment",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.",
+        "keywords": []
+    },
+    {
+        "loyalty": "3",
+        "name": "Jace, the Mind Sculptor",
+        "layout": "normal",
+        "type_line": "Legendary Planeswalker — Jace",
+        "mana_cost": "{2}{U}{U}",
+        "cmc": 4,
+        "oracle_text": "+2: Look at the top card.",
+        "keywords": []
+    },
+    {
+        "name": "Delver of Secrets // Insectile Aberration",
+        "layout": "transform",
+        "type_line": "Creature — Human Wizard // Creature — Human Insect"
+    },
+    {
+        "name": "Mind Stone",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "{T}: Add {C}.\n{1}, {T}, Sacrifice this artifact: Draw a card.",
+        "keywords": []
+    },
+    {
+        "name": "Izzet Signet",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "{1}, {T}: Add {U}{R}.",
+        "keywords": []
+    },
+    {
+        "power": "4",
+        "toughness": "4",
+        "keywords": [
+            "Flying",
+            "Vigilance"
+        ],
+        "name": "Serra Angel",
+        "layout": "normal",
+        "type_line": "Creature — Angel",
+        "mana_cost": "{3}{W}{W}",
+        "cmc": 5,
+        "oracle_text": "Flying, vigilance"
+    },
+    {
+        "power": "0",
+        "toughness": "4",
+        "keywords": [
+            "Defender"
+        ],
+        "name": "Wall of Omens",
+        "layout": "normal",
+        "type_line": "Creature — Wall",
+        "mana_cost": "{1}{W}",
+        "cmc": 2,
+        "oracle_text": "Defender\nWhen this creature enters, draw a card."
+    },
+    {
+        "power": "1",
+        "toughness": "1",
+        "name": "Perilous Myr",
+        "layout": "normal",
+        "type_line": "Artifact Creature — Myr",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "When this creature dies, it deals 2 damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Phyrexian Arena",
+        "layout": "normal",
+        "type_line": "Enchantment",
+        "mana_cost": "{1}{B}{B}",
+        "cmc": 3,
+        "oracle_text": "At the beginning of your upkeep, you draw a card and you lose 1 life.",
+        "keywords": []
+    },
+    {
+        "name": "Underground Sea",
+        "layout": "normal",
+        "type_line": "Land — Island Swamp",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {U} or {B}.)",
+        "keywords": []
+    },
+    {
+        "name": "Command Tower",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add one mana of any color in your commander's color identity.",
+        "keywords": []
+    },
+    {
+        "power": "0",
+        "toughness": "1",
+        "keywords": [
+            "Flying"
+        ],
+        "name": "Birds of Paradise",
+        "layout": "normal",
+        "type_line": "Creature — Bird",
+        "mana_cost": "{G}",
+        "cmc": 1,
+        "oracle_text": "Flying\n{T}: Add one mana of any color."
+    },
+    {
+        "name": "Lotus Petal",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{0}",
+        "cmc": 0,
+        "oracle_text": "{T}, Sacrifice Lotus Petal: Add one mana of any color.",
+        "keywords": []
+    },
+    {
+        "name": "Divination",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "Draw two cards.",
+        "keywords": []
+    },
+    {
+        "name": "Shock and Draw",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{1}{R}",
+        "cmc": 2,
+        "oracle_text": "Shock and Draw deals 2 damage to any target.\nDraw a card.",
+        "keywords": []
+    },
+    {
+        "name": "Bolt and Counter",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}{R}",
+        "cmc": 2,
+        "oracle_text": "Bolt and Counter deals 3 damage to any target.\nCounter target spell.",
+        "keywords": []
+    },
+    {
+        "name": "Ancient Tomb",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add {C}{C}. Ancient Tomb deals 2 damage to you.",
+        "keywords": []
+    },
+    {
+        "name": "Talisman of Dominance",
+        "layout": "normal",
+        "type_line": "Artifact",
+        "mana_cost": "{2}",
+        "cmc": 2,
+        "oracle_text": "{T}: Add {C}.\n{T}: Add {U} or {B}. Talisman of Dominance deals 1 damage to you.",
+        "keywords": []
+    },
+    {
+        "name": "Underground River",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add {C}.\n{T}: Add {U} or {B}. Underground River deals 1 damage to you.",
+        "keywords": []
+    },
+    {
+        "name": "Mana Confluence",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Pay 1 life: Add one mana of any color.",
+        "keywords": []
+    },
+    {
+        "name": "Polluted Delta",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Pay 1 life, Sacrifice Polluted Delta: Search your library for an Island or Swamp card, put it onto the battlefield, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Prismatic Vista",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}: Add {C}.\n{T}, Pay 1 life, Sacrifice Prismatic Vista: Search your library for a basic land card, put it onto the battlefield, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Evolving Wilds",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Sacrifice Evolving Wilds: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Watery Grave",
+        "layout": "normal",
+        "type_line": "Land — Island Swamp",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {U} or {B}.)\nAs Watery Grave enters, you may pay 2 life. If you don't, it enters tapped.",
+        "keywords": []
+    },
+    {
+        "name": "Island",
+        "layout": "normal",
+        "type_line": "Basic Land — Island",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {U}.)",
+        "keywords": []
+    },
+    {
+        "name": "Swamp",
+        "layout": "normal",
+        "type_line": "Basic Land — Swamp",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {B}.)",
+        "keywords": []
+    },
+    {
+        "power": "*",
+        "toughness": "1+*",
+        "name": "Tarmogoyf",
+        "layout": "normal",
+        "type_line": "Creature — Lhurgoyf",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "oracle_text": "Tarmogoyf's power is equal to the number of card types among cards in all graveyards.",
+        "keywords": []
+    },
+    {
+        "name": "Hallowed Fountain",
+        "layout": "normal",
+        "type_line": "Land — Plains Island",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "({T}: Add {W} or {U}.)\nAs Hallowed Fountain enters, you may pay 2 life. If you don't, it enters tapped.",
+        "keywords": []
+    },
+    {
+        "name": "Flooded Strand",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.",
+        "keywords": []
+    },
+    {
+        "power": "2",
+        "toughness": "2",
+        "name": "Recette, Azorius Envoy",
+        "layout": "normal",
+        "type_line": "Legendary Creature — Human Advisor",
+        "mana_cost": "{W}{U}",
+        "cmc": 2,
+        "oracle_text": "",
+        "keywords": []
+    },
+    {
+        "name": "Swords to Plowshares",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{W}",
+        "cmc": 1,
+        "oracle_text": "Exile target creature. Its controller gains life equal to its power.",
+        "keywords": []
+    },
+    {
+        "name": "Path to Exile",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{W}",
+        "cmc": 1,
+        "oracle_text": "Exile target creature. Its controller may search their library for a basic land card, put that card onto the battlefield tapped, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "City of Brass",
+        "layout": "normal",
+        "type_line": "Land",
+        "mana_cost": "",
+        "cmc": 0,
+        "oracle_text": "Whenever City of Brass becomes tapped, it deals 1 damage to you.\n{T}: Add one mana of any color.",
+        "keywords": []
+    },
+    {
+        "name": "Gut Shot",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{R/P}",
+        "cmc": 1,
+        "oracle_text": "({R/P} can be paid with either {R} or 2 life.)\nGut Shot deals 1 damage to any target.",
+        "keywords": []
+    },
+    {
+        "name": "Dispel",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}",
+        "cmc": 1,
+        "oracle_text": "Counter target instant spell.",
+        "keywords": []
+    },
+    {
+        "name": "Swan Song",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}",
+        "cmc": 1,
+        "oracle_text": "Counter target enchantment, instant, or sorcery spell. Its controller creates a 2/2 blue Bird creature token with flying.",
+        "keywords": []
+    },
+    {
+        "name": "Delighted Halfling",
+        "layout": "normal",
+        "type_line": "Legendary Creature — Halfling",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "power": "1",
+        "toughness": "2",
+        "oracle_text": "{T}: Add {G}. Spend this mana only to cast a legendary spell.",
+        "keywords": []
+    },
+    {
+        "name": "Demonic Tutor",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{1}{B}",
+        "cmc": 2,
+        "oracle_text": "Search your library for a card, put that card into your hand, then shuffle.",
+        "keywords": []
+    },
+    {
+        "name": "Force of Will",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{3}{U}{U}",
+        "cmc": 5,
+        "oracle_text": "You may pay 1 life and exile a blue card from your hand rather than pay this spell's mana cost.\nCounter target spell.",
+        "keywords": []
+    },
+    {
+        "name": "Fierce Guardianship",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{2}{U}",
+        "cmc": 3,
+        "oracle_text": "If you control a commander, you may cast this spell without paying its mana cost.\nCounter target noncreature spell.",
+        "keywords": []
+    },
+    {
+        "name": "Ambush Viper",
+        "layout": "normal",
+        "type_line": "Creature — Snake",
+        "mana_cost": "{1}{G}",
+        "cmc": 2,
+        "oracle_text": "Flash (You may cast this spell any time you could cast an instant.)\nDeathtouch",
+        "keywords": [
+            "Flash",
+            "Deathtouch"
+        ],
+        "power": "2",
+        "toughness": "1"
+    },
+    {
+        "name": "Test Treasure Spell",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{R}",
+        "cmc": 1,
+        "oracle_text": "Create a Treasure token.",
+        "keywords": []
+    },
+    {
+        "name": "Test Treasure Goblin",
+        "layout": "normal",
+        "type_line": "Creature — Goblin",
+        "mana_cost": "{1}{R}",
+        "cmc": 2,
+        "oracle_text": "When Test Treasure Goblin enters the battlefield, create a Treasure token.",
+        "keywords": [],
+        "power": "1",
+        "toughness": "1"
+    },
+    {
+        "name": "Vampiric Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{B}",
+        "cmc": 1,
+        "oracle_text": "Search your library for a card, then shuffle and put that card on top. You lose 2 life.",
+        "keywords": []
+    },
+    {
+        "name": "Mystical Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{U}",
+        "cmc": 1,
+        "oracle_text": "Search your library for an instant or sorcery card, reveal it, then shuffle and put that card on top.",
+        "keywords": []
+    },
+    {
+        "name": "Worldly Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{G}",
+        "cmc": 1,
+        "oracle_text": "Search your library for a creature card, reveal it, then shuffle and put the card on top.",
+        "keywords": []
+    },
+    {
+        "name": "Enlightened Tutor",
+        "layout": "normal",
+        "type_line": "Instant",
+        "mana_cost": "{W}",
+        "cmc": 1,
+        "oracle_text": "Search your library for an artifact or enchantment card, reveal it, then shuffle and put that card on top.",
+        "keywords": []
+    },
+    {
+        "name": "Imperial Seal",
+        "layout": "normal",
+        "type_line": "Sorcery",
+        "mana_cost": "{B}",
+        "cmc": 1,
+        "oracle_text": "Search your library for a card, then shuffle and put that card on top. You lose 2 life.",
+        "keywords": []
+    },
+    {"name": "Mana Vault", "layout": "normal", "type_line": "Artifact", "mana_cost": "{1}", "cmc": 1, "oracle_text": "This artifact doesn't untap during your untap step.\nAt the beginning of your upkeep, you may pay {4}. If you do, untap this artifact.\nAt the beginning of your draw step, if this artifact is tapped, it deals 1 damage to you.\n{T}: Add {C}{C}{C}.", "keywords": []},
+    {"name": "Grim Monolith", "layout": "normal", "type_line": "Artifact", "mana_cost": "{2}", "cmc": 2, "oracle_text": "This artifact doesn't untap during your untap step.\n{T}: Add {C}{C}{C}.\n{4}: Untap this artifact.", "keywords": []},
+    {"name": "Chrome Mox", "layout": "normal", "type_line": "Artifact", "mana_cost": "{0}", "cmc": 0, "oracle_text": "Imprint — When this artifact enters, you may exile a nonartifact, nonland card from your hand.\n{T}: Add one mana of any of the exiled card's colors.", "keywords": ["Imprint"]},
+    {"name": "Mox Diamond", "layout": "normal", "type_line": "Artifact", "mana_cost": "{0}", "cmc": 0, "oracle_text": "If this artifact would enter, you may discard a land card instead. If you do, put this artifact onto the battlefield. If you don't, put it into its owner's graveyard.\n{T}: Add one mana of any color.", "keywords": []},
+    {"name": "Fellwar Stone", "layout": "normal", "type_line": "Artifact", "mana_cost": "{2}", "cmc": 2, "oracle_text": "{T}: Add one mana of any color that a land an opponent controls could produce.", "keywords": []},
+    {"name": "Exotic Orchard", "layout": "normal", "type_line": "Land", "mana_cost": "", "cmc": 0, "oracle_text": "{T}: Add one mana of any color that a land an opponent controls could produce.", "keywords": []},
+    {"name": "Fire // Ice", "layout": "split", "type_line": "Instant // Instant", "mana_cost": "{1}{R} // {1}{U}", "cmc": 4, "oracle_text": null, "keywords": []},
+    {"name":"Force of Negation","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}{U}","cmc":3,"oracle_text":"If it's not your turn, you may exile a blue card from your hand rather than pay this spell's mana cost.\nCounter target noncreature spell. If that spell is countered this way, exile it instead of putting it into its owner's graveyard.","keywords":[]},
+    {"name":"Mental Misstep","layout":"normal","type_line":"Instant","mana_cost":"{U/P}","cmc":1,"oracle_text":"({U/P} can be paid with either {U} or 2 life.)\nCounter target spell with mana value 1.","keywords":[]},
+    {"name":"Mana Drain","layout":"normal","type_line":"Instant","mana_cost":"{U}{U}","cmc":2,"oracle_text":"Counter target spell. At the beginning of your next main phase, add an amount of {C} equal to that spell's mana value.","keywords":[]},
+    {"name":"Memory Lapse","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"Counter target spell. If that spell is countered this way, put it on top of its owner's library instead of into that player's graveyard.","keywords":[]},
+    {"name":"Mana Leak","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"Counter target spell unless its controller pays {3}.","keywords":[]},
+    {"name":"Daze","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"You may return an Island you control to its owner's hand rather than pay this spell's mana cost.\nCounter target spell unless its controller pays {1}.","keywords":[]},
+    {"name":"Gush","layout":"normal","type_line":"Instant","mana_cost":"{4}{U}","cmc":5,"oracle_text":"You may return two Islands you control to their owner's hand rather than pay this spell's mana cost.\nDraw two cards.","keywords":[]},
+    {"name":"Pact of Negation","layout":"normal","type_line":"Instant","mana_cost":"{0}","cmc":0,"oracle_text":"Counter target spell.\nAt the beginning of your next upkeep, pay {3}{U}{U}. If you don't, you lose the game.","keywords":[]},
+    {"name":"Brainstorm","layout":"normal","type_line":"Instant","mana_cost":"{U}","cmc":1,"oracle_text":"Draw three cards, then put two cards from your hand on top of your library in any order.","keywords":[]},
+    {"name":"Ponder","layout":"normal","type_line":"Sorcery","mana_cost":"{U}","cmc":1,"oracle_text":"Look at the top three cards of your library, then put them back in any order. You may shuffle.\nDraw a card.","keywords":[]},
+    {"name":"Preordain","layout":"normal","type_line":"Sorcery","mana_cost":"{U}","cmc":1,"oracle_text":"Scry 2, then draw a card. (To scry 2, look at the top two cards of your library, then put any number of them on the bottom and the rest on top in any order.)","keywords":["Scry"]},
+    {"name":"Rhystic Study","layout":"normal","type_line":"Enchantment","mana_cost":"{2}{U}","cmc":3,"oracle_text":"Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.","keywords":[]},
+    {"name":"Kraum, Ludevic's Opus","layout":"normal","type_line":"Legendary Creature — Zombie Horror","mana_cost":"{3}{U}{R}","cmc":5,"power":"4","toughness":"4","oracle_text":"Flying, haste\nWhenever an opponent casts their second spell each turn, draw a card.\nPartner (You can have two commanders if both have partner.)","keywords":["Flying","Haste","Partner"]},
+    {"name":"Tymna the Weaver","layout":"normal","type_line":"Legendary Creature — Human Cleric","mana_cost":"{1}{W}{B}","cmc":3,"power":"2","toughness":"2","oracle_text":"Lifelink\nAt the beginning of each of your postcombat main phases, you may pay X life, where X is the number of opponents that were dealt combat damage this turn. If you do, draw X cards.\nPartner (You can have two commanders if both have partner.)","keywords":["Lifelink","Partner"]},
+    {"name":"Misdirection","layout":"normal","type_line":"Instant","mana_cost":"{3}{U}{U}","cmc":5,"oracle_text":"You may exile a blue card from your hand rather than pay this spell's mana cost.\nChange the target of target spell with a single target.","keywords":[]},
+    {"name":"Commandeer","layout":"normal","type_line":"Instant","mana_cost":"{5}{U}{U}","cmc":7,"oracle_text":"You may exile two blue cards from your hand rather than pay this spell's mana cost.\nGain control of target noncreature spell. You may choose new targets for it. (If that spell is an artifact, enchantment, or planeswalker, the permanent enters under your control.)","keywords":[]},
+    {"name":"Snapback","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"You may exile a blue card from your hand rather than pay this spell's mana cost.\nReturn target creature to its owner's hand.","keywords":[]},
+    {"name":"Culling the Weak","layout":"normal","type_line":"Instant","mana_cost":"{B}","cmc":1,"oracle_text":"As an additional cost to cast this spell, sacrifice a creature.\nAdd {B}{B}{B}{B}.","keywords":[]},
+    {"name":"Diabolic Intent","layout":"normal","type_line":"Sorcery","mana_cost":"{1}{B}","cmc":2,"oracle_text":"As an additional cost to cast this spell, sacrifice a creature.\nSearch your library for a card, put that card into your hand, then shuffle.","keywords":[]},
+    {"name":"Simian Spirit Guide","layout":"normal","type_line":"Creature — Ape Spirit","mana_cost":"{2}{R}","cmc":3,"oracle_text":"Exile this card from your hand: Add {R}.","keywords":[],"power":"2","toughness":"2"},
+    {"name":"Lion's Eye Diamond","layout":"normal","type_line":"Artifact","mana_cost":"{0}","cmc":0,"oracle_text":"Discard your hand, Sacrifice this artifact: Add three mana of any one color. Activate only as an instant.","keywords":[]},
+    {"name":"Rite of Flame","layout":"normal","type_line":"Sorcery","mana_cost":"{R}","cmc":1,"oracle_text":"Add {R}{R}, then add {R} for each card named Rite of Flame in each graveyard.","keywords":[]},
+    {"name":"Cabal Ritual","layout":"normal","type_line":"Instant","mana_cost":"{1}{B}","cmc":2,"oracle_text":"Add {B}{B}{B}.\nThreshold — Add {B}{B}{B}{B}{B} instead if there are seven or more cards in your graveyard.","keywords":["Threshold"]},
+    {"name":"Rain of Filth","layout":"normal","type_line":"Instant","mana_cost":"{B}","cmc":1,"oracle_text":"Until end of turn, lands you control gain \"Sacrifice this land: Add {B}.\"","keywords":[]},
+    {"name":"Mox Opal","layout":"normal","type_line":"Legendary Artifact","mana_cost":"{0}","cmc":0,"oracle_text":"Metalcraft — {T}: Add one mana of any color. Activate only if you control three or more artifacts.","keywords":["Metalcraft"]},
+    {"name":"Mox Amber","layout":"normal","type_line":"Legendary Artifact","mana_cost":"{0}","cmc":0,"oracle_text":"{T}: Add one mana of any color among legendary creatures and planeswalkers you control.","keywords":[]},
+    {"name":"Starting Town","layout":"normal","type_line":"Land — Town","mana_cost":"","cmc":0,"oracle_text":"This land enters tapped unless it's your first, second, or third turn of the game.\n{T}: Add {C}.\n{T}, Pay 1 life: Add one mana of any color.","keywords":[]},
+    {"name":"City of Traitors","layout":"normal","type_line":"Land","mana_cost":"","cmc":0,"oracle_text":"When you play another land, sacrifice this land.\n{T}: Add {C}{C}.","keywords":[]},
+    {"name":"Otawara, Soaring City","layout":"normal","type_line":"Legendary Land","mana_cost":"","cmc":0,"oracle_text":"{T}: Add {U}.\nChannel — {3}{U}, Discard this card: Return target artifact, creature, enchantment, or planeswalker to its owner's hand. This ability costs {1} less to activate for each legendary creature you control.","keywords":["Channel"]},
+    {"name":"Gemstone Caverns","layout":"normal","type_line":"Legendary Land","mana_cost":"","cmc":0,"oracle_text":"If this card is in your opening hand and you're not the starting player, you may begin the game with Gemstone Caverns on the battlefield with a luck counter on it. If you do, exile a card from your hand.\n{T}: Add {C}. If Gemstone Caverns has a luck counter on it, instead add one mana of any color.","keywords":[]},
+    {"name":"Pyroblast","layout":"normal","type_line":"Instant","mana_cost":"{R}","cmc":1,"oracle_text":"Choose one —\n• Counter target spell if it's blue.\n• Destroy target permanent if it's blue.","keywords":[]},
+    {"name":"Red Elemental Blast","layout":"normal","type_line":"Instant","mana_cost":"{R}","cmc":1,"oracle_text":"Choose one —\n• Counter target blue spell.\n• Destroy target blue permanent.","keywords":[]},
+    {"name":"Gamble","layout":"normal","type_line":"Sorcery","mana_cost":"{R}","cmc":1,"oracle_text":"Search your library for a card, put that card into your hand, discard a card at random, then shuffle.","keywords":[]},
+    {"name":"Ranger-Captain of Eos","layout":"normal","type_line":"Creature — Human Soldier Ranger","mana_cost":"{1}{W}{W}","cmc":3,"oracle_text":"When this creature enters, you may search your library for a creature card with mana value 1 or less, reveal it, put it into your hand, then shuffle.\nSacrifice this creature: Your opponents can't cast noncreature spells this turn.","keywords":[],"power":"3","toughness":"3"},
+    {"name":"Wishclaw Talisman","layout":"normal","type_line":"Artifact","mana_cost":"{1}{B}","cmc":2,"oracle_text":"This artifact enters with three wish counters on it.\n{1}, {T}, Remove a wish counter from this artifact: Search your library for a card, put it into your hand, then shuffle. An opponent gains control of this artifact. Activate only during your turn.","keywords":[]},
+    {"name":"Deflecting Swat","layout":"normal","type_line":"Instant","mana_cost":"{2}{R}","cmc":3,"oracle_text":"If you control a commander, you may cast this spell without paying its mana cost.\nYou may choose new targets for target spell or ability.","keywords":[]},
+    {"name":"Chain of Vapor","layout":"normal","type_line":"Instant","mana_cost":"{U}","cmc":1,"oracle_text":"Return target nonland permanent to its owner's hand. Then that permanent's controller may sacrifice a land of their choice. If the player does, they may copy this spell and may choose a new target for that copy.","keywords":[]},
+    {"name":"Flusterstorm","layout":"normal","type_line":"Instant","mana_cost":"{U}","cmc":1,"oracle_text":"Counter target instant or sorcery spell unless its controller pays {1}.\nStorm (When you cast this spell, copy it for each spell cast before it this turn. You may choose new targets for the copies.)","keywords":["Storm"]},
+    {"name":"Brain Freeze","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"Target player mills three cards.\nStorm (When you cast this spell, copy it for each spell cast before it this turn. You may choose new targets for the copies.)","keywords":["Storm","Mill"]},
+    {"name":"Silence","layout":"normal","type_line":"Instant","mana_cost":"{W}","cmc":1,"oracle_text":"Your opponents can't cast spells this turn.","keywords":[]},
+    {"name":"Orim's Chant","layout":"normal","type_line":"Instant","mana_cost":"{W}","cmc":1,"oracle_text":"Kicker {W} (You may pay an additional {W} as you cast this spell.)\nTarget player can't cast spells this turn. If this spell was kicked, creatures can't attack this turn.","keywords":["Kicker"]},
+    {"name":"Lavinia, Azorius Renegade","layout":"normal","type_line":"Legendary Creature — Human Soldier","mana_cost":"{W}{U}","cmc":2,"power":"2","toughness":"2","oracle_text":"Each opponent can't cast noncreature spells with mana value greater than the number of lands that player controls.\nWhenever an opponent casts a spell, if no mana was spent to cast it, counter that spell.","keywords":[]},
+    {"name":"Voice of Victory","layout":"normal","type_line":"Creature — Human Bard","mana_cost":"{1}{W}","cmc":2,"power":"1","toughness":"3","oracle_text":"Mobilize 2 (Whenever this creature attacks, create two tapped and attacking 1/1 red Warrior creature tokens. Sacrifice them at the beginning of the next end step.)\nYour opponents can't cast spells during your turn.","keywords":["Mobilize"]},
+    {"name":"Borne Upon a Wind","layout":"normal","type_line":"Instant","mana_cost":"{1}{U}","cmc":2,"oracle_text":"You may cast spells this turn as though they had flash.\nDraw a card.","keywords":[]},
+    {"name":"Valley Floodcaller","layout":"normal","type_line":"Creature — Otter Wizard","mana_cost":"{2}{U}","cmc":3,"power":"2","toughness":"2","oracle_text":"Flash\nYou may cast noncreature spells as though they had flash.\nWhenever you cast a noncreature spell, Birds, Frogs, Otters, and Rats you control get +1/+1 until end of turn. Untap them.","keywords":["Flash"]},
+    {"name":"Mindbreak Trap","layout":"normal","type_line":"Instant — Trap","mana_cost":"{2}{U}{U}","cmc":4,"oracle_text":"If an opponent cast three or more spells this turn, you may pay {0} rather than pay this spell's mana cost.\nExile any number of target spells.","keywords":[]},
+    {"name":"Into the Flood Maw","layout":"normal","type_line":"Instant","mana_cost":"{U}","cmc":1,"oracle_text":"Gift a tapped Fish (You may promise an opponent a gift as you cast this spell. If you do, they create a tapped 1/1 blue Fish creature token before its other effects.)\nReturn target creature an opponent controls to its owner's hand. If the gift was promised, instead return target nonland permanent an opponent controls to its owner's hand.","keywords":["Gift"]},
+    {"name":"Esper Sentinel","layout":"normal","type_line":"Artifact Creature — Human Soldier","mana_cost":"{W}","power":"1","toughness":"1","cmc":1,"oracle_text":"Whenever an opponent casts their first noncreature spell each turn, draw a card unless that player pays {X}, where X is this creature's power.","keywords":[]},
+    {"name":"Faerie Mastermind","layout":"normal","type_line":"Creature — Faerie Rogue","mana_cost":"{1}{U}","power":"2","toughness":"1","cmc":2,"oracle_text":"Flash\nFlying\nWhenever an opponent draws their second card each turn, you draw a card.\n{3}{U}: Each player draws a card.","keywords":["Flying","Flash"]},
+    {"name":"Orcish Bowmasters","layout":"normal","type_line":"Creature — Orc Archer","mana_cost":"{1}{B}","power":"1","toughness":"1","cmc":2,"oracle_text":"Flash\nWhen this creature enters and whenever an opponent draws a card except the first one they draw in each of their draw steps, this creature deals 1 damage to any target. Then amass Orcs 1.","keywords":["Amass","Flash"]},
+    {"name":"Mystic Remora","layout":"normal","type_line":"Enchantment","mana_cost":"{U}","cmc":1,"oracle_text":"Cumulative upkeep {1} (At the beginning of your upkeep, put an age counter on this permanent, then sacrifice it unless you pay its upkeep cost for each age counter on it.)\nWhenever an opponent casts a noncreature spell, you may draw a card unless that player pays {4}.","keywords":["Cumulative upkeep"]},
+    {"name":"Opposition Agent","layout":"normal","type_line":"Creature — Human Rogue","mana_cost":"{2}{B}","cmc":3,"power":"3","toughness":"2","oracle_text":"Flash\nYou control your opponents while they're searching their libraries.\nWhile an opponent is searching their library, they exile each card they find. You may play those cards for as long as they remain exiled, and you may spend mana as though it were mana of any color to cast them.","keywords":["Flash"]},
+    {"name":"Mockingbird","layout":"normal","type_line":"Creature — Bird Bard","mana_cost":"{X}{U}","cmc":1,"power":"1","toughness":"1","oracle_text":"Flying\nYou may have this creature enter as a copy of any creature on the battlefield with mana value less than or equal to the amount of mana spent to cast this creature, except it's a Bird in addition to its other types and it has flying.","keywords":["Flying"]},
+    {"name":"Tataru Taru","layout":"normal","type_line":"Legendary Creature — Dwarf Advisor","mana_cost":"{1}{W}","cmc":2,"power":"0","toughness":"3","oracle_text":"When Tataru Taru enters, you draw a card and target opponent may draw a card.\nScions' Secretary — Whenever an opponent draws a card, if it isn't that player's turn, create a tapped Treasure token. This ability triggers only once each turn.","keywords":["Scions' Secretary","Treasure"]},
+    {"name":"Ragavan, Nimble Pilferer","layout":"normal","type_line":"Legendary Creature — Monkey Pirate","mana_cost":"{R}","cmc":1,"power":"2","toughness":"1","oracle_text":"Whenever Ragavan deals combat damage to a player, create a Treasure token and exile the top card of that player's library. Until end of turn, you may cast that card.\nDash {1}{R} (You may cast this spell for its dash cost. If you do, it gains haste, and it's returned from the battlefield to its owner's hand at the beginning of the next end step.)","keywords":["Treasure","Dash"]},
+    {"name":"Lotho, Corrupt Shirriff","layout":"normal","type_line":"Legendary Creature — Halfling Rogue","mana_cost":"{W}{B}","cmc":2,"power":"2","toughness":"1","oracle_text":"Whenever a player casts their second spell each turn, you lose 1 life and create a Treasure token. (It's an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")","keywords":["Treasure"]},
+    {"name":"An Offer You Can't Refuse","layout":"normal","type_line":"Instant","mana_cost":"{U}","cmc":1,"oracle_text":"Counter target noncreature spell. Its controller creates two Treasure tokens. (They're artifacts with \"{T}, Sacrifice this token: Add one mana of any color.\")","keywords":["Treasure"]},
+    {"name":"Gleaming Splendor","layout":"normal","type_line":"Enchantment","mana_cost":"{1}{W}","cmc":2,"oracle_text":"Whenever an opponent draws their second card each turn, you create a Treasure token.\n{2}{W}: Two target players each draw a card.","keywords":["Treasure"]},
+    {"name":"Strike It Rich","layout":"normal","type_line":"Sorcery","mana_cost":"{R}","cmc":1,"oracle_text":"Create a Treasure token. (It's an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")\nFlashback {2}{R} (You may cast this card from your graveyard for its flashback cost. Then exile it.)","keywords":["Treasure","Flashback"]},
+    {"name":"Thassa's Oracle","layout":"normal","type_line":"Creature — Merfolk Wizard","mana_cost":"{U}{U}","cmc":2,"oracle_text":"When this creature enters, look at the top X cards of your library, where X is your devotion to blue. Put up to one of them on top of your library and the rest on the bottom of your library in a random order. If X is greater than or equal to the number of cards in your library, you win the game. (Each {U} in the mana costs of permanents you control counts toward your devotion to blue.)","keywords":[],"power":"1","toughness":"3"},
+    {"name":"Demonic Consultation","layout":"normal","type_line":"Instant","mana_cost":"{B}","cmc":1,"oracle_text":"Choose a card name. Exile the top six cards of your library, then reveal cards from the top of your library until you reveal a card with the chosen name. Put that card into your hand and exile all other cards revealed this way.","keywords":[]},
+    {"name":"Tainted Pact","layout":"normal","type_line":"Instant","mana_cost":"{1}{B}","cmc":2,"oracle_text":"Exile the top card of your library. You may put that card into your hand unless it has the same name as another card exiled this way. Repeat this process until you put a card into your hand or you exile two cards with the same name, whichever comes first.","keywords":[]},
+    {"name":"Ad Nauseam","layout":"normal","type_line":"Instant","mana_cost":"{3}{B}{B}","cmc":5,"oracle_text":"Reveal the top card of your library and put that card into your hand. You lose life equal to its mana value. You may repeat this process any number of times.","keywords":[]},
+    {"name":"Necropotence","layout":"normal","type_line":"Enchantment","mana_cost":"{B}{B}{B}","cmc":3,"oracle_text":"Skip your draw step.\nWhenever you discard a card, exile that card from your graveyard.\nPay 1 life: Exile the top card of your library face down. Put that card into your hand at the beginning of your next end step.","keywords":[]},
+    {"name":"Underworld Breach","layout":"normal","type_line":"Enchantment","mana_cost":"{1}{R}","cmc":2,"oracle_text":"Each nonland card in your graveyard has escape. The escape cost is equal to the card's mana cost plus exile three other cards from your graveyard. (You may cast cards from your graveyard for their escape cost.)\nAt the beginning of the end step, sacrifice this enchantment.","keywords":[]},
+    {"name":"Final Fortune","layout":"normal","type_line":"Instant","mana_cost":"{R}{R}","cmc":2,"oracle_text":"Take an extra turn after this one. At the beginning of that turn's end step, you lose the game.","keywords":[]},
+    {"name":"Lim-Dûl's Vault","layout":"normal","type_line":"Instant","mana_cost":"{U}{B}","cmc":2,"oracle_text":"Look at the top five cards of your library. As many times as you choose, you may pay 1 life, put those cards on the bottom of your library in any order, then look at the top five cards of your library. Then shuffle and put the last cards you looked at this way on top in any order.","keywords":[]},
+    {"name":"Scheming Symmetry","layout":"normal","type_line":"Sorcery","mana_cost":"{B}","cmc":1,"oracle_text":"Choose two target players. Each of them searches their library for a card, then shuffles and puts that card on top.","keywords":[]},
+    {"name":"Beseech the Mirror","layout":"normal","type_line":"Sorcery","mana_cost":"{1}{B}{B}{B}","cmc":4,"oracle_text":"Bargain (You may sacrifice an artifact, enchantment, or token as you cast this spell.)\nSearch your library for a card, exile it face down, then shuffle. If this spell was bargained, you may cast the exiled card without paying its mana cost if that spell's mana value is 4 or less. Put the exiled card into your hand if it wasn't cast this way.","keywords":["Bargain"]}
+]

@@ -27,7 +27,8 @@ final class ManaContext
     /** @var array<string, array<string, int>>|null */
     private ?array $restrictedPool = null;
 
-    public function __construct(private readonly PlayerState $p, private readonly ?int $turn)
+    /** @param bool $spell false : le paiement sert une capacité (`ManaRestriction::allows()` sans sort) */
+    public function __construct(private readonly PlayerState $p, private readonly ?int $turn, private readonly bool $spell = true)
     {
     }
 
@@ -47,7 +48,7 @@ final class ManaContext
         $this->restrictedPool ??= $this->p->pool->restrictedToArray();
         $out = [];
         foreach ($this->restrictedPool as $kind => $amounts) {
-            if ((new ManaRestriction($kind))->allows($for)) {
+            if ((new ManaRestriction($kind))->allows($for, $this->spell)) {
                 $out[$kind] = $amounts;
             }
         }
@@ -75,7 +76,7 @@ final class ManaContext
             }
             $choices = [];
             foreach ($s['choices'] as $i => $choice) {
-                if ($s['restr'][$i] === null || $s['restr'][$i]->allows($for)) {
+                if ($s['restr'][$i] === null || $s['restr'][$i]->allows($for, $this->spell)) {
                     $choices[] = $choice;
                 }
             }
@@ -127,14 +128,24 @@ final class ManaContext
             $conv = [];
             foreach ($card->abilities() as $ai => $ability) {
                 if (!$ability->isManaAbility || $ability->effect !== 'mana' || !$ability->tap
-                    || !AbilityManager::sourceReady($card, $ability, $this->turn)) {
+                    || !AbilityManager::sourceReady($card, $ability, $this->turn) || !AbilityManager::requirementsMet($this->p, $ability)) {
+                    continue;
+                }
+                // Source qui blesse (PV payés ou dégâts à soi) : jamais si elle ferait tomber son contrôleur à 0 PV ou moins
+                // (et un coût en PV exige ces PV, CR 119.4) ; sinon comptée comme un sacrifice, en dernier recours.
+                $hurt = $ability->lifeCost + $ability->selfDamage;
+                if ($hurt > 0 && $this->p->life <= $hurt) {
                     continue;
                 }
                 $withCost = $ability->manaCost !== null;
-                if ($withCost && ($ability->manaCost->hybrid !== [] || $ability->manaCost->x > 0)) {
+                if ($withCost && ($ability->manaCost->hybrid !== [] || $ability->manaCost->phyrexian !== [] || $ability->manaCost->x > 0)) {
                     continue;
                 }
+                $allowed = $ability->spec === '' ? null : $this->p->allowedColors($card, $ability); // Fellwar Stone, Chrome Mox
                 foreach ($ability->options as $oi => $_) {
+                    if ($allowed !== null && !isset($allowed[$ability->options[$oi][0]->symbol()])) {
+                        continue;
+                    }
                     $restriction = $ability->restriction($oi);
                     if ($restriction !== null && $withCost) {
                         continue;
@@ -145,7 +156,7 @@ final class ManaContext
                         continue;
                     }
                     $first = $ability->options[$oi][0]->symbol();
-                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice ? 1 : 0, 'rk' => $restriction?->kind];
+                    $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice || $hurt > 0 ? 1 : 0, 'rk' => $restriction?->kind];
                     if ($withCost) {
                         $choice['cost'] = $ability->manaCost;
                         $choice['costTotal'] = $ability->manaCost->manaValue();

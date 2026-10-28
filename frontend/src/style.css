@@ -96,6 +96,7 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .card.tapped .card-art { display: none; }
 .preview-art { display: block; width: 100%; border-radius: 8px; margin-bottom: 6px; }
 .card-token { margin-left: 5px; font-size: .75em; font-style: italic; opacity: .8; }
+.card-counters { margin-left: 5px; padding: 0 4px; border-radius: 6px; font-size: .72em; font-weight: 600; background: rgba(127,127,127,.25); }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) { --mana-W: #d9cf8f; --mana-U: #3b8ad1; --mana-B: #8a7d9a; --mana-R: #d9573a; --mana-G: #3f9a4b; --mana-C: #aeb2bd; --mana-N: #8a91a2; }
 }
@@ -178,3 +179,18 @@ section { background: var(--panel); border: 1px solid var(--line); border-radius
 .card-preview .preview-text { margin: 0; padding-left: 16px; }
 .card-preview .preview-text li { margin: 2px 0; }
 .card-preview .preview-pt { margin-top: 6px; text-align: right; font-weight: 700; font-size: 15px; }
+
+.decks { padding: 6px 16px; border-bottom: 1px solid var(--border, #2a2f3a); }
+.decks summary { cursor: pointer; }
+.deck-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+.deck-seat { display: flex; flex-direction: column; gap: 4px; }
+.deck-seat textarea, .deck-seat input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; }
+.deck-problems { padding: 6px 16px; color: #e5736a; font-size: 13px; }
+.deck-problems ul { margin: 2px 0 6px; padding-left: 20px; }
+
+/* Cible possible au clic sur le plateau (TargetPicker) : contour pointillé, curseur de sélection. */
+.targetable {
+  outline: 2px dashed #f5c542;
+  outline-offset: 2px;
+  cursor: pointer;
+}

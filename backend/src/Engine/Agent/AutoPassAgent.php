@@ -5,12 +5,20 @@ declare(strict_types=1);
 namespace App\Engine\Agent;
 
 use App\Engine\Action\Action;
+use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\BottomCard;
+use App\Engine\Action\PregameChoice;
+use App\Engine\Action\ChainCopy;
+use App\Engine\Action\ReplaceChoice;
+use App\Engine\Action\ResolutionChoice;
 use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\KeepHand;
 use App\Engine\Action\KeepLegend;
+use App\Engine\Action\ScryArrange;
 use App\Engine\Action\PassPriority;
+use App\Engine\Action\PayCost;
+use App\Engine\Action\PutBack;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Game\GameState;
 
@@ -38,10 +46,14 @@ final class AutoPassAgent implements PlayerAgent
             }
         }
 
-        // Défausse obligatoire / trigger à poser / légende à garder / avant-partie (garder la main, puis la première carte au fond) :
-        // le premier choix proposé (déterministe). Jamais de mulligan.
+        // Défausse obligatoire / trigger à poser / légende à garder / avant-partie (garder la main, puis la première carte au fond) /
+        // paiement demandé à la résolution (payer s'il est possible) / sélection de cartes (Brainstorm : la première carte de la
+        // main ; Ponder : l'ordre actuel ; choix au milieu d'une résolution, `ResolutionChoice` : le plus naturel) : le premier
+        // choix proposé (déterministe). Jamais de mulligan.
         foreach ($legal as $action) {
-            if ($action instanceof Discard || $action instanceof PutTrigger || $action instanceof KeepLegend || $action instanceof KeepHand || $action instanceof BottomCard) {
+            if ($action instanceof Discard || $action instanceof PutTrigger || $action instanceof KeepLegend || $action instanceof KeepHand || $action instanceof BottomCard || $action instanceof ScryArrange || $action instanceof PayCost
+                || $action instanceof PutBack || $action instanceof ArrangeTop || $action instanceof ChainCopy || $action instanceof ReplaceChoice || $action instanceof PregameChoice
+                || $action instanceof ResolutionChoice) {
                 return $action;
             }
         }

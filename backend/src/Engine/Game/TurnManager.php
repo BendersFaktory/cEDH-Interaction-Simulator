@@ -21,6 +21,7 @@ final class TurnManager
         $s->emit('PhaseChanged', ['turn' => $s->turn, 'phase' => $s->phase->value, 'activePlayer' => $s->activePlayer]);
 
         if ($s->phase === Phase::Untap) {
+            $s->player($s->activePlayer)->turnsTaken++;
             $untapped = $s->player($s->activePlayer)->untapAll();
             if ($untapped !== []) {
                 $s->emit('PermanentsUntapped', ['player' => $s->activePlayer, 'cards' => $untapped]);
@@ -30,19 +31,40 @@ final class TurnManager
         // Triggers « au début de votre entretien » : mis sur la pile avant la première priorité de l'étape.
         if ($s->phase === Phase::Upkeep) {
             $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::UPKEEP);
+            $s->fireDelayedTriggers(TriggeredAbility::NEXT_UPKEEP); // Pact of Negation
+        }
+        // Triggers retardés « au début de votre prochaine phase principale » (Mana Drain), avant la première priorité.
+        if ($s->phase->isMain()) {
+            $s->fireDelayedTriggers(TriggeredAbility::NEXT_MAIN);
+        }
+        // « Au début de chacune de vos phases principales d'après combat » (Tymna the Weaver).
+        if ($s->phase === Phase::Main2) {
+            $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::POSTCOMBAT_MAIN);
         }
         // Triggers « au début de votre étape de fin » : idem, à l'étape de fin du joueur actif.
         if ($s->phase === Phase::End) {
             $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::END_STEP);
+            $s->queueEachEndStepTriggers(); // Underworld Breach : « at the beginning of the end step »
+            $s->fireDelayedTriggers(TriggeredAbility::NEXT_END); // Mobilize : sacrifier les jetons ; Necropotence ; Final Fortune
         }
 
         $this->combat->beginStep($s);
 
         if ($s->phase === Phase::Cleanup) {
+            $s->noncreatureLocks = []; // « ce tour » : Ranger-Captain of Eos
+            $s->castLocks = [];        // Silence, Orim's Chant
+            $s->flashGrants = [];      // Borne Upon a Wind
+            $s->expireExilePlays();    // Ragavan : « jusqu'à la fin du tour »
+            $s->attackLocked = false;  // Orim's Chant avec kicker
             foreach ($s->players as $p) {
                 foreach ($p->battlefield as $card) {
                     $card->damage = 0;
                     $card->deathtouchDamage = false;
+                    if ($card->grantedAbilities !== []) {
+                        $count = count($card->grantedAbilities);
+                        $card->grantedAbilities = []; // Rain of Filth : « jusqu'à la fin du tour »
+                        $s->emit('AbilitiesExpired', ['player' => $p->id, 'card' => $card->id, 'count' => $count]);
+                    }
                     // Fin des effets « jusqu'à la fin du tour » (règle 514.2).
                     if ($card->powerBonus !== 0 || $card->toughnessBonus !== 0) {
                         $card->powerBonus = 0;
@@ -56,7 +78,9 @@ final class TurnManager
         // CR 103.8 : seul le premier joueur d'une partie à 2 saute sa pioche ; en multijoueur, tout le monde pioche dès le tour 1.
         // Bibliothèque vide : le joueur perd à la vérification des SBA qui précède la priorité (CR 704.5b).
         if ($s->phase === Phase::Draw) {
-            $s->drawCard($s->activePlayer);
+            $s->drawCard($s->activePlayer, drawStep: true);
+            // Triggers « au début de votre étape de pioche » (après la pioche de l'étape, CR 504.1 puis 504.2).
+            $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::DRAW_STEP);
         }
 
         if (!$s->phase->hasPriority()) {
@@ -71,18 +95,23 @@ final class TurnManager
         $s->stepStarted = true;
     }
 
-    public function endStep(GameState $s): void
+    /** Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape (mana restreint compris, compté dans `lost`). */
+    public function emptyPools(GameState $s): void
     {
-        // Règle 500.4 : le mana non dépensé disparaît à la fin de chaque étape (mana restreint compris, compté dans `lost`).
         foreach ($s->players as $p) {
             if (!$p->pool->isEmpty()) {
                 $s->emit('ManaPoolEmptied', ['player' => $p->id, 'lost' => $p->pool->all(), 'pool' => []]);
                 $p->pool->clear();
             }
         }
+    }
+
+    public function endStep(GameState $s): void
+    {
+        $this->emptyPools($s);
 
         $next = $s->phase->next();
-        while ($next !== null && $this->combat->skips($next, $s)) {
+        while ($next !== null && ($this->combat->skips($next, $s) || $this->skipsDraw($s, $next))) {
             $next = $next->next();
         }
         if ($next !== null) {
@@ -101,9 +130,34 @@ final class TurnManager
 
             return;
         }
-        $s->activePlayer = $s->nextAlive($s->activePlayer);
+        // Tour supplémentaire (Final Fortune) : à la place du joueur suivant (CR 500.7).
+        $extra = $s->takeExtraTurn();
+        $s->activePlayer = $extra['player'] ?? $s->nextAlive($s->activePlayer);
         $s->landsPlayed = 0;
+        $s->spellsCast = [];
+        $s->noncreatureCast = [];
+        $s->cardsDrawn = [];
+        $s->onceTriggered = [];
+        $s->combatDamaged = [];
         $s->phase = Phase::Untap;
         $s->stepStarted = false;
+        if ($extra !== null) {
+            $s->emit('ExtraTurnStarted', ['player' => $extra['player'], 'turn' => $s->turn, 'pending' => count($s->extraTurns)]);
+            if (isset($extra['loseAtEnd'])) {
+                // « At the beginning of that turn's end step, you lose the game » : sa prochaine étape de fin est celle de ce tour.
+                $s->addDelayedTrigger($extra['player'], CardInstance::fromArray($extra['card']), new TriggeredAbility(TriggeredAbility::NEXT_END, 'lose_game'));
+            }
+        }
+    }
+
+    /** « Skip your draw step » (Necropotence) : l'étape de pioche du joueur actif n'a pas lieu (`StepSkipped`). */
+    private function skipsDraw(GameState $s, Phase $next): bool
+    {
+        if ($next !== Phase::Draw || !$s->controlsStatic($s->activePlayer, CardInstance::STATIC_SKIP_DRAW)) {
+            return false;
+        }
+        $s->emit('StepSkipped', ['player' => $s->activePlayer, 'phase' => Phase::Draw->value]);
+
+        return true;
     }
 }

@@ -39,11 +39,37 @@ final class PutTrigger implements Action
                 $label = $pending->source->name . ' (' . $pending->ability()->label() . ')';
             }
         }
-        if ($this->targets !== []) {
+        if (str_starts_with($this->targets[0] ?? '', 'card:')) {
+            $name = $state->player($this->player)->findInHand(substr($this->targets[0], 5))?->name ?? substr($this->targets[0], 5);
+            $label .= ' → exiler ' . $name;
+        } elseif (str_starts_with($this->targets[0] ?? '', 'library:')) {
+            $id = substr($this->targets[0], 8);
+            $found = null;
+            foreach ($state->player($this->player)->library as $c) {
+                if ($c->id === $id) {
+                    $found = $c;
+                }
+            }
+            $label .= $found === null ? ' → rien à chercher' : ' → ' . $found->name;
+        } elseif ($this->targets !== []) {
             $label .= ' → joueur ' . substr($this->targets[0], 7);
+        } elseif ($this->hasHandChoice($state)) {
+            $label .= ' → ne rien exiler';
         }
 
         return 'Mettre sur la pile : ' . $label;
+    }
+
+    /** Le trigger en attente choisit-il une carte de la main (imprint) : sans cible, il décline. */
+    private function hasHandChoice(GameState $state): bool
+    {
+        foreach ($state->pendingTriggers as $pending) {
+            if ($pending->id === $this->pendingId) {
+                return $pending->ability()->choosesHandCard();
+            }
+        }
+
+        return false;
     }
 
     public function toArray(): array

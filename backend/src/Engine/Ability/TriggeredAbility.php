@@ -15,9 +15,51 @@ use App\Engine\Game\CardInstance;
  * priorité ; `TriggerManager` la met alors sur la pile (ordre APNAP).
  *
  * Effets (même vocabulaire que `ActivatedAbility`) : `damage` (`amount` dégâts à un joueur ciblé), `draw` (piocher
- * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`).
+ * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`) ou `treasure` (`amount` jetons Treasure, engagés si `spec` = `tapped` : Tataru Taru), `self_damage` (`amount` dégâts à son contrôleur) ou `imprint` (Chrome Mox : exiler une carte
+ * non-artefact non-terrain de sa main, choisie en mettant le trigger sur la pile — cible `card:<id>`, absente = ne rien exiler).
  *
- * Filtre (`filter`, seulement pour `cast`) : `''` = tout sort, `instant_sorcery` = éphémère ou rituel.
+ * `opponent_cast` (un adversaire de son contrôleur lance un sort ; le lanceur est retenu par `PendingTrigger::$opponent` et
+ * devient la cible `player:<id>` du trigger) avec l'effet `draw_unless` (Rhystic Study : son contrôleur pioche `amount` cartes
+ * sauf si le lanceur paie `spec`, décision du lanceur à la résolution comme Daze ; le « you may » est choisi sauf si la bibliothèque est vide).
+ *
+ * `postcombat_main` (début de chacune des phases principales d'après combat de son contrôleur) avec l'effet `pay_life_draw`
+ * (Tymna the Weaver : X = nombre d'adversaires blessés au combat ce tour, `GameState::$combatDamaged` ; son contrôleur paie X PV
+ * et pioche X cartes ; le « you may » est choisi tant que X > 0 et que les PV restent positifs).
+ *
+ * Filtre (`filter`) : pour `opponent_cast`, `second_spell` = seulement le deuxième sort du lanceur ce tour (Kraum,
+ * `GameState::$spellsCast`) ; pour `cast`, `''` = tout sort, `instant_sorcery` = éphémère ou rituel ; pour les autres événements, `tapped` =
+ * seulement si la source est engagée (Mana Vault au début de l'étape de pioche).
+ *
+ * Triggers retardés (CR 603.7, créés par la résolution d'un sort, gardés dans `GameState::$delayedTriggers` jusqu'à leur
+ * événement, jamais portés par une carte) : `next_upkeep` (prochain entretien de son contrôleur) et `next_main` (début de sa
+ * prochaine phase principale). Effets : `pact` (payer `spec` ou perdre la partie, décision à la résolution) et `mana`
+ * (ajouter `amount` {C}, Mana Drain).
+ *
+ * Lot H3 : `storm` (trigger du sort lancé lui-même, jamais porté par une carte : `amount` copies du sort ; `spec` = son id de
+ * pile, son mode, son X et ses cibles, `PriorityManager::stormSpec()`), `counter_spell` (Lavinia : contre le sort ciblé
+ * `stack:<id>`, filtre `no_mana` = aucun mana dépensé pour le lancer), `mobilize` (Voice of Victory, `attacks` : `amount`
+ * jetons Warrior 1/1 rouges engagés et attaquants, sacrifiés au début de la prochaine étape de fin par un trigger retardé
+ * `next_end` d'effet `sacrifice_tokens`, `spec` = leurs ids) et `pump_untap` (Valley Floodcaller, `cast` filtré `noncreature` :
+ * ses créatures des sous-types `spec` (séparés par `|`) gagnent +1/+1 jusqu'à la fin du tour et se dégagent).
+ *
+ * Lot H4 : `opponent_draw` (un adversaire de son contrôleur pioche une carte, retenu par `PendingTrigger::$opponent` ; filtre
+ * `second_draw` = sa deuxième carte du tour, `GameState::$cardsDrawn` (Faerie Mastermind) ; `not_draw_step_first` = sauf la
+ * première qu'il pioche dans chacune de ses étapes de pioche (Orcish Bowmasters)). `ping_amass` (Orcish Bowmasters : `amount`
+ * dégâts à un joueur ciblé, puis Amass `spec` = `Type:N`, CR 701.47). `cumulative_upkeep` (Mystic Remora, `upkeep` : un marqueur
+ * d'âge, puis payer `spec` par marqueur d'âge ou sacrifier la source ; décision `PayCost` à la résolution). Pour `opponent_cast`,
+ * `first_noncreature` = premier sort non-créature du lanceur ce tour (Esper Sentinel, `GameState::$noncreatureCast`) et
+ * `noncreature` = tout sort non-créature (Mystic Remora). `draw_unless` accepte `spec` = `{X}` : X = force de la source (Esper
+ * Sentinel ; X = 0 : rien à payer, pas de pioche).
+ *
+ * `pay_untap` (Mana Vault, `upkeep`) : son contrôleur peut payer `spec` pour dégager la source (décision `PayCost` à la
+ * résolution, proposée seulement si la source est encore engagée sur le champ de bataille).
+ *
+ * Étape 14 (combos, lot H5b) : `each_end_step` (début de chaque étape de fin, quel que soit le joueur actif : Underworld Breach,
+ * effet `sacrifice_self`) ; `oracle` (Thassa's Oracle, `etb` : X = dévotion au bleu de son contrôleur ; il regarde les X cartes
+ * du dessus, en garde au plus une dessus et met le reste dessous dans un ordre aléatoire ; si X ≥ le nombre de cartes de sa
+ * bibliothèque, il gagne la partie) ; `exile_discarded` (Necropotence, `discard` : la carte défaussée, cible `card:<id>`, quitte
+ * le cimetière pour l'exil) ; triggers retardés `necro_return` (`next_end` : la carte exilée face cachée `spec` va en main) et
+ * `lose_game` (`next_end` : son contrôleur perd la partie, Final Fortune).
  *
  * Forme sérialisée (`toArray`) : `spec` et `filter` omis s'ils sont vides.
  */
@@ -29,14 +71,57 @@ final class TriggeredAbility
     public const ATTACKS = 'attacks';
     public const END_STEP = 'end_step';
     public const CAST = 'cast';
+    public const OPPONENT_CAST = 'opponent_cast';
     public const DISCARD = 'discard';
+    public const DRAW_STEP = 'draw_step';
+    public const POSTCOMBAT_MAIN = 'postcombat_main';
+    /** Son contrôleur joue un autre terrain (City of Traitors). */
+    public const LAND_PLAYED = 'land_played';
+    /** Triggers retardés (voir l'en-tête). */
+    public const NEXT_UPKEEP = 'next_upkeep';
+    public const NEXT_MAIN = 'next_main';
+    /** Début de la prochaine étape de fin (Mobilize : sacrifier les jetons). */
+    public const NEXT_END = 'next_end';
+    /** Un adversaire de son contrôleur pioche une carte (Faerie Mastermind, Orcish Bowmasters). */
+    public const OPPONENT_DRAW = 'opponent_draw';
+    /** Un joueur, quel qu'il soit, lance un sort (Lotho, Corrupt Shirriff ; avec `second_spell`). */
+    public const ANY_CAST = 'any_cast';
+    /** La source inflige des dégâts de combat à un joueur (Ragavan) ; le joueur blessé est la cible du trigger. */
+    public const COMBAT_DAMAGE_PLAYER = 'combat_damage_player';
+    /** Début de chaque étape de fin, celle de n'importe quel joueur (Underworld Breach : « At the beginning of the end step »). */
+    public const EACH_END_STEP = 'each_end_step';
+
+    /** Coût `{X}` de `draw_unless` : X = force de la source (Esper Sentinel). */
+    public const X_POWER = '{X}';
 
     /** Filtre de `cast` : le sort lancé est un éphémère ou un rituel. */
     public const INSTANT_SORCERY = 'instant_sorcery';
+    /** Filtre de `opponent_cast` : le sort est le deuxième que le lanceur lance ce tour (Kraum). */
+    public const SECOND_SPELL = 'second_spell';
+    /** Filtre de `cast` : le sort lancé n'est pas une créature (Valley Floodcaller). */
+    public const NONCREATURE = 'noncreature';
+    /** Filtre de `opponent_cast` : aucun mana n'a été dépensé pour lancer le sort (Lavinia, Azorius Renegade). */
+    public const NO_MANA = 'no_mana';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::DISCARD];
-    private const EFFECTS = ['damage', 'draw', 'token'];
-    private const FILTERS = ['', self::INSTANT_SORCERY];
+    /** Filtre de `opponent_cast` : premier sort non-créature du lanceur ce tour (Esper Sentinel). */
+    public const FIRST_NONCREATURE = 'first_noncreature';
+    /** Filtre de `opponent_draw` : deuxième carte piochée par cet adversaire ce tour (Faerie Mastermind). */
+    public const SECOND_DRAW = 'second_draw';
+    /** Filtre de `opponent_draw` : sauf la première carte piochée dans chacune de ses étapes de pioche (Orcish Bowmasters). */
+    public const NOT_DRAW_STEP_FIRST = 'not_draw_step_first';
+    /** Filtre de `opponent_draw` : pas pendant le tour de cet adversaire, et une seule fois par tour (Tataru Taru). */
+    public const OFF_TURN_ONCE = 'off_turn_once';
+
+    /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
+    public const TAPPED = 'tapped';
+
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW, self::ANY_CAST, self::COMBAT_DAMAGE_PLAYER, self::EACH_END_STEP];
+    /** `spec` d'un effet `treasure` : jetons créés engagés (Tataru Taru). */
+    public const TREASURE_TAPPED = 'tapped';
+    private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor',
+        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap', 'ping_amass', 'cumulative_upkeep', 'return_dashed',
+        'lose_life_treasure', 'draw_opponent_may', 'treasure_exile_top', 'oracle', 'exile_discarded', 'necro_return', 'lose_game'];
+    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA, self::FIRST_NONCREATURE, self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST, self::OFF_TURN_ONCE];
 
     public function __construct(
         public readonly string $event,
@@ -51,11 +136,28 @@ final class TriggeredAbility
         if (!in_array($effect, self::EFFECTS, true)) {
             throw new \InvalidArgumentException("Effet de trigger inconnu : $effect");
         }
-        if (!in_array($filter, self::FILTERS, true) || ($filter !== '' && $event !== self::CAST)) {
+        if (!in_array($filter, self::FILTERS, true) || ($filter === self::INSTANT_SORCERY && $event !== self::CAST)
+            || ($filter === self::TAPPED && $event === self::CAST) || ($filter === self::SECOND_SPELL && $event !== self::OPPONENT_CAST && $event !== self::ANY_CAST)
+            || ($filter === self::NONCREATURE && $event !== self::CAST && $event !== self::OPPONENT_CAST) || ($filter === self::NO_MANA && $event !== self::OPPONENT_CAST)
+            || ($filter === self::FIRST_NONCREATURE && $event !== self::OPPONENT_CAST)
+            || (in_array($filter, [self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST, self::OFF_TURN_ONCE], true) && $event !== self::OPPONENT_DRAW)) {
             throw new \InvalidArgumentException("Filtre de trigger invalide : $filter ($event)");
         }
         if ($effect === 'token') {
             ActivatedAbility::parseTokenSpec($spec);
+        }
+        if (in_array($effect, ['pact', 'draw_unless', 'pay_untap', 'cumulative_upkeep'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)
+            && !($effect === 'draw_unless' && $spec === self::X_POWER)) {
+            throw new \InvalidArgumentException("Coût de pacte invalide : $spec");
+        }
+        if ($effect === 'treasure' && $spec !== '' && $spec !== self::TREASURE_TAPPED) {
+            throw new \InvalidArgumentException("Treasure invalide : $spec");
+        }
+        if ($effect === 'ping_amass' && !preg_match('/^[A-Z][a-z]+:\d+$/', $spec)) {
+            throw new \InvalidArgumentException("Amass invalide : $spec");
+        }
+        if ($effect === 'tutor' && !preg_match('/^(creature|artifact|enchantment|instant|sorcery|land)?<=\d+$/', $spec)) {
+            throw new \InvalidArgumentException("Filtre de tuteur invalide : $spec");
         }
     }
 
@@ -64,14 +166,41 @@ final class TriggeredAbility
     {
         return match ($this->filter) {
             self::INSTANT_SORCERY => $spell->hasType(CardInstance::INSTANT) || $spell->hasType(CardInstance::SORCERY),
+            self::NONCREATURE, self::FIRST_NONCREATURE => !$spell->isCreature(),
             default => true,
         };
+    }
+
+    /** Choisit-elle une carte de la main du contrôleur en étant mise sur la pile (Chrome Mox) ? */
+    public function choosesHandCard(): bool
+    {
+        return $this->effect === 'imprint';
+    }
+
+    /** Choisit-elle une carte de la bibliothèque en étant mise sur la pile (tuteur à l'entrée : Ranger-Captain of Eos) ? */
+    public function choosesLibraryCard(): bool
+    {
+        return $this->effect === 'tutor';
+    }
+
+    /** La carte de la bibliothèque `$card` convient-elle à ce tuteur (`spec` = `[type]<=valeur de mana`) ? */
+    public function tutorMatches(CardInstance $card): bool
+    {
+        [$type, $max] = explode('<=', $this->spec, 2);
+
+        return ($type === '' || $card->hasType($type)) && $card->manaCost()->manaValue() <= (int) $max;
+    }
+
+    /** La capacité cible-t-elle un adversaire de son contrôleur (Tataru Taru : « target opponent may draw a card ») ? */
+    public function targetsOpponent(): bool
+    {
+        return $this->effect === 'draw_opponent_may';
     }
 
     /** La capacité cible-t-elle un joueur (à choisir en la mettant sur la pile) ? */
     public function targetsPlayer(): bool
     {
-        return $this->effect === 'damage';
+        return $this->effect === 'damage' || $this->effect === 'ping_amass';
     }
 
     /** Libellé court, ex. `Quand elle entre : piocher 1`, `Quand elle meurt : 2 dégâts`. */
@@ -83,13 +212,64 @@ final class TriggeredAbility
             self::UPKEEP => 'Au début de votre entretien',
             self::ATTACKS => 'Quand elle attaque',
             self::END_STEP => 'Au début de votre étape de fin',
-            self::CAST => $this->filter === self::INSTANT_SORCERY ? 'Quand vous lancez un éphémère ou un rituel' : 'Quand vous lancez un sort',
+            self::EACH_END_STEP => 'Au début de chaque étape de fin',
+            self::CAST => match ($this->filter) {
+                self::INSTANT_SORCERY => 'Quand vous lancez un éphémère ou un rituel',
+                self::NONCREATURE => 'Quand vous lancez un sort non-créature',
+                default => 'Quand vous lancez un sort',
+            },
+            self::OPPONENT_CAST => match ($this->filter) {
+                self::SECOND_SPELL => 'Quand un adversaire lance son deuxième sort du tour',
+                self::NO_MANA => 'Quand un adversaire lance un sort sans dépenser de mana',
+                self::FIRST_NONCREATURE => 'Quand un adversaire lance son premier sort non-créature du tour',
+                self::NONCREATURE => 'Quand un adversaire lance un sort non-créature',
+                default => 'Quand un adversaire lance un sort',
+            },
             self::DISCARD => 'Quand vous défaussez une carte',
-        };
+            self::DRAW_STEP => 'Au début de votre étape de pioche',
+            self::POSTCOMBAT_MAIN => 'Au début de votre phase principale d\'après combat',
+            self::LAND_PLAYED => 'Quand vous jouez un autre terrain',
+            self::NEXT_UPKEEP => 'Au début de votre prochain entretien',
+            self::NEXT_MAIN => 'Au début de votre prochaine phase principale',
+            self::NEXT_END => 'Au début de la prochaine étape de fin',
+            self::OPPONENT_DRAW => match ($this->filter) {
+                self::SECOND_DRAW => 'Quand un adversaire pioche sa deuxième carte du tour',
+                self::NOT_DRAW_STEP_FIRST => 'Quand un adversaire pioche une carte (sauf la première de son étape de pioche)',
+                self::OFF_TURN_ONCE => 'Quand un adversaire pioche une carte hors de son tour (une fois par tour)',
+                default => 'Quand un adversaire pioche une carte',
+            },
+            self::COMBAT_DAMAGE_PLAYER => 'Quand elle inflige des dégâts de combat à un joueur',
+            self::ANY_CAST => $this->filter === self::SECOND_SPELL ? 'Quand un joueur lance son deuxième sort du tour' : 'Quand un joueur lance un sort',
+        } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
         $what = match ($this->effect) {
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
+            'treasure' => sprintf('%d Treasure', $this->amount) . ($this->spec === self::TREASURE_TAPPED ? ' engagé' : ''),
+            'self_damage' => sprintf('%d dégât%s à vous', $this->amount, $this->amount > 1 ? 's' : ''),
+            'imprint' => 'exiler une carte de votre main (imprint)',
+            'pact' => sprintf('payer %s ou perdre la partie', $this->spec),
+            'draw_unless' => sprintf('piocher %d sauf s\'il paie %s', $this->amount, $this->spec === self::X_POWER ? '{X} (X = sa force)' : $this->spec),
+            'pay_life_draw' => 'payer X PV et piocher X (X = adversaires blessés au combat ce tour)',
+            'treasure_exile_top' => 'créer un Treasure, exiler la carte du dessus de la bibliothèque de ce joueur ; vous pouvez la lancer ce tour',
+            'lose_life_treasure' => sprintf('perdre %d PV et créer un Treasure', $this->amount),
+            'draw_opponent_may' => sprintf('piocher %d ; l\'adversaire ciblé peut piocher une carte', $this->amount),
+            'mana' => sprintf('ajouter %s', $this->amount > 0 ? str_repeat('{C}', $this->amount) : 'rien'),
+            'sacrifice_self' => 'la sacrifier',
+            'tutor' => sprintf('chercher une carte (%s) et la mettre dans la main', $this->spec),
+            'storm' => sprintf('Storm : copier le sort %d fois', $this->amount),
+            'counter_spell' => 'contrer ce sort',
+            'mobilize' => sprintf('créer %d jetons Warrior 1/1 engagés et attaquants', $this->amount),
+            'sacrifice_tokens' => 'sacrifier les jetons Warrior',
+            'return_dashed' => 'renvoyer la créature arrivée par Dash dans la main de son propriétaire',
+            'pump_untap' => sprintf('vos %s gagnent +1/+1 et se dégagent', str_replace('|', ', ', $this->spec)),
+            'pay_untap' => sprintf('vous pouvez payer %s pour la dégager', $this->spec),
+            'ping_amass' => sprintf('%d dégât%s, puis Amass %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
+            'cumulative_upkeep' => sprintf('un marqueur d\'âge, puis payer %s par marqueur ou la sacrifier', $this->spec),
+            'oracle' => 'regarder les X cartes du dessus (X = dévotion au bleu), en garder une dessus, le reste dessous ; gagner si X ≥ la taille de la bibliothèque',
+            'exile_discarded' => 'exiler la carte défaussée de votre cimetière',
+            'necro_return' => 'mettre en main la carte exilée face cachée',
+            'lose_game' => 'perdre la partie',
         };
 
         return "$when : $what";

@@ -1,0 +1,7 @@
+dist
+coverage
+recette
+node_modules
+package-lock.json
+src/engine/__fixtures__
+src/style.css

@@ -121,6 +121,8 @@ final class GameEngine
         if ($s->over) {
             return false;
         }
+        // Fin de cette étape de cleanup : le mana disparaît avant la suivante (règle 500.4), comme dans endStep.
+        $this->turns->emptyPools($s);
         $s->stepStarted = false;
 
         return true;

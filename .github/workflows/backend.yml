@@ -1,6 +1,6 @@
 name: Backend
 
-# PHPUnit (MySQL 9.3 en service) + PHPStan. Aucun secret versionné : le mot de passe MySQL du service
+# PHPUnit (MySQL 9.3 en service, couverture pcov avec seuil) + PHPStan niveau 3. Aucun secret versionné : le mot de passe MySQL du service
 # est jetable et l'URL passe par une variable d'environnement (qui prime sur backend/.env.test).
 on:
   pull_request:
@@ -38,6 +38,7 @@ jobs:
         with:
           php-version: '8.4'
           tools: composer
+          coverage: pcov
 
       - name: Dépendances
         run: composer install --no-interaction --prefer-dist
@@ -45,5 +46,9 @@ jobs:
       - name: PHPStan
         run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
 
-      - name: PHPUnit
-        run: vendor/bin/phpunit
+      - name: PHPUnit (avec couverture)
+        run: vendor/bin/phpunit --coverage-clover var/clover.xml
+
+      # Seuil = taux mesuré le 2026-10-24 (95,76 % des instructions de src/) arrondi vers le bas. À relever quand la couverture monte.
+      - name: Seuil de couverture
+        run: php bin/check-coverage.php var/clover.xml 95

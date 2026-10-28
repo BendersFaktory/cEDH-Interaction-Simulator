@@ -42,7 +42,7 @@ final class ActivateAbility implements Action
     public function describe(GameState $state): string
     {
         $card = null;
-        foreach ($state->player($this->player)->battlefield as $c) {
+        foreach ([...$state->player($this->player)->battlefield, ...$state->player($this->player)->hand] as $c) {
             if ($c->id === $this->cardId) {
                 $card = $c;
             }
@@ -57,8 +57,27 @@ final class ActivateAbility implements Action
             }
             $label .= ' en ' . ($ability?->sacrificeCreature ? 'sacrifiant ' : 'défaussant ') . implode(', ', $names);
         }
-        if ($this->targets !== []) {
-            $label .= ' → joueur ' . substr($this->targets[0], 7);
+        $target = $this->targets[0] ?? null;
+        if ($target !== null && str_starts_with($target, 'library:')) {
+            // Fetchland : le terrain cherché (et, pour une shockland, si on paie ses PV).
+            $id = substr($target, 8);
+            $found = null;
+            foreach ($state->player($this->player)->library as $c) {
+                if ($c->id === $id) {
+                    $found = $c;
+                }
+            }
+            $label .= $id === 'none' ? ' → rien à chercher' : ' → ' . ($found?->name ?? $id)
+                . (in_array('life', $this->targets, true) ? " (payer {$found?->untappedLifeCost} PV)" : ($found?->untappedLifeCost ? ' (engagé)' : ''));
+        } elseif ($target !== null && str_starts_with($target, 'permanent:')) {
+            $id = substr($target, 10);
+            foreach ($state->players as $pl) {
+                if (($found = $pl->findOnBattlefield($id)) !== null) {
+                    $label .= sprintf(' → %s (joueur %d)', $found->name, $pl->id);
+                }
+            }
+        } elseif ($target !== null) {
+            $label .= ' → joueur ' . substr($target, 7);
         }
 
         return 'Activer ' . $label;
@@ -67,7 +86,7 @@ final class ActivateAbility implements Action
     /** Vrai si la capacité visée est une capacité de mana (utilisé par l'auto-pass humain). */
     public function isManaAbility(GameState $state): bool
     {
-        foreach ($state->player($this->player)->battlefield as $c) {
+        foreach ([...$state->player($this->player)->battlefield, ...$state->player($this->player)->hand] as $c) {
             if ($c->id === $this->cardId) {
                 return ($c->abilities()[$this->abilityIndex] ?? null)?->isManaAbility ?? false;
             }

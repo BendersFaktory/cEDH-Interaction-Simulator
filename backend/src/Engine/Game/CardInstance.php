@@ -6,6 +6,8 @@ namespace App\Engine\Game;
 
 use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
+use App\Engine\Card\ReplacementEffect;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Card\Subtypes;
 use App\Engine\Mana\Color;
 use App\Engine\Mana\ManaCost;
@@ -24,6 +26,61 @@ final class CardInstance
     public const ARTIFACT = 'artifact';
     public const ENCHANTMENT = 'enchantment';
 
+    // Coûts alternatifs (`altCost`) : Force of Will (1 PV + exiler un bleu de la main), Fierce Guardianship (gratuit si commandant).
+    public const ALT_PITCH_BLUE = 'pitch_blue';
+    public const ALT_COMMANDER = 'commander';
+    /** Force of Negation : exiler une carte bleue de sa main (sans PV), seulement si ce n'est pas le tour du lanceur. */
+    public const ALT_PITCH_BLUE_OFF_TURN = 'pitch_blue_off_turn';
+    /** Daze (`return_islands:1`), Gush (`return_islands:2`) : renvoyer N Îles que l'on contrôle dans la main de leur propriétaire. */
+    public const ALT_RETURN_ISLANDS = 'return_islands:';
+
+    /** Misdirection / Snapback / Commandeer : exiler une carte bleue de sa main, sans PV (`ALT_PITCH_BLUE` en demande 1). */
+    public const ALT_PITCH_BLUE_FREE = 'pitch_blue_free';
+
+    /** Commandeer : exiler deux cartes bleues de sa main (`CastSpell::ALT_PITCH` suivi des deux ids séparés par une virgule). */
+    public const ALT_PITCH_TWO_BLUE = 'pitch_two_blue';
+    /** Mindbreak Trap : gratuit si un adversaire a lancé trois sorts ou plus ce tour (`CastSpell::ALT_FREE`). */
+    public const ALT_OPPONENT_THREE_SPELLS = 'opponent_three_spells';
+
+    /**
+     * Capacités statiques (`statics`, lot H3), lues par `GameState::canCast()` et `GameState::castsAtInstantSpeed()` tant que
+     * le permanent est sur le champ de bataille : Valley Floodcaller (son contrôleur lance ses sorts non-créature comme s'ils
+     * avaient le flash), Lavinia (chaque adversaire ne peut pas lancer de sort non-créature de valeur de mana supérieure à son
+     * nombre de terrains), Voice of Victory (les adversaires ne peuvent pas lancer de sort pendant le tour de son contrôleur).
+     */
+    public const STATIC_NONCREATURE_FLASH = 'noncreature_flash';
+    public const STATIC_OPPONENTS_MV_LANDS = 'opponents_mv_lands';
+    public const STATIC_OPPONENTS_NO_CAST_YOUR_TURN = 'opponents_no_cast_your_turn';
+    /** Dans la main de départ d'un joueur qui n'est pas premier joueur : peut commencer la partie en jeu avec un marqueur de chance (Gemstone Caverns). */
+    public const STATIC_PREGAME_LUCK = 'pregame_luck';
+    public const LUCK = 'luck';
+    /** Un adversaire qui cherche dans sa bibliothèque exile ce qu'il trouve ; le contrôleur peut jouer ces cartes (Opposition Agent). */
+    public const STATIC_OPPOSITION_AGENT = 'opposition_agent';
+    /** « Skip your draw step. » : son contrôleur passe son étape de pioche (Necropotence, `TurnManager`). */
+    public const STATIC_SKIP_DRAW = 'skip_draw';
+    /** Chaque carte non-terrain du cimetière de son contrôleur a l'escape (Underworld Breach, `CAST_ESCAPE`). */
+    public const STATIC_ESCAPE = 'escape';
+    public const STATICS = [self::STATIC_NONCREATURE_FLASH, self::STATIC_OPPONENTS_MV_LANDS, self::STATIC_OPPONENTS_NO_CAST_YOUR_TURN, self::STATIC_PREGAME_LUCK,
+        self::STATIC_OPPOSITION_AGENT, self::STATIC_SKIP_DRAW, self::STATIC_ESCAPE];
+
+    /** Coût additionnel (`extraCost`) : sacrifier une créature que l'on contrôle (Culling the Weak, Diabolic Intent). */
+    public const EXTRA_SACRIFICE_CREATURE = 'sacrifice_creature';
+    /** Bargain (CR 702.166) : coût additionnel facultatif, sacrifier un artefact, un enchantement ou un jeton (Beseech the Mirror). */
+    public const EXTRA_BARGAIN = 'bargain';
+    /**
+     * Façons de lancer la carte pour un autre coût (`$altCasts` : sorte => coût de mana). Flashback (CR 702.34) : depuis le
+     * cimetière, au rythme habituel, puis exilée quand elle quitte la pile (Strike It Rich). Dash (CR 702.109) : depuis la main ;
+     * la créature a la célérité et retourne dans la main de son propriétaire au début de la prochaine étape de fin (Ragavan).
+     */
+    public const CAST_FLASHBACK = 'flashback';
+    public const CAST_DASH = 'dash';
+    /**
+     * Escape (CR 702.138) : depuis le cimetière, pour son coût de mana plus l'exil de trois autres cartes de ce cimetière ; jamais
+     * portée par la carte, accordée par Underworld Breach (`STATIC_ESCAPE`). Un sort lancé ainsi retourne au cimetière.
+     */
+    public const CAST_ESCAPE = 'escape';
+    public const ALT_CASTS = [self::CAST_FLASHBACK, self::CAST_DASH, self::CAST_ESCAPE];
+
     // Mots-clés de combat (CR 702).
     public const FLYING = 'flying';
     public const REACH = 'reach';
@@ -36,6 +93,14 @@ final class CardInstance
     public const TRAMPLE = 'trample';
     public const DEATHTOUCH = 'deathtouch';
     public const LIFELINK = 'lifelink';
+    public const FLASH = 'flash';
+    /** Sortes de marqueurs (`$counters`). */
+    public const PLUS_ONE = '+1/+1';
+    public const AGE = 'age';
+    /** Partner (CR 702.124) : deux commandants si les deux l'ont (`Decks::validate()`). Sans effet en jeu. */
+    public const PARTNER = 'partner';
+    /** Storm (CR 702.40) : en le lançant, un trigger le copie une fois par sort lancé avant lui ce tour (`GameState::$spellsCast`). */
+    public const STORM = 'storm';
 
     // Supertypes (CR 205.4).
     public const LEGENDARY = 'legendary';
@@ -55,6 +120,54 @@ final class CardInstance
      * écriture) entre tous les états sérialisés ; une bibliothèque de 99 cartes ne coûte alors presque rien par checkpoint.
      * Pur cache d'une fonction de l'objet, jamais sérialisé.
      */
+    /** @var list<SpellEffect> effets d'un sort à sa résolution, dans l'ordre (vide : aucun effet de sort) */
+    public readonly array $effects;
+
+    /**
+     * Couleurs (lettres WUBRG) de la carte exilée par l'imprint (Chrome Mox) ; vide = rien d'exilé ou carte incolore. État de
+     * partie mutable : sérialisé sous `imprint` par `toArray()` (pas par `toPublic()`), omis quand vide.
+     *
+     * @var list<string>
+     */
+    public array $imprint = [];
+
+    /**
+     * Capacités accordées jusqu'à la fin du tour (Rain of Filth), placées après les capacités de la carte dans `abilities()` ;
+     * vidées au cleanup et quand la carte quitte le champ de bataille. Sérialisé sous `granted` par `toArray()`, omis quand vide.
+     *
+     * @var list<ActivatedAbility>
+     */
+    public array $grantedAbilities = [];
+
+    /**
+     * Marqueurs par sorte (`+1/+1`, CR 122.1a, comptés par `currentPower()` / `currentToughness()` ; `age`, Cumulative upkeep).
+     * État de partie mutable : sérialisé sous `counters` par `toArray()`, omis quand vide ; vidé quand la carte quitte le champ
+     * de bataille (CR 122.2). Seul chemin d'ajout : `GameState::addCounters()`.
+     *
+     * @var array<string, int>
+     */
+    public array $counters = [];
+
+    /**
+     * Arrivée par Dash : célérité tant qu'elle reste sur le champ de bataille, et le trigger retardé de fin de tour ne renvoie
+     * que ce permanent-là (pas un nouvel objet du même id, CR 400.7). Sérialisé sous `dashed` par `toArray()`, omis à faux ;
+     * remis à faux quand la carte quitte le champ de bataille.
+     */
+    public bool $dashed = false;
+
+    /**
+     * Permanent qui est une copie d'une autre créature (Mockingbird, CR 707.2) : la carte elle-même, telle qu'elle redevient en
+     * quittant le champ de bataille (`GameState::sendToGraveyard()`, `exile()`, `returnToHand()`). Sérialisé sous `original` par
+     * `toArray()`, omis quand null.
+     */
+    public ?CardInstance $original = null;
+
+    /** La carte telle qu'elle est hors du champ de bataille : l'original d'une copie (Mockingbird), sinon elle-même. */
+    public function printed(): self
+    {
+        return $this->original ?? $this;
+    }
+
     private ?array $publicMemo = null;
     private ?array $arrayMemo = null;
     private string $arrayMemoKey = '';
@@ -64,8 +177,8 @@ final class CardInstance
         public readonly string $name,
         string|array $type,
         public readonly int $cost = 0,
-        public readonly ?string $effect = null, // 'damage' | 'counter' | 'mana' | 'treasure' | null
-        public readonly int $amount = 0,
+        ?string $effect = null, // raccourci pour un sort à un seul effet ('damage' | 'counter' | 'mana' | 'treasure' | 'draw')
+        int $amount = 0,
         public bool $tapped = false,
         public readonly bool $commander = false,
         public readonly int $power = 0,
@@ -77,7 +190,7 @@ final class CardInstance
         public readonly array $produces = [],
         /** @var list<ActivatedAbility> capacités activées déclarées (un terrain a d'abord celles de `produces`, voir abilities()) */
         public readonly array $abilities = [],
-        public readonly ?string $adds = null, // mana ajouté à la résolution d'un sort `effect 'mana'` (rituel), ex. `{R}{R}`
+        ?string $adds = null, // raccourci : mana ajouté par l'effet `mana` (rituel), ex. `{R}{R}`
         public readonly bool $token = false, // jeton : cesse d'exister en quittant le champ de bataille
         /** @var list<TriggeredAbility> triggers (l'index fait partie de l'id d'action PutTrigger) */
         public readonly array $triggers = [],
@@ -87,7 +200,31 @@ final class CardInstance
         public readonly array $keywords = [],
         /** @var list<string> supertypes (constante LEGENDARY) */
         public readonly array $supertypes = [],
+        /** @var list<SpellEffect> effets du sort dans l'ordre (remplace `effect` / `amount` / `adds` s'il est non vide) */
+        array $effects = [],
+        /** PV à payer en arrivant pour ne pas arriver engagé (shockland : 2) ; 0 = terrain ordinaire */
+        public readonly int $untappedLifeCost = 0,
+        public readonly ?string $altCost = null, // coût alternatif (ALT_PITCH_BLUE | ALT_COMMANDER | ALT_PITCH_BLUE_OFF_TURN | ALT_RETURN_ISLANDS . N), null = coût de mana seul
+        public readonly bool $noUntap = false,   // « ne se dégage pas pendant votre étape de dégagement » (Mana Vault, Grim Monolith)
+        public readonly ?string $extraCost = null, // coût additionnel du sort (EXTRA_SACRIFICE_CREATURE), null = aucun
+        public readonly int $tappedAfterOwnTurn = 0, // terrain qui arrive engagé après son N-ième tour (Starting Town : 3), 0 = jamais
+        /** @var list<string> capacités statiques (constantes STATIC_…) */
+        public readonly array $statics = [],
+        public readonly ?string $kicker = null, // coût de kicker (Orim's Chant : `{W}`), null = pas de kicker
+        /** @var list<ReplacementEffect> effets de remplacement « de soi » (CR 614.15, Mox Diamond), lus par GameState::replacementFor() */
+        public readonly array $replacements = [],
+        /** @var array<string, string> autres façons de la lancer (ALT_CASTS => coût de mana) : Flashback, Dash */
+        public readonly array $altCasts = [],
+        /** @var array<string, int> marqueurs posés à l'arrivée sur le champ de bataille (Wishclaw Talisman : `wish` => 3) */
+        public readonly array $entersWithCounters = [],
     ) {
+        if (array_diff($statics, self::STATICS) !== []) {
+            throw new \InvalidArgumentException("$name : capacité statique inconnue");
+        }
+        if (array_diff(array_keys($altCasts), self::ALT_CASTS) !== []) {
+            throw new \InvalidArgumentException("$name : façon de lancer inconnue");
+        }
+        $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
         $this->types = is_array($type) ? array_values($type) : [$type];
         if ($this->types === []) {
             throw new \InvalidArgumentException("$name : une carte a au moins un type");
@@ -102,6 +239,71 @@ final class CardInstance
         return in_array($type, $this->types, true);
     }
 
+    /** Premier effet de sort du genre `$effect` (`damage`, `counter`, `mana`, `treasure`, `draw`), ou null. */
+    public function effect(string $effect): ?SpellEffect
+    {
+        foreach ($this->effects as $e) {
+            if ($e->effect === $effect) {
+                return $e;
+            }
+        }
+
+        return null;
+    }
+
+    public function hasEffect(string $effect): bool
+    {
+        return $this->effect($effect) !== null;
+    }
+
+    /**
+     * Les effets ciblés du sort, dans l'ordre du texte : une cible par effet (CR 115.1, 608.2b). Vide si aucun.
+     *
+     * @return list<SpellEffect>
+     */
+    public function targetedEffects(int $mode = 0): array
+    {
+        return array_values(array_filter($this->effectsForMode($mode), static fn (SpellEffect $e) => $e->isTargeted()));
+    }
+
+    /** Sort modal (« choisissez un mode ») : au moins un de ses effets porte un mode (`SpellEffect::$mode`). */
+    public function isModal(): bool
+    {
+        foreach ($this->effects as $e) {
+            if ($e->mode > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return list<int> modes du sort (1, 2...), vide s'il n'est pas modal */
+    public function modes(): array
+    {
+        return array_values(array_unique(array_filter(array_map(static fn (SpellEffect $e) => $e->mode, $this->effects))));
+    }
+
+    /**
+     * Effets joués pour le mode choisi : ceux du mode `$mode` d'un sort modal, tous les effets sinon.
+     *
+     * @return list<SpellEffect>
+     */
+    public function effectsForMode(int $mode = 0): array
+    {
+        if ($mode === 0 || !$this->isModal()) {
+            return $this->effects;
+        }
+
+        return array_values(array_filter($this->effects, static fn (SpellEffect $e) => $e->mode === $mode));
+    }
+
+    /** Bleue (CR 105.2) : un symbole bleu dans son coût de mana (Pyroblast ; ≠ identité de couleurs, voir `isBlue()`). */
+    public function isBlueColored(): bool
+    {
+        return in_array('U', $this->colors(), true);
+    }
+
     /** Sous-type porté par la carte, sous le type `$type` s'il est donné (sinon sous n'importe lequel de ses types). */
     public function hasSubtype(string $subtype, ?string $type = null): bool
     {
@@ -114,15 +316,44 @@ final class CardInstance
         return false;
     }
 
+    /** Nombre d'Îles à renvoyer en main pour le coût alternatif (`ALT_RETURN_ISLANDS`), 0 sans ce coût. */
+    public function islandsToReturn(): int
+    {
+        return $this->altCost !== null && str_starts_with($this->altCost, self::ALT_RETURN_ISLANDS) ? (int) substr($this->altCost, strlen(self::ALT_RETURN_ISLANDS)) : 0;
+    }
+
+    /** Île : terrain de sous-type Island (Volcanic Island compris) ; terrain de base des decks de démo, construit sans sous-type, reconnu par son nom. */
+    public function isIsland(): bool
+    {
+        return $this->isLand() && ($this->hasSubtype('Island', self::LAND) || $this->name === 'Island');
+    }
+
     /** Légendaire : soumis à la règle des légendes (CR 704.5j). */
+    /** Bleue : une de ses couleurs d'identité est le bleu (Force of Will exile une carte bleue de la main). */
+    public function isBlue(): bool
+    {
+        foreach ($this->colorIdentity() as $color) {
+            if ($color->symbol() === 'U') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function isLegendary(): bool
     {
         return in_array(self::LEGENDARY, $this->supertypes, true);
     }
 
+    public function hasStatic(string $static): bool
+    {
+        return in_array($static, $this->statics, true);
+    }
+
     public function hasKeyword(string $keyword): bool
     {
-        return in_array($keyword, $this->keywords, true);
+        return in_array($keyword, $this->keywords, true) || ($this->dashed && $keyword === self::HASTE);
     }
 
     /** Incolore : aucun symbole coloré ni hybride dans le coût de mana (`{C}` est incolore). */
@@ -130,7 +361,18 @@ final class CardInstance
     {
         $cost = $this->manaCost();
 
-        return $cost->hybrid === [] && array_diff(array_keys($cost->colored), ['C']) === [];
+        return $cost->hybrid === [] && $cost->phyrexian === [] && array_diff(array_keys($cost->colored), ['C']) === [];
+    }
+
+
+    /** @param list<list<Color>> $options vrai si ce sont exactement les cinq couleurs, chaque alternative d'une seule couleur (un ou plusieurs mana) */
+    private static function isAnyColor(array $options): bool
+    {
+        $symbols = array_map(static fn (array $o): string => $o !== [] && count(array_unique(array_map(static fn (Color $c) => $c->symbol(), $o))) === 1 ? $o[0]->symbol() : '', $options);
+        $symbols = array_values(array_diff($symbols, ['C'])); // Gemstone Caverns : {C}, ou n'importe quelle couleur (un {C} est incolore)
+        sort($symbols);
+
+        return $symbols === ['B', 'G', 'R', 'U', 'W'];
     }
 
     /**
@@ -151,13 +393,22 @@ final class CardInstance
                 $found[$a->symbol()] = true;
                 $found[$b->symbol()] = true;
             }
+            foreach ($cost->phyrexian as $color) {
+                $found[$color->symbol()] = true; // {U/P} est bleu (CR 903.4 : le symbole phyrexian compte)
+            }
         };
         if (!$this->isLand()) {
             $addCost($this->manaCost());
         }
-        foreach ($this->abilities() as $ability) {
+        // « Add one mana of any color » (Treasure, Lotus Petal, Birds of Paradise, Command Tower) n'a aucun symbole de mana :
+        // sans identité (CR 903.4). Ses cinq alternatives à une couleur ne comptent donc pas (terrain : `produces`).
+        $anyColorLand = $this->isLand() && self::isAnyColor(array_map(static fn (string $s) => [Color::fromSymbol($s)], $this->produces));
+        foreach ($anyColorLand ? $this->abilities : $this->abilities() as $ability) {
             if ($ability->manaCost !== null) {
                 $addCost($ability->manaCost);
+            }
+            if (self::isAnyColor($ability->options)) {
+                continue;
             }
             foreach ($ability->options as $option) {
                 foreach ($option as $color) {
@@ -165,14 +416,40 @@ final class CardInstance
                 }
             }
         }
-        if ($this->adds !== null) {
-            $addCost(ManaCost::parse($this->adds));
+        foreach ($this->effects as $e) {
+            if ($e->adds !== null) {
+                $addCost(ManaCost::parse($e->adds));
+            }
         }
 
         return array_values(array_filter(
             Color::cases(),
             static fn (Color $c) => $c !== Color::Colorless && isset($found[$c->symbol()]),
         ));
+    }
+
+    /**
+     * Couleurs de la carte (CR 105.2) : celles des symboles de son coût de mana (hybride = les deux, phyrexien = sa couleur ;
+     * `{C}` et le générique n'en sont pas). Contrairement à `colorIdentity()`, ignore les capacités.
+     *
+     * @return list<string> lettres dans l'ordre WUBRG
+     */
+    public function colors(): array
+    {
+        if ($this->isLand()) {
+            return [];
+        }
+        $cost = $this->manaCost();
+        $found = array_fill_keys(array_keys($cost->colored), true);
+        foreach ($cost->hybrid as [$a, $b]) {
+            $found[$a->symbol()] = true;
+            $found[$b->symbol()] = true;
+        }
+        foreach ($cost->phyrexian as $color) {
+            $found[$color->symbol()] = true;
+        }
+
+        return array_values(array_filter(['W', 'U', 'B', 'R', 'G'], static fn (string $c) => isset($found[$c])));
     }
 
     /** Coût de mana structuré (les terrains n'ont pas de coût). */
@@ -199,32 +476,67 @@ final class CardInstance
      */
     public function abilities(): array
     {
+        $base = $this->declaredAbilities();
+
+        return $this->grantedAbilities === [] ? $base : [...$base, ...$this->grantedAbilities];
+    }
+
+    /** @return list<ActivatedAbility> */
+    private function declaredAbilities(): array
+    {
         if (!$this->isLand()) {
             return $this->abilities;
         }
 
-        return [...array_map(
-            static fn (string $symbol) => ActivatedAbility::mana('{' . $symbol . '}'),
-            $this->produces === [] ? ['C'] : $this->produces,
-        ), ...$this->abilities];
+        // Sans `produces`, un terrain de démo donne {C} (Kher Keep ; Eldrazi Temple, dont la capacité propre est restreinte).
+        // Pas un terrain chargé depuis Scryfall qui a sa propre capacité de mana libre (Ancient Tomb : seulement {C}{C} avec
+        // dégâts), ni une fetchland, qui ne produit aucun mana.
+        $produces = $this->produces;
+        if ($produces === []) {
+            $produces = ['C'];
+            foreach ($this->abilities as $ability) {
+                if ($ability->effect === 'fetch' || ($ability->isManaAbility && $ability->restrictions === [])) {
+                    $produces = [];
+                }
+            }
+        }
+
+        return [...array_map(static fn (string $symbol) => ActivatedAbility::mana('{' . $symbol . '}'), $produces), ...$this->abilities];
     }
 
-    /** Force actuelle (bonus du tour compris). */
+    /** Force actuelle (bonus du tour et marqueurs +1/+1 compris). */
     public function currentPower(): int
     {
-        return $this->power + $this->powerBonus;
+        return $this->power + $this->powerBonus + ($this->counters[self::PLUS_ONE] ?? 0);
     }
 
-    /** Endurance actuelle (bonus du tour compris). */
+    /** Endurance actuelle (bonus du tour et marqueurs +1/+1 compris). */
     public function currentToughness(): int
     {
-        return $this->toughness + $this->toughnessBonus;
+        return $this->toughness + $this->toughnessBonus + ($this->counters[self::PLUS_ONE] ?? 0);
     }
 
     /** Permanent : va sur le champ de bataille en se résolvant (créature, artefact) ou en étant joué (terrain). */
     public function isPermanent(): bool
     {
         return !$this->hasType(self::INSTANT) && !$this->hasType(self::SORCERY);
+    }
+
+    /**
+     * Propriétaire de la carte (CR 108.3), lu dans son id : `p<n>_c<k>` pour une carte de deck, `p<n>_t<k>` pour un jeton
+     * (propriétaire = joueur sous le contrôle duquel il est arrivé, CR 111.2). Ne change jamais, même quand le contrôle change
+     * (`GameState::gainControl()`) : c'est la zone du propriétaire qui reçoit la carte quand elle quitte le champ de bataille.
+     * null pour un id d'une autre forme (cartes construites à la main dans les tests) : le contrôleur fait alors foi.
+     */
+    public function ownerId(): ?int
+    {
+        return preg_match('/^p(\d+)_/', $this->id, $m) === 1 ? (int) $m[1] : null;
+    }
+
+    /** Propriétaire, ou `$controller` quand l'id ne le dit pas (voir ownerId()). */
+    public function ownerOr(int $controller): int
+    {
+        return $this->ownerId() ?? $controller;
     }
 
     public function isLand(): bool
@@ -237,9 +549,10 @@ final class CardInstance
         return $this->hasType(self::CREATURE);
     }
 
+    /** Lançable à tout moment où l'on a la priorité : éphémère ou carte avec flash. */
     public function isInstantSpeed(): bool
     {
-        return $this->hasType(self::INSTANT);
+        return $this->hasType(self::INSTANT) || in_array(self::FLASH, $this->keywords, true);
     }
 
     /** Représentation exposée dans les événements (tout est public dans ce simulateur). */
@@ -254,9 +567,10 @@ final class CardInstance
             'manaCost' => $this->isLand() ? null : (string) $this->manaCost(),
             'produces' => $this->produces,
             'abilities' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->abilities),
-            'adds' => $this->adds,
-            'effect' => $this->effect,
-            'amount' => $this->amount,
+            // Premier effet sous les clés historiques (format inchangé pour un sort à un effet) ; `effects` seulement à partir de deux.
+            'adds' => $this->effects[0]->adds ?? null,
+            'effect' => $this->effects[0]->effect ?? null,
+            'amount' => $this->effects[0]->amount ?? 0,
             'commander' => $this->commander,
             'power' => $this->power,
             'toughness' => $this->toughness,
@@ -264,12 +578,25 @@ final class CardInstance
             + ($this->triggers === [] ? [] : ['triggers' => array_map(static fn (TriggeredAbility $t) => $t->toArray(), $this->triggers)]) // idem
             + ($this->subtypes === [] ? [] : ['subtypes' => $this->subtypes]) // idem
             + ($this->keywords === [] ? [] : ['keywords' => $this->keywords]) // idem
-            + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]); // idem
+            + ($this->supertypes === [] ? [] : ['supertypes' => $this->supertypes]) // idem
+            // `effects` à partir de deux, ou quand le premier porte une précision absente des clés historiques (`target`, `powerLife` d'un exil).
+            + (count($this->effects) > 1 || ($this->effects[0] ?? null)?->isPrecise() === true ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)] : []) // idem
+            + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []) // idem
+            + ($this->altCost === null ? [] : ['altCost' => $this->altCost]) // idem
+            + ($this->noUntap ? ['noUntap' => true] : []) // idem
+            + ($this->extraCost === null ? [] : ['extraCost' => $this->extraCost]) // idem
+            + ($this->tappedAfterOwnTurn > 0 ? ['tappedAfterOwnTurn' => $this->tappedAfterOwnTurn] : []) // idem
+            + ($this->statics === [] ? [] : ['statics' => $this->statics]) // idem
+            + ($this->kicker === null ? [] : ['kicker' => $this->kicker]) // idem
+            + ($this->altCasts === [] ? [] : ['altCasts' => $this->altCasts]) // idem
+            + ($this->entersWithCounters === [] ? [] : ['entersWithCounters' => $this->entersWithCounters]) // idem
+            + ($this->replacements === [] ? [] : ['replacements' => array_map(static fn (ReplacementEffect $r) => $r->toArray(), $this->replacements)]); // idem
     }
 
     public function toArray(): array
     {
-        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus";
+        $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint)) . ($this->grantedAbilities === [] ? '' : '|g' . count($this->grantedAbilities))
+            . ($this->counters === [] ? '' : '|c' . json_encode($this->counters)) . ($this->dashed ? '|dash' : '') . ($this->original === null ? '' : '|o');
         if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
             return $this->arrayMemo;
         }
@@ -278,7 +605,12 @@ final class CardInstance
         // `boost` omis sans bonus : au-delà de 16 clés, PHP double la table (voir toPublic).
         return $this->arrayMemo = $this->toPublic() + ['tapped' => $this->tapped, 'damage' => $this->damage, 'enteredTurn' => $this->enteredTurn]
             + ($this->powerBonus !== 0 || $this->toughnessBonus !== 0 ? ['boost' => [$this->powerBonus, $this->toughnessBonus]] : [])
-            + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : []);
+            + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : [])
+            + ($this->imprint === [] ? [] : ['imprint' => $this->imprint])
+            + ($this->grantedAbilities === [] ? [] : ['granted' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->grantedAbilities)])
+            + ($this->counters === [] ? [] : ['counters' => $this->counters])
+            + ($this->dashed ? ['dashed' => true] : [])
+            + ($this->original === null ? [] : ['original' => $this->original->toArray()]);
     }
 
     public static function fromArray(array $d): self
@@ -305,9 +637,25 @@ final class CardInstance
             $d['subtypes'] ?? [],
             $d['keywords'] ?? [],
             $d['supertypes'] ?? [],
+            array_map([SpellEffect::class, 'fromArray'], $d['effects'] ?? []),
+            (int) ($d['untappedLifeCost'] ?? 0),
+            $d['altCost'] ?? null,
+            (bool) ($d['noUntap'] ?? false),
+            $d['extraCost'] ?? null,
+            (int) ($d['tappedAfterOwnTurn'] ?? 0),
+            $d['statics'] ?? [],
+            $d['kicker'] ?? null,
+            array_map([ReplacementEffect::class, 'fromArray'], $d['replacements'] ?? []),
+            $d['altCasts'] ?? [],
+            array_map('intval', $d['entersWithCounters'] ?? []),
         );
+        $card->dashed = (bool) ($d['dashed'] ?? false);
+        $card->original = isset($d['original']) ? self::fromArray($d['original']) : null;
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);
+        $card->imprint = $d['imprint'] ?? [];
+        $card->grantedAbilities = array_map([ActivatedAbility::class, 'fromArray'], $d['granted'] ?? []);
+        $card->counters = array_map('intval', $d['counters'] ?? []);
 
         return $card;
     }

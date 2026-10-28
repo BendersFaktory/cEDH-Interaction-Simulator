@@ -25,6 +25,24 @@ final class PlayerState
      * (CR 704.5b). Sérialisé sous `drewFromEmpty`, omis à faux.
      */
     public bool $drewFromEmpty = false;
+    /** Nombre de tours de ce joueur commencés (Starting Town : « votre premier, deuxième ou troisième tour »). Sérialisé sous `turnsTaken`, omis à 0. */
+    public int $turnsTaken = 0;
+    /**
+     * Zone d'exil du joueur (cartes dont il est le propriétaire), dans l'ordre d'arrivée. Seul chemin d'entrée :
+     * `GameState::exile()`. Sérialisée sous `exile`, omise quand vide (empreintes inchangées tant que rien n'exile).
+     *
+     * @var list<CardInstance>
+     */
+    public array $exile = [];
+
+    /**
+     * Couleurs (lettres WUBRG) que peut produire un terrain contrôlé par un adversaire, en `[lettre => true]` : branché par
+     * `GameState` (jamais sérialisé, l'état se lit toujours depuis les adversaires). Sans lui (joueur isolé), aucune.
+     * Sert aux capacités `ActivatedAbility::DYNAMIC_OPPONENT_LAND` (Fellwar Stone, Exotic Orchard).
+     *
+     * @var (\Closure(): array<string, true>)|null
+     */
+    public ?\Closure $opponentColors = null;
 
     /**
      * @param list<CardInstance> $library    index 0 = dessus de la bibliothèque
@@ -75,6 +93,84 @@ final class PlayerState
     public function findCastable(string $cardId): ?CardInstance
     {
         return $this->findInHand($cardId) ?? $this->findInCommand($cardId);
+    }
+
+    /**
+     * Copie indépendante (par la forme sérialisée) qui garde le branchement sur les adversaires : pour les simulations
+     * locales de l'IA, où une capacité de mana dynamique doit rester évaluable.
+     */
+    public function duplicate(): self
+    {
+        $copy = self::fromArray($this->toArray());
+        $copy->opponentColors = $this->opponentColors;
+
+        return $copy;
+    }
+
+    /**
+     * Couleurs (lettres) qu'une capacité de mana dynamique de `$card` autorise maintenant ; null si la capacité n'est pas dynamique
+     * (toutes ses alternatives sont permises).
+     *
+     * @return array<string, true>|null
+     */
+    public function allowedColors(CardInstance $card, ActivatedAbility $ability): ?array
+    {
+        if (!$ability->isDynamicMana()) {
+            return null;
+        }
+        if ($ability->spec === ActivatedAbility::DYNAMIC_LUCK) {
+            return ($card->counters[CardInstance::LUCK] ?? 0) > 0 ? array_fill_keys(['W', 'U', 'B', 'R', 'G'], true) : ['C' => true]; // Gemstone Caverns
+        }
+        if ($ability->spec === ActivatedAbility::DYNAMIC_IMPRINT) {
+            return array_fill_keys($card->imprint, true);
+        }
+        if ($ability->spec === ActivatedAbility::DYNAMIC_LEGENDARY) {
+            // Mox Amber : couleurs des créatures (et planeswalkers) légendaires que l'on contrôle.
+            $colors = [];
+            foreach ($this->battlefield as $c) {
+                if ($c->isCreature() && $c->isLegendary()) {
+                    foreach ($c->colors() as $symbol) {
+                        $colors[$symbol] = true;
+                    }
+                }
+            }
+
+            return $colors;
+        }
+
+        return $this->opponentColors === null ? [] : ($this->opponentColors)();
+    }
+
+    /** L'alternative `$option` de la capacité de mana est-elle utilisable (couleur autorisée si la capacité est dynamique) ? */
+    public function optionAllowed(CardInstance $card, ActivatedAbility $ability, int $option): bool
+    {
+        $allowed = $this->allowedColors($card, $ability);
+
+        return $allowed === null || isset($allowed[$ability->options[$option][0]->symbol()]);
+    }
+
+    /** Contrôle-t-il un commandant sur le champ de bataille (Fierce Guardianship) ? */
+    public function controlsCommander(): bool
+    {
+        foreach ($this->battlefield as $card) {
+            if ($card->commander) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Carte de la main d'id `$cardId`, sans la retirer. */
+    public function findHand(string $cardId): ?CardInstance
+    {
+        foreach ($this->hand as $card) {
+            if ($card->id === $cardId) {
+                return $card;
+            }
+        }
+
+        return null;
     }
 
     public function takeFromHand(string $cardId): ?CardInstance
@@ -162,14 +258,18 @@ final class PlayerState
      * Les sources dont le coût inclut un sacrifice (Treasure) restent engagées sur le champ de bataille : l'appelant les
      * sacrifie aussitôt avec `GameState::sacrifice($joueur, $result['sacrifice'])`.
      *
-     * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>, sacrifice: list<string>}
-     *         ids engagés, mana produit par les activations, mana pris dans la réserve préexistante, ids à sacrifier
+     * Les PV payés et les dégâts que s'infligent les sources (`lifeCost`, `selfDamage`) ne sont PAS appliqués ici : l'appelant
+     * les applique avec `GameState::hurtByMana($joueur, $result['pain'])` (événements à valeurs absolues).
+     *
+     * @return array{tapped: list<string>, paid: array<string, int>, fromPool: array<string, int>, sacrifice: list<string>, pain: list<array{source: string, lifeCost: int, selfDamage: int}>}
+     *         ids engagés, mana produit par les activations, mana pris dans la réserve préexistante, ids à sacrifier, blessures
      */
     public function payWithPlan(ManaPlan $plan): array
     {
         $tapped = [];
         $paid = [];
         $sacrifice = [];
+        $pain = [];
         foreach ($plan->taps as ['card' => $cardId, 'ability' => $abilityIndex, 'option' => $option]) {
             $card = $this->findOnBattlefield($cardId);
             $ability = $card?->abilities()[$abilityIndex] ?? null;
@@ -181,6 +281,9 @@ final class PlayerState
             }
             if ($ability->sacrifice) {
                 $sacrifice[] = $cardId;
+            }
+            if ($ability->lifeCost > 0 || $ability->selfDamage > 0) {
+                $pain[] = ['source' => $card->name, 'lifeCost' => $ability->lifeCost, 'selfDamage' => $ability->selfDamage];
             }
             foreach ($this->activateManaSource($card, $ability, $option) as $symbol => $n) {
                 $paid[$symbol] = ($paid[$symbol] ?? 0) + $n;
@@ -228,7 +331,7 @@ final class PlayerState
             }
         }
 
-        return ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice];
+        return ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain];
     }
 
     public function findOnBattlefield(string $cardId): ?CardInstance
@@ -247,7 +350,7 @@ final class PlayerState
     {
         $ids = [];
         foreach ($this->battlefield as $card) {
-            if ($card->tapped) {
+            if ($card->tapped && !$card->noUntap) {
                 $card->tapped = false;
                 $ids[] = $card->id;
             }
@@ -273,7 +376,9 @@ final class PlayerState
             'commanderDamage' => $this->commanderDamage,
             'pool' => $this->pool->toArray(),
         ] + ($this->pool->restrictedToArray() === [] ? [] : ['poolRestricted' => $this->pool->restrictedToArray()])
-            + ($this->drewFromEmpty ? ['drewFromEmpty' => true] : []);
+            + ($this->drewFromEmpty ? ['drewFromEmpty' => true] : [])
+            + ($this->turnsTaken > 0 ? ['turnsTaken' => $this->turnsTaken] : [])
+            + ($this->exile === [] ? [] : ['exile' => $map($this->exile)]);
     }
 
     public static function fromArray(array $d): self
@@ -293,6 +398,8 @@ final class PlayerState
         );
         $p->lost = (bool) $d['lost'];
         $p->drewFromEmpty = (bool) ($d['drewFromEmpty'] ?? false);
+        $p->turnsTaken = (int) ($d['turnsTaken'] ?? 0);
+        $p->exile = $map($d['exile'] ?? []);
 
         return $p;
     }
