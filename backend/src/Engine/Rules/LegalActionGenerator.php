@@ -24,6 +24,7 @@ use App\Engine\Action\Mulligan;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PregameChoice;
 use App\Engine\Action\PutBack;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Card\SpellEffect;
@@ -82,6 +83,19 @@ final class LegalActionGenerator
             return [];
         }
         $p = $s->player($playerId);
+        if ($sel['kind'] === 'replace' && ($sel['instead'] ?? null) === \App\Engine\Card\ReplacementEffect::COPY_CREATURE) {
+            // Mockingbird : arriver telle quelle, ou comme une copie d'une créature de valeur de mana ≤ mana dépensé (une par nom).
+            $actions = [new ReplaceChoice($playerId)];
+            $seen = [];
+            foreach ($s->copyCandidates((int) $sel['maxValue']) as $card) {
+                if (!isset($seen[$card->name])) {
+                    $seen[$card->name] = true;
+                    $actions[] = new ReplaceChoice($playerId, null, $card->id);
+                }
+            }
+
+            return $actions;
+        }
         if ($sel['kind'] === 'replace') {
             $actions = [new ReplaceChoice($playerId)];
             $seen = [];
@@ -196,7 +210,10 @@ final class LegalActionGenerator
         // Terrain : action spéciale, une par tour, timing sorcery.
         if ($sorcerySpeed && $s->landsPlayed < 1) {
             $seen = [];
-            foreach ($p->hand as $card) {
+            // Terrains exilés jouables (Opposition Agent : « play ») ; ignorés sans permission, le cas courant reste rapide.
+            $exiledLands = $s->exilePlays === [] ? [] : array_map(static fn (array $e) => $e['card'],
+                array_filter($s->exilePlayable($playerId), static fn (array $e) => $e['lands'] && $e['card']->isLand()));
+            foreach ([...$p->hand, ...$exiledLands] as $card) {
                 if ($card->isLand() && !isset($seen[$card->name])) {
                     $seen[$card->name] = true;
                     if ($card->untappedLifeCost === 0) {
@@ -217,12 +234,15 @@ final class LegalActionGenerator
         $mana = ManaPayment::context($p, $s->turn); // champ de bataille scanné une seule fois pour tous les sorts et capacités
         // Interdictions (Silence, Lavinia, Voice of Victory…) : vérifiées seulement s'il y en a, le cas courant reste rapide.
         $restricted = $s->castLocks !== [] || $s->noncreatureLocks !== [] || self::opponentsHaveStatics($s, $playerId);
-        foreach ([...$p->hand, ...$p->command] as $card) {
+        $exiled = $s->exilePlays === [] ? [] : array_map(static fn (array $e) => $e['card'], $s->exilePlayable($playerId)); // Ragavan, Opposition Agent
+        // Flashback (Strike It Rich) : depuis le cimetière, seulement pour son coût de flashback.
+        $graveyard = array_values(array_filter($p->graveyard, static fn (CardInstance $c) => isset($c->altCasts[CardInstance::CAST_FLASHBACK])));
+        foreach ([...$p->hand, ...$p->command, ...$exiled, ...$graveyard] as $card) {
             if ($card->isLand() || (!$sorcerySpeed && !$s->castsAtInstantSpeed($playerId, $card)) || ($restricted && !$s->canCast($playerId, $card))) {
                 continue;
             }
             // Modes de paiement : le coût de mana (si payable avec les terrains non engagés : couleurs, hybrides), puis les coûts alternatifs.
-            $cost = $p->castCost($card);
+            $cost = $s->castCostFor($playerId, $card);
             $modes = ManaPayment::plan($p, $cost, 0, $s->turn, null, $card, $mana) === null ? [] : [null];
             if (($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander())
                 || ($card->altCost === CardInstance::ALT_OPPONENT_THREE_SPELLS && PriorityManager::opponentCastThree($s, $playerId))) {
@@ -252,6 +272,16 @@ final class LegalActionGenerator
             if ($card->islandsToReturn() > 0) {
                 foreach (self::islandChoices($p, $card->islandsToReturn()) as $ids) {
                     $modes[] = CastSpell::ALT_RETURN . implode(',', $ids);
+                }
+            }
+            $inGraveyard = $graveyard !== [] && in_array($card, $graveyard, true);
+            if ($inGraveyard) {
+                $modes = [];
+            }
+            foreach ($card->altCasts as $kind => $altCost) {
+                if (($kind === CardInstance::CAST_FLASHBACK) === $inGraveyard && ($kind !== CardInstance::CAST_DASH || $p->findInHand($card->id) !== null)
+                    && ManaPayment::plan($p, ManaCost::parse($altCost), 0, $s->turn, null, $card, $mana) !== null) {
+                    $modes[] = $kind; // Dash : seulement depuis la main
                 }
             }
             if ($modes === []) {
@@ -294,6 +324,20 @@ final class LegalActionGenerator
         }
 
         return [...$actions, ...$this->abilityActions($s, $p, $mana)];
+    }
+
+    /** Paires de joueurs en vie distincts (deux cibles « target players ») : `[['player:0', 'player:1'], …]`. @return list<list<string>> */
+    private static function playerPairs(GameState $s): array
+    {
+        $alive = $s->alivePlayerIds();
+        $pairs = [];
+        foreach ($alive as $i => $a) {
+            foreach (array_slice($alive, $i + 1) as $b) {
+                $pairs[] = ['player:' . $a, 'player:' . $b];
+            }
+        }
+
+        return $pairs;
     }
 
     /** Un adversaire de `$playerId` contrôle-t-il un permanent à capacité statique (Lavinia, Voice of Victory) ? */
@@ -409,6 +453,8 @@ final class LegalActionGenerator
                 $options = $ability->isManaAbility ? AbilityManager::allowedOptions($p, $card, $ability) : [0];
                 $targetSets = match ($ability->effect) {
                     'damage' => array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds()),
+                    'two_players_draw' => self::playerPairs($s), // Gleaming Splendor
+                    'tutor_give_control' => array_map(static fn (string $t) => [$t], self::libraryTargets($p)), // Wishclaw Talisman
                     'fetch' => self::fetchTargets($p, $ability),
                     // Channel : un artefact, une créature ou un enchantement (pas un terrain), de n'importe quel joueur en vie.
                     'bounce' => self::bounceTargets($s),
@@ -456,7 +502,21 @@ final class LegalActionGenerator
                 : [new KeepHand($playerId)];
         }
         if (MulliganManager::toBottom($s, $playerId) === 0) {
-            return [];
+            $source = MulliganManager::pregameCard($s, $playerId);
+            if ($source === null) {
+                return [];
+            }
+            // Gemstone Caverns : la garder, ou l'exiler contre une autre carte de la main (une par nom).
+            $actions = [new PregameChoice($playerId, $source->id, null)];
+            $seen = [];
+            foreach ($s->player($playerId)->hand as $card) {
+                if ($card->id !== $source->id && !isset($seen[$card->name])) {
+                    $seen[$card->name] = true;
+                    $actions[] = new PregameChoice($playerId, $source->id, $card->id);
+                }
+            }
+
+            return $actions;
         }
 
         return array_map(static fn (CardInstance $c) => new BottomCard($playerId, $c->id), $s->player($playerId)->hand);
@@ -493,7 +553,8 @@ final class LegalActionGenerator
             $ability = $pending->ability();
             $targetSets = $ability->targetsPlayer()
                 ? array_map(static fn (int $id) => ['player:' . $id], $s->alivePlayerIds())
-                : ($pending->opponent !== null && $ability->effect === 'draw_unless' ? [['player:' . $pending->opponent]] : [[]]); // Rhystic Study : le lanceur paiera ; Kraum ne cible pas
+                : ($ability->targetsOpponent() ? array_map(static fn (int $id) => ['player:' . $id], array_values(array_diff($s->alivePlayerIds(), [$playerId]))) // Tataru Taru
+                : ($pending->opponent !== null && in_array($ability->effect, ['draw_unless', 'treasure_exile_top'], true) ? [['player:' . $pending->opponent]] : [[]])); // Rhystic Study : le lanceur paiera ; Ragavan : le joueur blessé ; Kraum ne cible pas
             if ($ability->effect === 'counter_spell' && $pending->stackId !== null) {
                 $targetSets = [['stack:' . $pending->stackId]]; // Lavinia : le sort lancé sans mana
             }

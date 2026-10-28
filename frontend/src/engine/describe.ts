@@ -42,7 +42,7 @@ export function describeEvent(e: GameEvent): string {
     case 'PriorityPassed':
       return `J${p.player} passe`
     case 'LandPlayed':
-      return `J${p.player} joue ${p.card.name}${p.tapped ? ' (engagé)' : ''}`
+      return `J${p.player} joue ${p.card.name}${p.fromExile ? ` depuis l'exil de J${p.owner}` : ''}${p.tapped ? ' (engagé)' : ''}`
     case 'LandFetched':
       return `J${p.player} cherche ${p.card.name}${p.tapped ? ' (engagé)' : ''}`
     case 'Scried':
@@ -55,7 +55,15 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} paie ${p.amount} PV (${p.source}) → ${p.life}`
     case 'SpellCast': {
       const t = (p.targets as string[]).map(target).join(', ')
-      const from = p.fromCommand ? ' depuis la zone de commandement' : ''
+      const from = p.fromCommand
+        ? ' depuis la zone de commandement'
+        : p.fromExile
+          ? ` depuis l'exil de J${p.owner}`
+          : p.altCast === 'flashback'
+            ? ' depuis le cimetière (flashback)'
+            : p.altCast === 'dash'
+              ? ' (dash)'
+              : ''
       const paid = p.manaCost ? ` (coût ${p.manaCost}${p.x !== undefined && p.manaCost.includes('{X}') ? `, X=${p.x}` : ''})` : p.fromCommand ? ` (coût ${p.cost})` : ''
       return `J${p.player} lance ${p.card.name}${from}${paid}${t ? ` → ${t}` : ''}`
     }
@@ -87,6 +95,7 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card.name} (J${p.controller}) est contré${where[p.destination] ?? ''}`
     }
     case 'ReplacementApplied':
+      if (p.copyOf) return `${p.card.name} (J${p.player}) : Mockingbird arrive comme une copie, Bird volant en plus`
       return p.discarded ? `J${p.player} défausse ${p.discarded.name} : ${p.card.name} arrive sur le champ de bataille` : `${p.card.name} (J${p.player}) : aucun terrain défaussé, va au cimetière`
     case 'SpellCopied': {
       const t = (p.targets as string[]).map(target).join(', ')
@@ -140,6 +149,10 @@ export function describeEvent(e: GameEvent): string {
       return `${p.card} subit ${p.amount} dégâts (${p.damage} marqués)`
     case 'CreatureDied':
       return `${p.card.name} (J${p.player}) meurt${p.destination === 'command' ? ' et retourne en zone de commandement' : ''}`
+    case 'ExilePlayGranted':
+      return `J${p.player} peut ${p.lands ? 'jouer' : 'lancer'} ${p.card.name} (exil de J${p.owner}) ${p.until === 'turn' ? "jusqu'à la fin du tour" : "tant qu'elle reste exilée"} (${p.source})`
+    case 'PermanentControlChanged':
+      return p.source === 'player_left' ? `${p.card.name} revient à J${p.player}, son propriétaire` : `J${p.player} prend le contrôle de ${p.card.name} (J${p.from}) par ${p.source}`
     case 'PermanentDestroyed':
       return `${p.card.name} (J${p.player}) est détruit par ${p.source}`
     case 'AbilitiesGranted':
@@ -154,6 +167,10 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} exile ${p.exiled} (imprint)${p.colors.length ? `, couleurs ${p.colors.join('')}` : ', sans couleur'}`
     case 'CommanderReturned':
       return `${p.card.name} (J${p.player}) retourne en zone de commandement`
+    case 'CountersRemoved':
+      return `${p.card} (J${p.player}) : un marqueur ${p.kind} retiré, ${p.count} restant${p.count > 1 ? 's' : ''}`
+    case 'PregameCardPlaced':
+      return `J${p.player} commence la partie avec ${p.card.name} en jeu`
     case 'CountersAdded':
       return `${p.card} (J${p.player}) : ${p.count} marqueur${p.count > 1 ? 's' : ''} ${p.kind === 'age' ? "d'âge" : p.kind}${p.power !== undefined ? `, ${p.power}/${p.toughness}` : ''}`
     case 'CreatureBoosted':

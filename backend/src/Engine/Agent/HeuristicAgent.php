@@ -20,7 +20,9 @@ use App\Engine\Action\KeepLegend;
 use App\Engine\Action\ScryArrange;
 use App\Engine\Action\Mulligan;
 use App\Engine\Action\PayCost;
+use App\Engine\Action\PassPriority;
 use App\Engine\Action\PlayLand;
+use App\Engine\Action\PregameChoice;
 use App\Engine\Action\PutBack;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Action\ReplaceChoice;
@@ -90,6 +92,22 @@ final class HeuristicAgent implements PlayerAgent
 
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
+        if ($state->exilePlays !== [] || $state->player($playerId)->graveyard !== []) {
+            // Cartes jouables hors de la main et de la zone de commandement (exil : Ragavan, Opposition Agent ; cimetière :
+            // Flashback) : les heuristiques ne regardent que la main et la zone de commandement, elles décident sans elles ;
+            // si elles passeraient dans sa phase principale pile vide, l'IA joue la première de ces cartes (une permission de
+            // Ragavan tombe à la fin du tour).
+            $p = $state->player($playerId);
+            $elsewhere = static fn (Action $a) => ($a instanceof CastSpell && $p->findCastable($a->cardId) === null)
+                || ($a instanceof PlayLand && $p->findInHand($a->cardId) === null);
+            $outside = array_values(array_filter($legal, $elsewhere));
+            if ($outside !== []) {
+                $choice = $this->decide($state, $playerId, array_values(array_filter($legal, static fn (Action $a) => !$elsewhere($a))));
+                $ownMain = $state->activePlayer === $playerId && $state->phase->isMain() && $state->stack === [];
+
+                return $choice instanceof PassPriority && $ownMain ? $outside[0] : $choice;
+            }
+        }
         if ($state->selection !== null) {
             return $this->selectionDecision($state, $playerId, $legal);
         }
@@ -166,7 +184,7 @@ final class HeuristicAgent implements PlayerAgent
         // s'en charge.
         $ping = null;
         foreach ($legal as $action) {
-            if ($action instanceof ActivateAbility && !$action->mana
+            if ($action instanceof ActivateAbility && !$action->mana && $this->ability($state, $action)?->effect === 'damage'
                 && ($action->costChoices === [] || $this->battlefieldCard($state, $playerId, $action->costChoices[0])?->token)
                 && ($target = $this->playerTarget($action)) !== null && $target !== $playerId) {
                 $life = $state->player($target)->life;
@@ -386,6 +404,14 @@ final class HeuristicAgent implements PlayerAgent
     private function selectionDecision(GameState $state, int $playerId, array $legal): Action
     {
         // Mox Diamond : défausser le terrain le plus en double dans la main (le premier à égalité) plutôt que perdre le Mox.
+        // Mockingbird : la créature copiable la plus forte (valeur de mana + force), sinon telle quelle.
+        $copies = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ReplaceChoice && $a->copyId !== null));
+        if ($copies !== []) {
+            $score = static fn (ReplaceChoice $r) => ($c = $state->findPermanent((string) $r->copyId)) === null ? -1 : $c->manaCost()->manaValue() + $c->currentPower();
+            usort($copies, static fn (ReplaceChoice $a, ReplaceChoice $b) => $score($b) <=> $score($a));
+
+            return $copies[0];
+        }
         $replaces = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ReplaceChoice && $a->discardId !== null));
         if ($replaces !== []) {
             $hand = $state->player($playerId)->hand;
@@ -952,6 +978,11 @@ final class HeuristicAgent implements PlayerAgent
         if ($bottoms !== []) {
             return $this->discard($state, $bottoms, $playerId);
         }
+        // Gemstone Caverns : toujours en jeu (un mana de plus dès le premier tour), en exilant la carte qu'elle défausserait.
+        $pregame = array_values(array_filter($legal, static fn (Action $a) => $a instanceof PregameChoice && $a->cardId !== null));
+        if ($pregame !== []) {
+            return $this->discard($state, $pregame, $playerId);
+        }
         $lands = count(array_filter($state->player($playerId)->hand, static fn (CardInstance $c) => $c->isLand()));
         $taken = $state->mulligan[$playerId]['taken'] ?? 0;
         $wanted = ($lands < 2 || $lands > 5) && $taken < 2 ? Mulligan::class : KeepHand::class;
@@ -975,7 +1006,7 @@ final class HeuristicAgent implements PlayerAgent
      *  4. on garde en dernier : un terrain utile (-1, ou -1000 s'il y en a moins de 4 en jeu) et un contresort (-500).
      * Égalité : plus petit id.
      *
-     * @param list<Discard|BottomCard|PutBack> $discards
+     * @param list<Discard|BottomCard|PutBack|PregameChoice> $discards
      */
     private function discard(GameState $state, array $discards, int $playerId): Action
     {

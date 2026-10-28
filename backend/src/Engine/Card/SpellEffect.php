@@ -42,6 +42,8 @@ use App\Engine\Game\CardInstance;
  * `nonland`, `opponent_creature` et `opponent_nonland` ; `chain` (Chain of Vapor) : le contrôleur du permanent renvoyé peut
  * sacrifier un terrain pour copier le sort (`GameState::$selection`, kind `chain`). `kicked` : l'effet n'a lieu que si le kicker
  * a été payé (Orim's Chant).
+ * Étape 13 : `treasure` crée `amount` Treasure (0 = 1) pour le lanceur, ou, avec `target` = `spell_controller`, pour le contrôleur
+ * du sort visé par le sort (An Offer You Can't Refuse : « its controller creates two Treasure tokens » ; rien si le sort fizzle).
  */
 final class SpellEffect
 {
@@ -66,6 +68,8 @@ final class SpellEffect
     /** Destinations d'un sort contré autres que le cimetière (`counterTo`). */
     public const COUNTER_EXILE = 'exile';
     public const COUNTER_LIBRARY_TOP = 'library_top';
+    /** `target` d'un effet `treasure` : les jetons vont au contrôleur du sort visé par le sort (An Offer You Can't Refuse) ; `amount` = nombre (0 = 1). */
+    public const TREASURE_SPELL_CONTROLLER = 'spell_controller';
 
     public function __construct(
         public readonly string $effect,
@@ -97,6 +101,7 @@ final class SpellEffect
             'exile', 'bounce', 'destroy' => in_array($target, self::PERMANENT_TARGETS, true),
             'counter', 'steal' => $target !== null && array_diff(explode('|', $target), self::COUNTER_TARGETS) === [],
             'redirect' => in_array($target, self::REDIRECT_TARGETS, true),
+            'treasure' => $target === self::TREASURE_SPELL_CONTROLLER,
             default => false,
         };
         if ($target !== null && !$validTarget) {

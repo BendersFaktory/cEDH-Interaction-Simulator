@@ -41,8 +41,11 @@ final class AbilityManager
         if ($ability->upkeepOnly && !($p->id === $s->activePlayer && $s->phase === Phase::Upkeep)) {
             return false;
         }
-        if (!self::requirementsMet($p, $ability)) {
-            return false; // Mox Opal sans métalcraft
+        if (!self::requirementsMet($p, $ability, $s)) {
+            return false; // Mox Opal sans métalcraft, Wishclaw Talisman hors de son tour
+        }
+        if ($ability->removeCounter !== '' && ($card->counters[$ability->removeCounter] ?? 0) < 1) {
+            return false; // Wishclaw Talisman sans marqueur de souhait
         }
         if ($ability->isDynamicMana() && self::allowedOptions($p, $card, $ability) === []) {
             return false; // aucune couleur utilisable (Fellwar Stone sans terrain adverse, Chrome Mox sans carte colorée exilée)
@@ -65,10 +68,13 @@ final class AbilityManager
     }
 
     /** Condition d'activation de la capacité remplie (`requires`) : métalcraft = trois artefacts ou plus (Mox Opal compris). */
-    public static function requirementsMet(PlayerState $p, ActivatedAbility $ability): bool
+    public static function requirementsMet(PlayerState $p, ActivatedAbility $ability, ?GameState $s = null): bool
     {
         if ($ability->requires === ActivatedAbility::REQ_METALCRAFT) {
             return count(array_filter($p->battlefield, static fn (CardInstance $c) => $c->hasType(CardInstance::ARTIFACT))) >= 3;
+        }
+        if ($ability->requires === ActivatedAbility::REQ_YOUR_TURN) {
+            return $s !== null && $p->id === $s->activePlayer; // Wishclaw Talisman
         }
 
         return true;
@@ -241,6 +247,9 @@ final class AbilityManager
 
         if ($ability->tap) {
             $card->tapped = true;
+        }
+        if ($ability->removeCounter !== '') {
+            $s->removeCounter($a->player(), $card, $ability->removeCounter); // Wishclaw Talisman, avant la copie mise sur la pile
         }
         // Copie de la source : l'objet sur la pile ne doit pas partager l'état de la carte du champ de bataille (sinon un
         // bonus ultérieur le modifierait en partie réelle mais pas dans un état reconstruit depuis une ancre).

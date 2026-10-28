@@ -8,6 +8,8 @@ use App\Engine\Action\Action;
 use App\Engine\Action\BottomCard;
 use App\Engine\Action\KeepHand;
 use App\Engine\Action\Mulligan;
+use App\Engine\Action\PregameChoice;
+use App\Engine\Game\CardInstance;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PriorityState;
@@ -24,6 +26,10 @@ use App\Engine\Game\PriorityState;
  * Les décisions sont séquentielles et non simultanées comme le prévoit CR 103.5 : c'est sans effet sur des agents qui ne
  * regardent que leur propre main. L'état tient dans `GameState::$mulligan` ; le nombre de cartes à mettre au fond se
  * recalcule (voir `toBottom`), ce qui rend la reprise après DecisionRequired triviale.
+ *
+ * Une fois toutes les mains gardées, un joueur qui n'est pas le premier joueur et qui a en main une carte
+ * `STATIC_PREGAME_LUCK` (Gemstone Caverns) décide de la mettre en jeu, avec un marqueur de chance, en exilant une autre
+ * carte de sa main, ou de la garder (`PregameChoice`, une décision par carte ; `mulligan[id]['pregame']` les retient).
  */
 final class MulliganManager
 {
@@ -70,6 +76,7 @@ final class MulliganManager
             }
 
             match (true) {
+                $action instanceof PregameChoice => $this->pregame($s, $playerId, $action),
                 $action instanceof Mulligan => $this->mulligan($s, $playerId),
                 $action instanceof KeepHand => $this->keep($s, $playerId),
                 $action instanceof BottomCard => $this->bottom($s, $playerId, $action->cardId),
@@ -91,8 +98,57 @@ final class MulliganManager
                 return $id;
             }
         }
+        foreach ($ordered as $id) {
+            if (self::pregameCard($s, $id) !== null) {
+                return $id;
+            }
+        }
 
         return null;
+    }
+
+    /**
+     * Carte d'avant-partie (Gemstone Caverns) encore à décider pour ce joueur : toutes les mains gardées et mises au fond, pas
+     * premier joueur, au moins une autre carte en main à exiler ; null sinon.
+     */
+    public static function pregameCard(GameState $s, int $playerId): ?CardInstance
+    {
+        if ($s->mulligan === null || $playerId === $s->activePlayer || in_array(false, array_column($s->mulligan, 'kept'), true)) {
+            return null;
+        }
+        foreach ($s->alivePlayerIds() as $id) {
+            if (self::toBottom($s, $id) > 0) {
+                return null;
+            }
+        }
+        $hand = $s->player($playerId)->hand;
+        if (count($hand) < 2) {
+            return null;
+        }
+        foreach ($hand as $card) {
+            if (in_array(CardInstance::STATIC_PREGAME_LUCK, $card->statics, true) && !in_array($card->id, $s->mulligan[$playerId]['pregame'] ?? [], true)) {
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
+    /** Gemstone Caverns : en jeu avec un marqueur de chance, la carte choisie exilée de la main (`PregameCardPlaced`) ; ou gardée. */
+    private function pregame(GameState $s, int $playerId, PregameChoice $a): void
+    {
+        $s->mulligan[$playerId]['pregame'][] = $a->sourceId;
+        if ($a->cardId === null) {
+            return;
+        }
+        $p = $s->player($playerId);
+        $source = $p->takeFromHand($a->sourceId) ?? throw new \DomainException("Carte d'avant-partie absente de la main : $a->sourceId");
+        $exiled = $p->takeFromHand($a->cardId) ?? throw new \DomainException("Carte à exiler absente de la main : $a->cardId");
+        $source->enteredTurn = $s->turn;
+        $p->battlefield[] = $source;
+        $s->emit('PregameCardPlaced', ['player' => $playerId, 'card' => $source->toPublic(), 'hand' => count($p->hand)]);
+        $s->addCounters($playerId, $source, CardInstance::LUCK, 1);
+        $s->exileFromHand($playerId, $exiled, $source->name);
     }
 
     private function mulligan(GameState $s, int $playerId): void

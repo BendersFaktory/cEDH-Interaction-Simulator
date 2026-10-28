@@ -121,7 +121,7 @@ final class StackResolver
                 'damage' => $this->damage($s, $item->targets[0] ?? '', $ability->amount, $card->name),
                 'draw' => $this->draw($s, $item->controller, $ability->amount),
                 'token' => $this->tokens($s, $item->controller, $ability->spec, $ability->amount),
-                'treasure' => $this->treasures($s, $item->controller, $ability->amount),
+                'treasure' => $this->treasures($s, $item->controller, $ability->amount, $ability->spec === TriggeredAbility::TREASURE_TAPPED),
                 'pump' => $this->pump($s, $item->controller, $card->id, $item->ability),
                 'fetch' => $this->fetch($s, $item->controller, $item->ability, $item->targets),
                 'untap' => $this->untap($s, $item->controller, $card->id),
@@ -141,10 +141,16 @@ final class StackResolver
                 'cumulative_upkeep' => $this->cumulativeUpkeep($s, $item->controller, $card->id, $paid), // Mystic Remora
                 'each_draw' => $this->eachDraw($s, $ability->amount), // Faerie Mastermind
                 'pay_life_draw' => $this->payLifeDraw($s, $item->controller, $card->name), // Tymna the Weaver
+                'treasure_exile_top' => $this->treasureExileTop($s, $item->controller, $item->targets[0] ?? '', $card->name), // Ragavan
+                'lose_life_treasure' => $this->loseLifeTreasure($s, $item->controller, $ability->amount, $card->name), // Lotho
+                'draw_opponent_may' => $this->drawOpponentMay($s, $item->controller, $ability->amount, $item->targets[0] ?? ''), // Tataru Taru
+                'tutor_give_control' => $this->tutorGiveControl($s, $item->controller, $card->id, $item->targets[0] ?? '', $card->name), // Wishclaw Talisman
+                'two_players_draw' => $this->targetPlayersDraw($s, $item->targets, $ability->amount), // Gleaming Splendor
                 'storm' => $this->stormCopies($s, $item),
                 'counter_spell' => $this->counter($s, $item->targets[0] ?? '', $item, new SpellEffect('counter'), null), // Lavinia
                 'mobilize' => $this->mobilize($s, $item),
                 'sacrifice_tokens' => $this->sacrificeTokens($s, $item->controller, $ability->spec),
+                'return_dashed' => $this->returnDashed($s, $ability->spec),
                 'pump_untap' => $this->pumpUntap($s, $item->controller, $ability->spec), // Valley Floodcaller
                 default => null,
             };
@@ -160,8 +166,15 @@ final class StackResolver
         } elseif ($card->isPermanent() && ($replacement = $s->replacementFor($card, ReplacementEffect::ENTERS)) !== null) {
             $destination = 'replaced';
         } elseif ($card->isPermanent()) {
+            $card->dashed = $item->altCast === CardInstance::CAST_DASH;
             $s->enterBattlefield($item->controller, $card);
             $destination = 'battlefield';
+            if ($card->dashed) {
+                // Dash (CR 702.109a) : renvoyée dans la main de son propriétaire au début de la prochaine étape de fin.
+                $s->addDelayedTrigger($item->controller, $card, new TriggeredAbility(TriggeredAbility::NEXT_END, 'return_dashed', spec: $card->id));
+            }
+        } elseif ($item->flashback()) {
+            $destination = $s->exile($item->ownerId(), $card); // Flashback (CR 702.34a)
         } else {
             $destination = $s->sendToGraveyard($item->ownerId(), $card);
         }
@@ -173,7 +186,7 @@ final class StackResolver
             'destination' => $destination,
         ] + ($item->ownerId() !== $item->controller ? ['owner' => $item->ownerId()] : []));
         if ($replacement !== null) {
-            $s->replaceEntering($item->controller, $item->ownerId(), $card, $replacement);
+            $s->replaceEntering($item->controller, $item->ownerId(), $card, $replacement, $card->manaCost()->manaValue($item->x)); // mana dépensé ≈ valeur de mana avec X (Mockingbird)
         }
 
         // CR 608.2b : une cible par effet ciblé, dans l'ordre du texte. Si TOUTES les cibles sont devenues illégales, le sort ne
@@ -188,6 +201,7 @@ final class StackResolver
             }
         }
 
+        $spellController = self::targetSpellController($s, $effects, $targets);
         // Effets dans l'ordre du texte (CR 608.2c). Une sélection (Brainstorm, Ponder) suspend la résolution : les pioches qui
         // suivent attendent la décision (`GameState::$selection`, `draw`).
         foreach ($effects as $i => $effect) {
@@ -209,7 +223,7 @@ final class StackResolver
                 'grant_sac_mana' => $this->grantSacrificeMana($s, $item->controller, (string) $effect->adds),
                 'bounce' => $this->bounceTarget($s, $target, $effect, $item),
                 'destroy' => $this->destroyTarget($s, $target, $effect, $card->name),
-                'treasure' => $s->createTreasure($item->controller),
+                'treasure' => $this->treasures($s, $effect->target === SpellEffect::TREASURE_SPELL_CONTROLLER ? $spellController ?? $item->controller : $item->controller, max(1, $effect->amount)),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
                 'exile' => $this->exileTarget($s, $target, $effect, $card->name),
                 'tutor' => $this->tutor($s, $item->controller, $target, $effect, $card->name),
@@ -537,6 +551,21 @@ final class StackResolver
         }
     }
 
+    /**
+     * Dash (Ragavan) : le permanent `$cardId` retourne dans la main de son propriétaire s'il est encore sur le champ de bataille
+     * en tant que l'objet arrivé par Dash (`dashed`), quel que soit son contrôleur actuel ; sinon rien (CR 400.7).
+     */
+    private function returnDashed(GameState $s, string $cardId): void
+    {
+        foreach ($s->players as $p) {
+            if (($card = $p->findOnBattlefield($cardId)) !== null && $card->dashed) {
+                $s->returnToHand($p->id, $cardId, 'Dash');
+
+                return;
+            }
+        }
+    }
+
     /** Valley Floodcaller : ses créatures des sous-types `$spec` gagnent +1/+1 jusqu'à la fin du tour et se dégagent. */
     private function pumpUntap(GameState $s, int $player, string $spec): void
     {
@@ -645,6 +674,69 @@ final class StackResolver
     }
 
     /** « Chaque joueur pioche N cartes » (Faerie Mastermind), dans l'ordre du tour à partir du joueur actif. */
+    /**
+     * Ragavan : son contrôleur crée un Treasure, puis la carte du dessus de la bibliothèque du joueur blessé est exilée (zone
+     * d'exil de ce joueur, son propriétaire) et le contrôleur peut la lancer jusqu'à la fin du tour (pas la jouer : un terrain reste exilé).
+     */
+    private function treasureExileTop(GameState $s, int $player, string $target, string $source): void
+    {
+        $s->createTreasure($player);
+        $victim = str_starts_with($target, 'player:') ? $s->player((int) substr($target, 7)) : null;
+        if ($victim === null || $victim->lost || $victim->library === []) {
+            return;
+        }
+        $card = array_shift($victim->library);
+        $s->exile($victim->id, $card);
+        $s->emit('CardExiled', ['player' => $victim->id, 'card' => $card->toPublic(), 'from' => 'library', 'destination' => 'exile', 'source' => $source,
+            'exile' => count($victim->exile), 'library' => count($victim->library)]);
+        $s->grantExilePlay($player, $card, GameState::EXILE_PLAY_TURN, $source);
+    }
+
+    /** Lotho, Corrupt Shirriff : son contrôleur perd `$n` PV et crée un Treasure. */
+    private function loseLifeTreasure(GameState $s, int $player, int $n, string $source): void
+    {
+        $s->loseLife($player, $n, $source);
+        $s->createTreasure($player);
+    }
+
+    /**
+     * Tataru Taru : son contrôleur pioche `$n` cartes, puis l'adversaire ciblé « may draw a card » : il pioche, sauf si sa
+     * bibliothèque est vide (piocher le ferait perdre), comme le « you may » de Rhystic Study ; rien s'il n'est plus en vie.
+     */
+    private function drawOpponentMay(GameState $s, int $player, int $n, string $target): void
+    {
+        $this->draw($s, $player, $n);
+        $opponent = str_starts_with($target, 'player:') ? (int) substr($target, 7) : null;
+        if ($opponent !== null && !$s->player($opponent)->lost && $s->player($opponent)->library !== []) {
+            $this->draw($s, $opponent, 1);
+        }
+    }
+
+    /**
+     * Wishclaw Talisman : son contrôleur cherche la carte `$target` (main, puis mélange), puis « an opponent gains control of »
+     * la source : l'adversaire en vie suivant dans l'ordre du tour (approximation : le choix de l'adversaire n'est pas proposé),
+     * si la source est encore sur son champ de bataille.
+     */
+    private function tutorGiveControl(GameState $s, int $player, string $sourceId, string $target, string $source): void
+    {
+        $this->tutor($s, $player, $target, new SpellEffect('tutor'), $source);
+        $opponent = $s->nextAlive($player);
+        if ($opponent !== $player) {
+            $s->gainControl($player, $sourceId, $opponent, $source);
+        }
+    }
+
+    /** Gleaming Splendor : chaque joueur ciblé encore en vie pioche `$n` cartes, dans l'ordre des cibles. */
+    private function targetPlayersDraw(GameState $s, array $targets, int $n): void
+    {
+        foreach ($targets as $target) {
+            $id = (int) substr($target, 7);
+            if (str_starts_with($target, 'player:') && !$s->player($id)->lost) {
+                $this->draw($s, $id, $n);
+            }
+        }
+    }
+
     private function eachDraw(GameState $s, int $n): void
     {
         $id = $s->activePlayer;
@@ -754,7 +846,11 @@ final class StackResolver
         foreach ($p->library as $i => $card) {
             if ($card->id === $id && $ability->fetches($card)) {
                 array_splice($p->library, $i, 1);
-                $s->putLandOntoBattlefield($player, $card, in_array('life', $targets, true), 'LandFetched', $ability->fetchSpec()['tapped']);
+                if (($watcher = $s->searchWatcher($player)) !== null) {
+                    $s->exileFound($player, $card, $watcher); // Opposition Agent
+                } else {
+                    $s->putLandOntoBattlefield($player, $card, in_array('life', $targets, true), 'LandFetched', $ability->fetchSpec()['tapped']);
+                }
                 break;
             }
         }
@@ -784,6 +880,11 @@ final class StackResolver
             if ($card->id === $id) {
                 array_splice($p->library, $i, 1);
                 $p->library = $s->rng->shuffle($p->library);
+                if (($watcher = $s->searchWatcher($player)) !== null) {
+                    $s->exileFound($player, $card, $watcher); // Opposition Agent : exilée au lieu d'aller en main ou sur le dessus
+                    $s->emit('LibraryShuffled', ['player' => $player, 'library' => count($p->library)]);
+                    break;
+                }
                 if ($effect->tutorTop) {
                     array_unshift($p->library, $card);
                 } else {
@@ -829,11 +930,32 @@ final class StackResolver
         }
     }
 
-    private function treasures(GameState $s, int $player, int $amount): void
+    private function treasures(GameState $s, int $player, int $amount, bool $tapped = false): void
     {
         for ($i = 0; $i < $amount; $i++) {
-            $s->createTreasure($player);
+            $s->createTreasure($player, $tapped);
         }
+    }
+
+    /**
+     * Contrôleur du premier sort visé par le sort `$item` (« its controller », An Offer You Can't Refuse), relevé avant que les
+     * effets ne le retirent de la pile ; null si aucun effet n'en a besoin ou si aucune cible n'est un objet de pile.
+     *
+     * @param list<SpellEffect> $effects
+     * @param array<int, string> $targets
+     */
+    private static function targetSpellController(GameState $s, array $effects, array $targets): ?int
+    {
+        if (array_filter($effects, static fn (SpellEffect $e) => $e->target === SpellEffect::TREASURE_SPELL_CONTROLLER) === []) {
+            return null;
+        }
+        foreach ($targets as $target) {
+            if (str_starts_with($target, 'stack:') && ($victim = $s->findStackItem(substr($target, 6))) !== null) {
+                return $victim->controller;
+            }
+        }
+
+        return null;
     }
 
     /** Dégage la source si elle est encore sur le champ de bataille (Grim Monolith, Mana Vault) ; `PermanentsUntapped`. */
@@ -931,8 +1053,8 @@ final class StackResolver
         $extra = $victim->ownerId() !== $victim->controller ? ['owner' => $victim->ownerId()] : [];
         if ($victim->copy) {
             $destination = 'none'; // une copie cesse d'exister (CR 707.10a)
-        } elseif ($effect->counterTo === SpellEffect::COUNTER_EXILE) {
-            $destination = $s->exile($victim->ownerId(), $victim->card);
+        } elseif ($effect->counterTo === SpellEffect::COUNTER_EXILE || $victim->flashback()) {
+            $destination = $s->exile($victim->ownerId(), $victim->card); // Force of Negation ; Flashback : exil où qu'il dût aller
         } elseif ($effect->counterTo === SpellEffect::COUNTER_LIBRARY_TOP && $victim->card->commander) {
             $owner->command[] = $victim->card;
             $destination = 'command';

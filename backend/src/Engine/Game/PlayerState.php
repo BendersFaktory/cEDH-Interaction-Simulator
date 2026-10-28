@@ -118,6 +118,9 @@ final class PlayerState
         if (!$ability->isDynamicMana()) {
             return null;
         }
+        if ($ability->spec === ActivatedAbility::DYNAMIC_LUCK) {
+            return ($card->counters[CardInstance::LUCK] ?? 0) > 0 ? array_fill_keys(['W', 'U', 'B', 'R', 'G'], true) : ['C' => true]; // Gemstone Caverns
+        }
         if ($ability->spec === ActivatedAbility::DYNAMIC_IMPRINT) {
             return array_fill_keys($card->imprint, true);
         }

@@ -8,6 +8,7 @@ use App\Engine\Ability\ActivatedAbility;
 use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Card\ReplacementEffect;
 use App\Engine\Event\GameEvent;
+use App\Engine\Mana\ManaCost;
 
 /**
  * Source de vérité unique d'une partie. 100 % sérialisable (toArray/fromArray),
@@ -98,6 +99,13 @@ final class GameState
      */
     public array $cardsDrawn = [];
     /**
+     * Sources dont un trigger « une seule fois par tour » s'est déjà déclenché ce tour (Tataru Taru), remis à zéro à chaque
+     * nouveau tour. Sérialisé sous `onceTriggered`, omis quand vide.
+     *
+     * @var list<string>
+     */
+    public array $onceTriggered = [];
+    /**
      * Joueurs blessés au combat ce tour (Tymna), remis à zéro à chaque nouveau tour. Sérialisé sous `combatDamaged`, omis quand vide.
      *
      * @var list<int>
@@ -138,6 +146,16 @@ final class GameState
      * @var list<int>
      */
     public array $flashGrants = [];
+    /**
+     * Permissions de jouer une carte exilée (CR 601.2, 305.1 : Ragavan, Opposition Agent) : `player` peut lancer la carte `card`
+     * (dans la zone d'exil de son propriétaire), et aussi la jouer si c'est un terrain quand `lands` est vrai ; `anyMana` : son
+     * mana se dépense comme s'il était de n'importe quel type (couleurs du coût payables par n'importe quel mana). `until` :
+     * `turn` (vidé au cleanup) ou `exiled` (tant que la carte reste en exil). Une permission tombe quand la carte quitte l'exil.
+     * Sérialisé sous `exilePlays`, omis quand vide.
+     *
+     * @var list<array{card: string, player: int, until: string, lands?: true, anyMana?: true}>
+     */
+    public array $exilePlays = [];
     /** Les créatures ne peuvent pas attaquer ce tour (Orim's Chant avec kicker) ; remis à faux au cleanup. Sérialisé sous `attackLocked`, omis à faux. */
     public bool $attackLocked = false;
 
@@ -314,6 +332,18 @@ final class GameState
             + ($card->isCreature() ? ['power' => $card->currentPower(), 'toughness' => $card->currentToughness()] : []));
     }
 
+    /** Retire un marqueur `$kind` du permanent `$card` de `$playerId` (coût de Wishclaw Talisman) ; `CountersRemoved` porte le total restant. */
+    public function removeCounter(int $playerId, CardInstance $card, string $kind): void
+    {
+        $left = max(0, ($card->counters[$kind] ?? 0) - 1);
+        if ($left === 0) {
+            unset($card->counters[$kind]);
+        } else {
+            $card->counters[$kind] = $left;
+        }
+        $this->emit('CountersRemoved', ['player' => $playerId, 'card' => $card->id, 'kind' => $kind, 'count' => $left]);
+    }
+
     /**
      * Envoie une carte au cimetière de son propriétaire, SAUF un jeton qui cesse d'exister (règles 111.7 et 704.5d).
      * Un commandant va bien au cimetière (ses triggers « meurt » se déclenchent) ; les SBA le renvoient ensuite en zone
@@ -321,8 +351,10 @@ final class GameState
      */
     public function sendToGraveyard(int $ownerId, CardInstance $card): string
     {
+        $card = $card->original ?? $card; // Mockingbird : redevient la carte
         $card->grantedAbilities = [];
         $card->counters = [];
+        $card->dashed = false;
         if ($card->token) {
             return 'none';
         }
@@ -338,8 +370,10 @@ final class GameState
      */
     public function exile(int $ownerId, CardInstance $card): string
     {
+        $card = $card->original ?? $card; // Mockingbird : redevient la carte
         $card->grantedAbilities = [];
         $card->counters = [];
+        $card->dashed = false;
         if ($card->token) {
             return 'none';
         }
@@ -378,15 +412,52 @@ final class GameState
         $card->deathtouchDamage = false;
         $card->powerBonus = 0;
         $card->toughnessBonus = 0;
-        $destination = $this->exile($playerId, $card);
+        $owner = $card->ownerOr($playerId);
+        $destination = $this->exile($owner, $card);
         $this->emit('CardExiled', [
             'player' => $playerId,
-            'card' => $card->toPublic(),
+            'card' => $card->printed()->toPublic(),
             'from' => 'battlefield',
             'destination' => $destination,
             'source' => $source,
-            'exile' => count($this->player($playerId)->exile),
-        ]);
+            'exile' => count($this->player($owner)->exile),
+        ] + self::ownerField($playerId, $card));
+
+        return true;
+    }
+
+    /**
+     * Champ `owner` d'un événement de départ du champ de bataille : présent seulement quand le propriétaire n'est pas le
+     * contrôleur `$playerId` (permanent dont le contrôle a changé), pour que le reducer range la carte dans la bonne zone.
+     *
+     * @return array{owner?: int}
+     */
+    public static function ownerField(int $playerId, CardInstance $card): array
+    {
+        $owner = $card->ownerOr($playerId);
+
+        return $owner === $playerId ? [] : ['owner' => $owner];
+    }
+
+    /**
+     * Un adversaire (ou n'importe quel joueur) prend le contrôle d'un permanent (Wishclaw Talisman ; CR 108.4) : il passe du
+     * champ de bataille de `$from` à celui de `$to`, sans changer de zone (ni triggers d'entrée, ni marqueurs perdus). Il a le
+     * mal d'invocation chez son nouveau contrôleur (CR 302.6) et sort du combat (CR 506.4). Son propriétaire ne change pas :
+     * quand il quitte le champ de bataille, il va dans la zone de son propriétaire. `PermanentControlChanged`.
+     * Retourne false si le permanent n'est plus là.
+     */
+    public function gainControl(int $from, string $cardId, int $to, string $source): bool
+    {
+        if ($from === $to || ($card = $this->player($from)->takeFromBattlefield($cardId)) === null) {
+            return false;
+        }
+        $card->enteredTurn = $this->turn;
+        unset($this->combat->attackers[$cardId]);
+        foreach ($this->combat->blockers as $attacker => $list) {
+            $this->combat->blockers[$attacker] = array_values(array_diff($list, [$cardId]));
+        }
+        $this->player($to)->battlefield[] = $card;
+        $this->emit('PermanentControlChanged', ['player' => $to, 'from' => $from, 'card' => $card->toPublic(), 'tapped' => $card->tapped, 'source' => $source]);
 
         return true;
     }
@@ -403,18 +474,18 @@ final class GameState
         foreach ($cardIds as $id) {
             $card = $p->takeFromBattlefield($id) ?? throw new \DomainException("Permanent à sacrifier introuvable : $id");
             $card->tapped = false;
-            $destination = $this->sendToGraveyard($playerId, $card);
-            $this->emit('PermanentSacrificed', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination]);
+            $destination = $this->sendToGraveyard($card->ownerOr($playerId), $card);
+            $this->emit('PermanentSacrificed', ['player' => $playerId, 'card' => $card->printed()->toPublic(), 'destination' => $destination] + self::ownerField($playerId, $card));
             if ($card->isCreature()) {
                 $this->queueTriggers($playerId, $card, TriggeredAbility::DIES);
             }
         }
     }
 
-    /** Crée un jeton Treasure sur le champ de bataille du joueur (`TokenCreated`). */
-    public function createTreasure(int $playerId): CardInstance
+    /** Crée un jeton Treasure sur le champ de bataille du joueur (`TokenCreated`), engagé si `$tapped` (Tataru Taru). */
+    public function createTreasure(int $playerId, bool $tapped = false): CardInstance
     {
-        return $this->createToken($playerId, 'Treasure', CardInstance::ARTIFACT, abilities: [ActivatedAbility::treasure()], subtypes: [CardInstance::ARTIFACT => ['Treasure']]);
+        return $this->createToken($playerId, 'Treasure', CardInstance::ARTIFACT, abilities: [ActivatedAbility::treasure()], subtypes: [CardInstance::ARTIFACT => ['Treasure']], tapped: $tapped);
     }
 
     /**
@@ -466,7 +537,7 @@ final class GameState
      * ou `LandFetched`) avec `tapped: true` s'il arrive engagé. Shockland (`untappedLifeCost`) : « en arrivant, vous pouvez payer
      * N PV ; sinon il arrive engagé » ; `$payLife` porte le choix (payé seulement s'il reste assez de PV, CR 119.4).
      */
-    public function putLandOntoBattlefield(int $playerId, CardInstance $card, ?bool $payLife, string $event, bool $tapped = false): void
+    public function putLandOntoBattlefield(int $playerId, CardInstance $card, ?bool $payLife, string $event, bool $tapped = false, ?int $fromExileOf = null): void
     {
         $pays = $card->untappedLifeCost > 0 && $payLife === true && $this->player($playerId)->life >= $card->untappedLifeCost;
         $tapped = $tapped || ($card->untappedLifeCost > 0 && !$pays)
@@ -474,7 +545,8 @@ final class GameState
         $card->tapped = $tapped;
         $this->enterBattlefield($playerId, $card);
         $this->emit($event, ['player' => $playerId, 'card' => $card->toPublic()] + ($tapped ? ['tapped' => true] : [])
-            + ($event === 'LandFetched' ? ['library' => count($this->player($playerId)->library)] : []));
+            + ($event === 'LandFetched' ? ['library' => count($this->player($playerId)->library)] : [])
+            + ($fromExileOf !== null ? ['fromExile' => true, 'owner' => $fromExileOf] : [])); // Opposition Agent
         if ($pays) {
             $this->payLife($playerId, $card->untappedLifeCost, $card->name);
         }
@@ -549,8 +621,8 @@ final class GameState
         $card->damage = 0;
         $card->deathtouchDamage = false;
         $card->tapped = false;
-        $destination = $this->sendToGraveyard($playerId, $card);
-        $this->emit('PermanentDestroyed', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'source' => $source]);
+        $destination = $this->sendToGraveyard($card->ownerOr($playerId), $card);
+        $this->emit('PermanentDestroyed', ['player' => $playerId, 'card' => $card->printed()->toPublic(), 'destination' => $destination, 'source' => $source] + self::ownerField($playerId, $card));
         if ($card->isCreature()) {
             $this->queueTriggers($playerId, $card, TriggeredAbility::DIES);
         }
@@ -685,8 +757,20 @@ final class GameState
      * résolution (`$selection`, kind `replace`, décision `ReplaceChoice` : `finishReplacement()`) ; sans terrain, la carte va
      * directement au cimetière (`ReplacementApplied`).
      */
-    public function replaceEntering(int $playerId, int $ownerId, CardInstance $card, ReplacementEffect $replacement): void
+    public function replaceEntering(int $playerId, int $ownerId, CardInstance $card, ReplacementEffect $replacement, int $manaSpent = 0): void
     {
+        if ($replacement->instead === ReplacementEffect::COPY_CREATURE) {
+            // Mockingbird : choisir une créature de valeur de mana ≤ mana dépensé, ou arriver telle quelle.
+            if ($this->copyCandidates($manaSpent) === []) {
+                $this->finishReplacement($playerId, $ownerId, $card, null);
+
+                return;
+            }
+            $this->selection = ['player' => $playerId, 'kind' => 'replace', 'instead' => ReplacementEffect::COPY_CREATURE, 'maxValue' => $manaSpent,
+                'count' => 1, 'source' => $card->name, 'draw' => 0, 'card' => $card->toArray()] + ($ownerId === $playerId ? [] : ['owner' => $ownerId]);
+
+            return;
+        }
         $lands = array_filter($this->player($playerId)->hand, static fn (CardInstance $c) => $c->isLand());
         if ($replacement->instead === ReplacementEffect::DISCARD_LAND && $lands !== []) {
             $this->selection = ['player' => $playerId, 'kind' => 'replace', 'count' => 1, 'source' => $card->name, 'draw' => 0, 'card' => $card->toArray()]
@@ -701,10 +785,18 @@ final class GameState
      * Fin d'un remplacement d'entrée : `$discard` (id d'une carte de terrain de la main) est défaussé et la carte arrive sur le
      * champ de bataille (ses triggers d'entrée se déclenchent) ; sans défausse, elle va au cimetière de son propriétaire `$ownerId`.
      */
-    public function finishReplacement(int $playerId, int $ownerId, CardInstance $card, ?string $discard): void
+    public function finishReplacement(int $playerId, int $ownerId, CardInstance $card, ?string $discard, ?string $copyId = null): void
     {
         $discarded = null;
-        if ($discard !== null) {
+        $copied = null;
+        if ($this->replacementFor($card, ReplacementEffect::ENTERS)?->instead === ReplacementEffect::COPY_CREATURE) {
+            $source = $copyId === null ? null : ($this->findPermanent($copyId) ?? throw new \DomainException("Créature à copier introuvable : $copyId"));
+            $entering = $source === null ? $card : self::copyCard($card->id, $source, $card, [CardInstance::CREATURE => ['Bird']], [CardInstance::FLYING]);
+            $copied = $source?->id;
+            $this->enterBattlefield($playerId, $entering);
+            $card = $entering;
+            $destination = 'battlefield';
+        } elseif ($discard !== null) {
             $land = $this->player($playerId)->findInHand($discard);
             if ($land === null || !$land->isLand()) {
                 throw new \DomainException("Carte de terrain à défausser absente de la main : $discard");
@@ -721,13 +813,70 @@ final class GameState
             'card' => $card->toPublic(),
             'event' => ReplacementEffect::ENTERS,
             'destination' => $destination,
-        ] + ($ownerId === $playerId ? [] : ['owner' => $ownerId]) + ($discarded === null ? [] : ['discarded' => $discarded]));
+        ] + ($ownerId === $playerId ? [] : ['owner' => $ownerId]) + ($discarded === null ? [] : ['discarded' => $discarded])
+            + ($copied === null ? [] : ['copyOf' => $copied]));
+    }
+
+    /** Créatures sur le champ de bataille de valeur de mana ≤ `$maxValue` (Mockingbird), dans l'ordre des joueurs. @return list<CardInstance> */
+    public function copyCandidates(int $maxValue): array
+    {
+        $out = [];
+        foreach ($this->players as $p) {
+            foreach ($p->battlefield as $c) {
+                if ($c->isCreature() && $c->manaCost()->manaValue() <= $maxValue) {
+                    $out[] = $c;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /** Permanent d'id `$cardId` sur n'importe quel champ de bataille, ou null. */
+    public function findPermanent(string $cardId): ?CardInstance
+    {
+        foreach ($this->players as $p) {
+            if (($card = $p->findOnBattlefield($cardId)) !== null) {
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Copie de `$source` (valeurs copiables, CR 707.2 : nom, types, supertypes, sous-types, force / endurance de base, coût,
+     * mots-clés, capacités et triggers), d'id `$id`, avec des sous-types et mots-clés en plus (CR 707.9b, Mockingbird : Bird,
+     * vol) ; `$original` est la carte qu'elle redevient en quittant le champ de bataille (null : un jeton).
+     *
+     * @param array<string, list<string>> $extraSubtypes
+     * @param list<string>                $extraKeywords
+     */
+    public static function copyCard(string $id, CardInstance $source, ?CardInstance $original, array $extraSubtypes = [], array $extraKeywords = []): CardInstance
+    {
+        $subtypes = $source->subtypes;
+        foreach ($extraSubtypes as $type => $names) {
+            $subtypes[$type] = array_values(array_unique([...($subtypes[$type] ?? []), ...$names]));
+        }
+        $copy = new CardInstance(
+            $id, $source->name, $source->types, $source->cost,
+            power: $source->power, toughness: $source->toughness, manaCost: $source->manaCost, produces: $source->produces,
+            abilities: $source->abilities, token: $original === null, triggers: $source->triggers, subtypes: $subtypes,
+            keywords: array_values(array_unique([...$source->keywords, ...$extraKeywords])), supertypes: $source->supertypes,
+            effects: $source->effects, statics: $source->statics, altCasts: $source->altCasts,
+        );
+        $copy->original = $original;
+
+        return $copy;
     }
 
     public function enterBattlefield(int $playerId, CardInstance $card): void
     {
         $card->enteredTurn = $this->turn;
         $this->player($playerId)->battlefield[] = $card;
+        foreach ($card->entersWithCounters as $kind => $n) {
+            $this->addCounters($playerId, $card, $kind, $n); // « enters with three wish counters » (Wishclaw Talisman)
+        }
         $this->queueTriggers($playerId, $card, TriggeredAbility::ETB);
     }
 
@@ -745,7 +894,11 @@ final class GameState
                 && ($trigger->filter !== TriggeredAbility::FIRST_NONCREATURE || ($this->noncreatureCast[$opponent] ?? 0) === 1)
                 && ($trigger->filter !== TriggeredAbility::SECOND_DRAW || ($this->cardsDrawn[$opponent] ?? 0) === 2)
                 && ($trigger->filter !== TriggeredAbility::NOT_DRAW_STEP_FIRST || !$drawStepFirst)
-                && ($trigger->filter !== TriggeredAbility::NO_MANA || !$manaSpent)) {
+                && ($trigger->filter !== TriggeredAbility::NO_MANA || !$manaSpent)
+                && ($trigger->filter !== TriggeredAbility::OFF_TURN_ONCE || ($opponent !== $this->activePlayer && !in_array($card->id, $this->onceTriggered, true)))) {
+                if ($trigger->filter === TriggeredAbility::OFF_TURN_ONCE) {
+                    $this->onceTriggered[] = $card->id; // Tataru Taru : « This ability triggers only once each turn. »
+                }
                 $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $controller, clone $card, $index, opponent: $opponent, stackId: $stackId);
             }
         }
@@ -759,12 +912,15 @@ final class GameState
     public function queueOpponentCastTriggers(int $caster, CardInstance $spell, ?string $stackId = null, bool $manaSpent = true): void
     {
         foreach ($this->players as $p) {
-            if ($p->id === $caster || $p->lost) {
+            if ($p->lost) {
                 continue;
             }
             foreach ($p->battlefield as $card) {
                 if ($card->triggers !== []) {
-                    $this->queueTriggers($p->id, $card, TriggeredAbility::OPPONENT_CAST, $spell, $caster, $stackId, $manaSpent);
+                    if ($p->id !== $caster) {
+                        $this->queueTriggers($p->id, $card, TriggeredAbility::OPPONENT_CAST, $spell, $caster, $stackId, $manaSpent);
+                    }
+                    $this->queueTriggers($p->id, $card, TriggeredAbility::ANY_CAST, $spell, $caster, $stackId, $manaSpent); // Lotho
                 }
             }
         }
@@ -845,10 +1001,152 @@ final class GameState
         $card->toughnessBonus = 0;
         $card->grantedAbilities = [];
         $card->counters = [];
+        $card->dashed = false;
+        $owner = $this->player($card->ownerOr($playerId));
         if (!$card->token) {
-            $p->hand[] = $card;
+            $owner->hand[] = $card->original ?? $card; // Mockingbird : redevient la carte
         }
-        $this->emit('PermanentReturnedToHand', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $card->token ? 'none' : 'hand', 'hand' => count($p->hand), 'source' => $source]);
+        $this->emit('PermanentReturnedToHand', ['player' => $playerId, 'card' => $card->printed()->toPublic(), 'destination' => $card->token ? 'none' : 'hand', 'hand' => count($owner->hand), 'source' => $source] + self::ownerField($playerId, $card));
+    }
+
+    public const EXILE_PLAY_TURN = 'turn';
+    public const EXILE_PLAY_EXILED = 'exiled';
+
+    /**
+     * Donne à `$playerId` la permission de jouer `$card`, déjà dans la zone d'exil de son propriétaire (voir `$exilePlays`).
+     * `ExilePlayGranted`.
+     */
+    public function grantExilePlay(int $playerId, CardInstance $card, string $until, string $source, bool $lands = false, bool $anyMana = false): void
+    {
+        $this->exilePlays[] = ['card' => $card->id, 'player' => $playerId, 'until' => $until] + ($lands ? ['lands' => true] : []) + ($anyMana ? ['anyMana' => true] : []);
+        $this->emit('ExilePlayGranted', ['player' => $playerId, 'card' => $card->toPublic(), 'owner' => $card->ownerOr($playerId), 'until' => $until, 'source' => $source]
+            + ($lands ? ['lands' => true] : []) + ($anyMana ? ['anyMana' => true] : []));
+    }
+
+    /**
+     * Cartes exilées que `$playerId` peut jouer maintenant, avec leur permission (la première qui s'applique). Une carte qui
+     * n'est plus dans une zone d'exil n'y figure pas.
+     *
+     * @return list<array{card: CardInstance, owner: int, lands: bool, anyMana: bool}>
+     */
+    public function exilePlayable(int $playerId): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($this->exilePlays as $grant) {
+            if ($grant['player'] !== $playerId || isset($seen[$grant['card']])) {
+                continue;
+            }
+            foreach ($this->players as $owner) {
+                foreach ($owner->exile as $card) {
+                    if ($card->id === $grant['card']) {
+                        $seen[$card->id] = true;
+                        $out[] = ['card' => $card, 'owner' => $owner->id, 'lands' => isset($grant['lands']), 'anyMana' => isset($grant['anyMana'])];
+                        continue 3;
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /** Permission de `$playerId` sur la carte exilée `$cardId`, ou null (voir exilePlayable()). @return array{card: CardInstance, owner: int, lands: bool, anyMana: bool}|null */
+    public function exilePlayFor(int $playerId, string $cardId): ?array
+    {
+        if ($this->exilePlays === []) {
+            return null; // cas courant : aucun balayage des zones d'exil
+        }
+        foreach ($this->exilePlayable($playerId) as $play) {
+            if ($play['card']->id === $cardId) {
+                return $play;
+            }
+        }
+
+        return null;
+    }
+
+    /** Carte que `$playerId` peut lancer : main, zone de commandement, puis carte exilée qu'il a la permission de jouer. */
+    public function castable(int $playerId, string $cardId): ?CardInstance
+    {
+        return $this->player($playerId)->findCastable($cardId) ?? $this->exilePlayFor($playerId, $cardId)['card'] ?? null;
+    }
+
+    /**
+     * Coût de lancement de `$card` par `$playerId` : `PlayerState::castCost()` (taxe de commandant), où chaque symbole coloré
+     * devient générique si une permission `anyMana` s'applique (Opposition Agent : n'importe quel mana paie les couleurs).
+     */
+    public function castCostFor(int $playerId, CardInstance $card): ManaCost
+    {
+        $cost = $this->player($playerId)->castCost($card);
+
+        return $this->exilePlays !== [] && ($this->exilePlayFor($playerId, $card->id)['anyMana'] ?? false) ? $cost->withAnyType() : $cost;
+    }
+
+    /**
+     * Sort de l'exil la carte `$cardId` que `$playerId` joue en vertu d'une permission (toutes les permissions sur elle tombent :
+     * c'est un nouvel objet, CR 400.7). Retourne la carte et son propriétaire, ou null sans permission.
+     *
+     * @return array{card: CardInstance, owner: int}|null
+     */
+    public function takeExilePlayable(int $playerId, string $cardId): ?array
+    {
+        $play = $this->exilePlayFor($playerId, $cardId);
+        if ($play === null) {
+            return null;
+        }
+        $owner = $this->player($play['owner']);
+        $owner->exile = array_values(array_filter($owner->exile, static fn (CardInstance $c) => $c->id !== $cardId));
+        $this->exilePlays = array_values(array_filter($this->exilePlays, static fn (array $g) => $g['card'] !== $cardId));
+
+        return ['card' => $play['card'], 'owner' => $play['owner']];
+    }
+
+    /**
+     * Opposition Agent : contrôleur d'un Opposition Agent adverse quand `$searcher` cherche dans sa bibliothèque (le premier dans
+     * l'ordre du tour après lui), ou null. Approximation : « you control your opponents while they're searching » n'est pas
+     * modélisé, celui qui cherche choisit la carte ; seul l'exil de ce qu'il trouve l'est.
+     */
+    public function searchWatcher(int $searcher): ?int
+    {
+        for ($id = $this->nextAlive($searcher); $id !== $searcher; $id = $this->nextAlive($id)) {
+            foreach ($this->player($id)->battlefield as $card) {
+                if (in_array(CardInstance::STATIC_OPPOSITION_AGENT, $card->statics, true)) {
+                    return $id;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Opposition Agent : la carte `$card` que `$searcher` vient de trouver (déjà sortie de sa bibliothèque) est exilée chez lui
+     * (`CardExiled`, `from: library`) et `$watcher` peut la jouer tant qu'elle reste exilée, avec n'importe quel mana.
+     */
+    public function exileFound(int $searcher, CardInstance $card, int $watcher): void
+    {
+        $this->exile($searcher, $card);
+        $p = $this->player($searcher);
+        $this->emit('CardExiled', ['player' => $searcher, 'card' => $card->toPublic(), 'from' => 'library', 'destination' => 'exile', 'source' => 'Opposition Agent',
+            'exile' => count($p->exile), 'library' => count($p->library)]);
+        $this->grantExilePlay($watcher, $card, self::EXILE_PLAY_EXILED, 'Opposition Agent', true, true);
+    }
+
+    /** Cleanup : les permissions « jusqu'à la fin du tour » tombent, ainsi que celles dont la carte a quitté l'exil. */
+    public function expireExilePlays(): void
+    {
+        if ($this->exilePlays === []) {
+            return;
+        }
+        $exiled = [];
+        foreach ($this->players as $p) {
+            foreach ($p->exile as $card) {
+                $exiled[$card->id] = true;
+            }
+        }
+        $this->exilePlays = array_values(array_filter($this->exilePlays,
+            static fn (array $g) => $g['until'] !== self::EXILE_PLAY_TURN && isset($exiled[$g['card']])));
     }
 
     /** Change les stops d'un joueur ; `null` (ou une config équivalente au défaut) revient au comportement par défaut. */
@@ -918,6 +1216,9 @@ final class GameState
         if ($this->noncreatureCast !== []) {
             $d['noncreatureCast'] = $this->noncreatureCast;
         }
+        if ($this->onceTriggered !== []) {
+            $d['onceTriggered'] = $this->onceTriggered;
+        }
         if ($this->cardsDrawn !== []) {
             $d['cardsDrawn'] = $this->cardsDrawn;
         }
@@ -929,6 +1230,9 @@ final class GameState
         }
         if ($this->castLocks !== []) {
             $d['castLocks'] = $this->castLocks;
+        }
+        if ($this->exilePlays !== []) {
+            $d['exilePlays'] = $this->exilePlays;
         }
         if ($this->flashGrants !== []) {
             $d['flashGrants'] = $this->flashGrants;
@@ -982,6 +1286,7 @@ final class GameState
         foreach ($d['noncreatureCast'] ?? [] as $id => $count) {
             $s->noncreatureCast[(int) $id] = (int) $count;
         }
+        $s->onceTriggered = $d['onceTriggered'] ?? [];
         foreach ($d['cardsDrawn'] ?? [] as $id => $count) {
             $s->cardsDrawn[(int) $id] = (int) $count;
         }
@@ -996,6 +1301,7 @@ final class GameState
         $s->noncreatureLocks = array_map('intval', $d['noncreatureLocks'] ?? []);
         $s->castLocks = array_map('intval', $d['castLocks'] ?? []);
         $s->flashGrants = array_map('intval', $d['flashGrants'] ?? []);
+        $s->exilePlays = $d['exilePlays'] ?? [];
         $s->attackLocked = (bool) ($d['attackLocked'] ?? false);
         foreach ($d['stops'] ?? [] as $id => $config) {
             $s->stops[(int) $id] = StopConfig::fromArray($config);
@@ -1003,7 +1309,7 @@ final class GameState
         if (isset($d['mulligan'])) {
             $s->mulligan = [];
             foreach ($d['mulligan'] as $id => $m) {
-                $s->mulligan[(int) $id] = ['taken' => (int) $m['taken'], 'kept' => (bool) $m['kept']];
+                $s->mulligan[(int) $id] = ['taken' => (int) $m['taken'], 'kept' => (bool) $m['kept']] + (isset($m['pregame']) ? ['pregame' => $m['pregame']] : []);
             }
         }
 

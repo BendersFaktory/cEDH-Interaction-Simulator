@@ -15,7 +15,7 @@ use App\Engine\Game\CardInstance;
  * priorité ; `TriggerManager` la met alors sur la pile (ordre APNAP).
  *
  * Effets (même vocabulaire que `ActivatedAbility`) : `damage` (`amount` dégâts à un joueur ciblé), `draw` (piocher
- * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`) ou `treasure` (`amount` jetons Treasure), `self_damage` (`amount` dégâts à son contrôleur) ou `imprint` (Chrome Mox : exiler une carte
+ * `amount` cartes) ou `token` (`amount` jetons créature décrits par `spec` = `Nom:F/E`) ou `treasure` (`amount` jetons Treasure, engagés si `spec` = `tapped` : Tataru Taru), `self_damage` (`amount` dégâts à son contrôleur) ou `imprint` (Chrome Mox : exiler une carte
  * non-artefact non-terrain de sa main, choisie en mettant le trigger sur la pile — cible `card:<id>`, absente = ne rien exiler).
  *
  * `opponent_cast` (un adversaire de son contrôleur lance un sort ; le lanceur est retenu par `PendingTrigger::$opponent` et
@@ -77,6 +77,10 @@ final class TriggeredAbility
     public const NEXT_END = 'next_end';
     /** Un adversaire de son contrôleur pioche une carte (Faerie Mastermind, Orcish Bowmasters). */
     public const OPPONENT_DRAW = 'opponent_draw';
+    /** Un joueur, quel qu'il soit, lance un sort (Lotho, Corrupt Shirriff ; avec `second_spell`). */
+    public const ANY_CAST = 'any_cast';
+    /** La source inflige des dégâts de combat à un joueur (Ragavan) ; le joueur blessé est la cible du trigger. */
+    public const COMBAT_DAMAGE_PLAYER = 'combat_damage_player';
 
     /** Coût `{X}` de `draw_unless` : X = force de la source (Esper Sentinel). */
     public const X_POWER = '{X}';
@@ -96,14 +100,19 @@ final class TriggeredAbility
     public const SECOND_DRAW = 'second_draw';
     /** Filtre de `opponent_draw` : sauf la première carte piochée dans chacune de ses étapes de pioche (Orcish Bowmasters). */
     public const NOT_DRAW_STEP_FIRST = 'not_draw_step_first';
+    /** Filtre de `opponent_draw` : pas pendant le tour de cet adversaire, et une seule fois par tour (Tataru Taru). */
+    public const OFF_TURN_ONCE = 'off_turn_once';
 
     /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
     public const TAPPED = 'tapped';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW];
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW, self::ANY_CAST, self::COMBAT_DAMAGE_PLAYER];
+    /** `spec` d'un effet `treasure` : jetons créés engagés (Tataru Taru). */
+    public const TREASURE_TAPPED = 'tapped';
     private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor',
-        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap', 'ping_amass', 'cumulative_upkeep'];
-    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA, self::FIRST_NONCREATURE, self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST];
+        'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap', 'ping_amass', 'cumulative_upkeep', 'return_dashed',
+        'lose_life_treasure', 'draw_opponent_may', 'treasure_exile_top'];
+    private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA, self::FIRST_NONCREATURE, self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST, self::OFF_TURN_ONCE];
 
     public function __construct(
         public readonly string $event,
@@ -119,10 +128,10 @@ final class TriggeredAbility
             throw new \InvalidArgumentException("Effet de trigger inconnu : $effect");
         }
         if (!in_array($filter, self::FILTERS, true) || ($filter === self::INSTANT_SORCERY && $event !== self::CAST)
-            || ($filter === self::TAPPED && $event === self::CAST) || ($filter === self::SECOND_SPELL && $event !== self::OPPONENT_CAST)
+            || ($filter === self::TAPPED && $event === self::CAST) || ($filter === self::SECOND_SPELL && $event !== self::OPPONENT_CAST && $event !== self::ANY_CAST)
             || ($filter === self::NONCREATURE && $event !== self::CAST && $event !== self::OPPONENT_CAST) || ($filter === self::NO_MANA && $event !== self::OPPONENT_CAST)
             || ($filter === self::FIRST_NONCREATURE && $event !== self::OPPONENT_CAST)
-            || (in_array($filter, [self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST], true) && $event !== self::OPPONENT_DRAW)) {
+            || (in_array($filter, [self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST, self::OFF_TURN_ONCE], true) && $event !== self::OPPONENT_DRAW)) {
             throw new \InvalidArgumentException("Filtre de trigger invalide : $filter ($event)");
         }
         if ($effect === 'token') {
@@ -131,6 +140,9 @@ final class TriggeredAbility
         if (in_array($effect, ['pact', 'draw_unless', 'pay_untap', 'cumulative_upkeep'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)
             && !($effect === 'draw_unless' && $spec === self::X_POWER)) {
             throw new \InvalidArgumentException("Coût de pacte invalide : $spec");
+        }
+        if ($effect === 'treasure' && $spec !== '' && $spec !== self::TREASURE_TAPPED) {
+            throw new \InvalidArgumentException("Treasure invalide : $spec");
         }
         if ($effect === 'ping_amass' && !preg_match('/^[A-Z][a-z]+:\d+$/', $spec)) {
             throw new \InvalidArgumentException("Amass invalide : $spec");
@@ -170,6 +182,12 @@ final class TriggeredAbility
         return ($type === '' || $card->hasType($type)) && $card->manaCost()->manaValue() <= (int) $max;
     }
 
+    /** La capacité cible-t-elle un adversaire de son contrôleur (Tataru Taru : « target opponent may draw a card ») ? */
+    public function targetsOpponent(): bool
+    {
+        return $this->effect === 'draw_opponent_may';
+    }
+
     /** La capacité cible-t-elle un joueur (à choisir en la mettant sur la pile) ? */
     public function targetsPlayer(): bool
     {
@@ -207,19 +225,25 @@ final class TriggeredAbility
             self::OPPONENT_DRAW => match ($this->filter) {
                 self::SECOND_DRAW => 'Quand un adversaire pioche sa deuxième carte du tour',
                 self::NOT_DRAW_STEP_FIRST => 'Quand un adversaire pioche une carte (sauf la première de son étape de pioche)',
+                self::OFF_TURN_ONCE => 'Quand un adversaire pioche une carte hors de son tour (une fois par tour)',
                 default => 'Quand un adversaire pioche une carte',
             },
+            self::COMBAT_DAMAGE_PLAYER => 'Quand elle inflige des dégâts de combat à un joueur',
+            self::ANY_CAST => $this->filter === self::SECOND_SPELL ? 'Quand un joueur lance son deuxième sort du tour' : 'Quand un joueur lance un sort',
         } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
         $what = match ($this->effect) {
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
-            'treasure' => sprintf('%d Treasure', $this->amount),
+            'treasure' => sprintf('%d Treasure', $this->amount) . ($this->spec === self::TREASURE_TAPPED ? ' engagé' : ''),
             'self_damage' => sprintf('%d dégât%s à vous', $this->amount, $this->amount > 1 ? 's' : ''),
             'imprint' => 'exiler une carte de votre main (imprint)',
             'pact' => sprintf('payer %s ou perdre la partie', $this->spec),
             'draw_unless' => sprintf('piocher %d sauf s\'il paie %s', $this->amount, $this->spec === self::X_POWER ? '{X} (X = sa force)' : $this->spec),
             'pay_life_draw' => 'payer X PV et piocher X (X = adversaires blessés au combat ce tour)',
+            'treasure_exile_top' => 'créer un Treasure, exiler la carte du dessus de la bibliothèque de ce joueur ; vous pouvez la lancer ce tour',
+            'lose_life_treasure' => sprintf('perdre %d PV et créer un Treasure', $this->amount),
+            'draw_opponent_may' => sprintf('piocher %d ; l\'adversaire ciblé peut piocher une carte', $this->amount),
             'mana' => sprintf('ajouter %s', $this->amount > 0 ? str_repeat('{C}', $this->amount) : 'rien'),
             'sacrifice_self' => 'la sacrifier',
             'tutor' => sprintf('chercher une carte (%s) et la mettre dans la main', $this->spec),
@@ -227,6 +251,7 @@ final class TriggeredAbility
             'counter_spell' => 'contrer ce sort',
             'mobilize' => sprintf('créer %d jetons Warrior 1/1 engagés et attaquants', $this->amount),
             'sacrifice_tokens' => 'sacrifier les jetons Warrior',
+            'return_dashed' => 'renvoyer la créature arrivée par Dash dans la main de son propriétaire',
             'pump_untap' => sprintf('vos %s gagnent +1/+1 et se dégagent', str_replace('|', ', ', $this->spec)),
             'pay_untap' => sprintf('vous pouvez payer %s pour la dégager', $this->spec),
             'ping_amass' => sprintf('%d dégât%s, puis Amass %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),

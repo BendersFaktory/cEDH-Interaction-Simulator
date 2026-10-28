@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Engine\Rules;
 
+use App\Engine\Ability\TriggeredAbility;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
 
@@ -116,11 +117,14 @@ final class CombatResolver
             }
             $payload = ['source' => $attacker->name, 'target' => 'player:' . $defender, 'amount' => $amount, 'life' => $victim->life, 'combat' => true];
             if ($attacker->commander) {
-                $key = $attackerOwner . ':' . $attacker->id;
+                $key = $attacker->ownerOr($attackerOwner) . ':' . $attacker->id; // propriétaire, même si un adversaire le contrôle
                 $victim->commanderDamage[$key] = ($victim->commanderDamage[$key] ?? 0) + $amount;
                 $payload['commanderDamage'] = ['key' => $key, 'total' => $victim->commanderDamage[$key]];
             }
             $s->emit('DamageDealt', $payload);
+            if ($amount > 0 && $attacker->triggers !== []) {
+                $s->queueTriggers($attackerOwner, $attacker, TriggeredAbility::COMBAT_DAMAGE_PLAYER, opponent: $defender); // Ragavan
+            }
         }
 
         foreach ($toCreatures as $cardId => $amount) {

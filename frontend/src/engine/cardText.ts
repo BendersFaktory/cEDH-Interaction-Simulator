@@ -65,7 +65,8 @@ function effectText(effect: string, amount: number | undefined, spec?: string): 
     case 'token':
       return `crée ${amount ?? 1} jeton ${(spec ?? '').replace(':', ' ')}`
     case 'treasure':
-      return `crée ${amount ?? 1} Trésor`
+      // `spell_controller` : An Offer You Can't Refuse ; `tapped` : Tataru Taru.
+      return `${spec === 'spell_controller' ? 'le contrôleur du sort visé ' : ''}crée ${amount || 1} Trésor${spec === 'tapped' ? ' engagé' : ''}`
     case 'tutor':
       return 'cherche une carte dans sa bibliothèque et la met en main'
     case 'scry':
@@ -88,6 +89,16 @@ function effectText(effect: string, amount: number | undefined, spec?: string): 
       return `paie ${spec ?? ''} ou perd la partie`
     case 'mana':
       return `ajoute ${'{C}'.repeat(amount ?? 0) || 'rien'}`
+    case 'lose_life_treasure':
+      return `perd ${n} PV et crée un Trésor`
+    case 'draw_opponent_may':
+      return `pioche ${n} ; l'adversaire ciblé peut piocher une carte`
+    case 'treasure_exile_top':
+      return 'crée un Trésor et exile la carte du dessus de la bibliothèque de ce joueur ; tu peux la lancer ce tour'
+    case 'two_players_draw':
+      return `deux joueurs ciblés piochent ${n}`
+    case 'tutor_give_control':
+      return 'cherche une carte et la met en main ; un adversaire prend le contrôle de cette carte (à ton tour seulement)'
     default:
       return `${effect}${amount ? ` ${amount}` : ''}`
   }
@@ -100,11 +111,13 @@ export function abilityText(a: AbilityView): string {
   const what =
     a.isManaAbility && a.spec === 'oppland'
       ? "un mana d'une couleur que produit un terrain adverse"
-      : a.isManaAbility && a.spec === 'imprint'
-        ? "un mana d'une couleur de la carte exilée"
-        : a.isManaAbility
-          ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ')
-          : effectText(a.effect, a.amount, a.spec)
+      : a.isManaAbility && a.spec === 'luck'
+        ? "{C}, ou un mana de n'importe quelle couleur avec un marqueur de chance"
+        : a.isManaAbility && a.spec === 'imprint'
+          ? "un mana d'une couleur de la carte exilée"
+          : a.isManaAbility
+            ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ')
+            : effectText(a.effect, a.amount, a.spec)
   return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}${a.upkeepOnly ? ' (à ton entretien)' : ''}`
 }
 
@@ -120,11 +133,21 @@ const triggerEvents: Record<string, string> = {
   draw_step: 'Au début de ton étape de pioche',
   next_upkeep: 'Au début de ton prochain entretien',
   next_main: 'Au début de ta prochaine phase principale',
+  any_cast: 'Quand un joueur lance un sort',
+  opponent_draw: 'Quand un adversaire pioche une carte',
+  combat_damage_player: 'Quand elle inflige des dégâts de combat à un joueur',
+}
+
+const triggerFilters: Record<string, string> = {
+  tapped: ', si elle est engagée',
+  second_spell: ' (son deuxième du tour)',
+  second_draw: ' (sa deuxième du tour)',
+  off_turn_once: ' hors de son tour (une fois par tour)',
 }
 
 export function triggerText(t: TriggerView): string {
   const when = t.event === 'cast' && t.filter === 'instant_sorcery' ? 'Quand tu lances un éphémère ou un rituel' : (triggerEvents[t.event] ?? t.event)
-  return `${when}${t.filter === 'tapped' ? ', si elle est engagée' : ''} : ${effectText(t.effect, t.amount, t.spec)}`
+  return `${when}${triggerFilters[t.filter ?? ''] ?? ''} : ${effectText(t.effect, t.amount, t.spec)}`
 }
 
 /** Jeton créé pour le contrôleur du sort contré (Swan Song : « son contrôleur crée un jeton Bird 2/2 volant »). */
@@ -147,6 +170,12 @@ function counterOptionsText(e: { effect: string; payCost?: string; manaValue?: n
 }
 
 /** Effet d'un sort (dégâts, contre, pioche...), tel que le moteur le décrit. */
+/** Flashback / Dash : « Flashback {2}{R} (depuis le cimetière, puis exilée) ». */
+export function altCastText(card: PublicCard): string[] {
+  const casts = card.altCasts ?? {}
+  return [...(casts.flashback ? [`Flashback ${casts.flashback} (depuis le cimetière, puis exilée)`] : []), ...(casts.dash ? [`Dash ${casts.dash} (célérité, revient en main à la fin du tour)`] : [])]
+}
+
 export function spellText(card: PublicCard): string | null {
   const effects = card.effects ?? (card.effect ? [{ effect: card.effect, amount: card.amount, adds: card.adds }] : [])
   if (!effects.length) return null

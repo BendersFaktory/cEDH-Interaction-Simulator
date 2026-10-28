@@ -17,6 +17,9 @@ final class CastSpell implements Action
     public const ALT_FREE = 'free';
     public const ALT_PITCH = 'pitch:';
     public const ALT_RETURN = 'return:';
+    /** Flashback (depuis le cimetière) et Dash (depuis la main) : `alt` vaut la sorte, `CardInstance::CAST_FLASHBACK` | `CAST_DASH`. */
+    public const ALT_FLASHBACK = \App\Engine\Game\CardInstance::CAST_FLASHBACK;
+    public const ALT_DASH = \App\Engine\Game\CardInstance::CAST_DASH;
 
     /** @param list<string> $targets ex: ['player:1'] ou ['stack:s3'] */
     public function __construct(
@@ -46,15 +49,22 @@ final class CastSpell implements Action
     public function describe(GameState $state): string
     {
         $player = $state->player($this->player);
-        $card = $player->findCastable($this->cardId);
-        $label = 'Lancer ' . ($card?->name ?? $this->cardId);
+        if ($this->alt === self::ALT_FLASHBACK) {
+            $card = array_values(array_filter($player->graveyard, fn ($c) => $c->id === $this->cardId))[0] ?? null;
+
+            return 'Lancer ' . ($card?->name ?? $this->cardId) . ' (flashback ' . ($card?->altCasts[self::ALT_FLASHBACK] ?? '') . ', depuis le cimetière)';
+        }
+        $card = $state->castable($this->player, $this->cardId);
+        $label = 'Lancer ' . ($card?->name ?? $this->cardId) . ($card !== null && $player->findCastable($this->cardId) === null ? ' (exil)' : '');
         if ($card?->commander) {
             $label .= sprintf(' (commandant, coût %s)', $player->castCost($card));
         }
         if ($this->x > 0) {
             $label .= sprintf(' (X=%d)', $this->x);
         }
-        if ($this->alt === self::ALT_FREE) {
+        if ($this->alt === self::ALT_DASH) {
+            $label .= ' (dash ' . ($card?->altCasts[self::ALT_DASH] ?? '') . ')';
+        } elseif ($this->alt === self::ALT_FREE) {
             $label .= ' (coût alternatif : gratuit)';
         } elseif ($this->alt !== null && str_starts_with($this->alt, self::ALT_RETURN)) {
             $names = array_map(static function (string $id) use ($player): string {

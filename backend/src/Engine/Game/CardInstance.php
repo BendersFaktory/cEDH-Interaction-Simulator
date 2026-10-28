@@ -51,10 +51,24 @@ final class CardInstance
     public const STATIC_NONCREATURE_FLASH = 'noncreature_flash';
     public const STATIC_OPPONENTS_MV_LANDS = 'opponents_mv_lands';
     public const STATIC_OPPONENTS_NO_CAST_YOUR_TURN = 'opponents_no_cast_your_turn';
-    public const STATICS = [self::STATIC_NONCREATURE_FLASH, self::STATIC_OPPONENTS_MV_LANDS, self::STATIC_OPPONENTS_NO_CAST_YOUR_TURN];
+    /** Dans la main de départ d'un joueur qui n'est pas premier joueur : peut commencer la partie en jeu avec un marqueur de chance (Gemstone Caverns). */
+    public const STATIC_PREGAME_LUCK = 'pregame_luck';
+    public const LUCK = 'luck';
+    /** Un adversaire qui cherche dans sa bibliothèque exile ce qu'il trouve ; le contrôleur peut jouer ces cartes (Opposition Agent). */
+    public const STATIC_OPPOSITION_AGENT = 'opposition_agent';
+    public const STATICS = [self::STATIC_NONCREATURE_FLASH, self::STATIC_OPPONENTS_MV_LANDS, self::STATIC_OPPONENTS_NO_CAST_YOUR_TURN, self::STATIC_PREGAME_LUCK,
+        self::STATIC_OPPOSITION_AGENT];
 
     /** Coût additionnel (`extraCost`) : sacrifier une créature que l'on contrôle (Culling the Weak, Diabolic Intent). */
     public const EXTRA_SACRIFICE_CREATURE = 'sacrifice_creature';
+    /**
+     * Façons de lancer la carte pour un autre coût (`$altCasts` : sorte => coût de mana). Flashback (CR 702.34) : depuis le
+     * cimetière, au rythme habituel, puis exilée quand elle quitte la pile (Strike It Rich). Dash (CR 702.109) : depuis la main ;
+     * la créature a la célérité et retourne dans la main de son propriétaire au début de la prochaine étape de fin (Ragavan).
+     */
+    public const CAST_FLASHBACK = 'flashback';
+    public const CAST_DASH = 'dash';
+    public const ALT_CASTS = [self::CAST_FLASHBACK, self::CAST_DASH];
 
     // Mots-clés de combat (CR 702).
     public const FLYING = 'flying';
@@ -123,6 +137,26 @@ final class CardInstance
      */
     public array $counters = [];
 
+    /**
+     * Arrivée par Dash : célérité tant qu'elle reste sur le champ de bataille, et le trigger retardé de fin de tour ne renvoie
+     * que ce permanent-là (pas un nouvel objet du même id, CR 400.7). Sérialisé sous `dashed` par `toArray()`, omis à faux ;
+     * remis à faux quand la carte quitte le champ de bataille.
+     */
+    public bool $dashed = false;
+
+    /**
+     * Permanent qui est une copie d'une autre créature (Mockingbird, CR 707.2) : la carte elle-même, telle qu'elle redevient en
+     * quittant le champ de bataille (`GameState::sendToGraveyard()`, `exile()`, `returnToHand()`). Sérialisé sous `original` par
+     * `toArray()`, omis quand null.
+     */
+    public ?CardInstance $original = null;
+
+    /** La carte telle qu'elle est hors du champ de bataille : l'original d'une copie (Mockingbird), sinon elle-même. */
+    public function printed(): self
+    {
+        return $this->original ?? $this;
+    }
+
     private ?array $publicMemo = null;
     private ?array $arrayMemo = null;
     private string $arrayMemoKey = '';
@@ -168,9 +202,16 @@ final class CardInstance
         public readonly ?string $kicker = null, // coût de kicker (Orim's Chant : `{W}`), null = pas de kicker
         /** @var list<ReplacementEffect> effets de remplacement « de soi » (CR 614.15, Mox Diamond), lus par GameState::replacementFor() */
         public readonly array $replacements = [],
+        /** @var array<string, string> autres façons de la lancer (ALT_CASTS => coût de mana) : Flashback, Dash */
+        public readonly array $altCasts = [],
+        /** @var array<string, int> marqueurs posés à l'arrivée sur le champ de bataille (Wishclaw Talisman : `wish` => 3) */
+        public readonly array $entersWithCounters = [],
     ) {
         if (array_diff($statics, self::STATICS) !== []) {
             throw new \InvalidArgumentException("$name : capacité statique inconnue");
+        }
+        if (array_diff(array_keys($altCasts), self::ALT_CASTS) !== []) {
+            throw new \InvalidArgumentException("$name : façon de lancer inconnue");
         }
         $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
         $this->types = is_array($type) ? array_values($type) : [$type];
@@ -301,7 +342,7 @@ final class CardInstance
 
     public function hasKeyword(string $keyword): bool
     {
-        return in_array($keyword, $this->keywords, true);
+        return in_array($keyword, $this->keywords, true) || ($this->dashed && $keyword === self::HASTE);
     }
 
     /** Incolore : aucun symbole coloré ni hybride dans le coût de mana (`{C}` est incolore). */
@@ -317,6 +358,7 @@ final class CardInstance
     private static function isAnyColor(array $options): bool
     {
         $symbols = array_map(static fn (array $o): string => $o !== [] && count(array_unique(array_map(static fn (Color $c) => $c->symbol(), $o))) === 1 ? $o[0]->symbol() : '', $options);
+        $symbols = array_values(array_diff($symbols, ['C'])); // Gemstone Caverns : {C}, ou n'importe quelle couleur (un {C} est incolore)
         sort($symbols);
 
         return $symbols === ['B', 'G', 'R', 'U', 'W'];
@@ -469,6 +511,23 @@ final class CardInstance
         return !$this->hasType(self::INSTANT) && !$this->hasType(self::SORCERY);
     }
 
+    /**
+     * Propriétaire de la carte (CR 108.3), lu dans son id : `p<n>_c<k>` pour une carte de deck, `p<n>_t<k>` pour un jeton
+     * (propriétaire = joueur sous le contrôle duquel il est arrivé, CR 111.2). Ne change jamais, même quand le contrôle change
+     * (`GameState::gainControl()`) : c'est la zone du propriétaire qui reçoit la carte quand elle quitte le champ de bataille.
+     * null pour un id d'une autre forme (cartes construites à la main dans les tests) : le contrôleur fait alors foi.
+     */
+    public function ownerId(): ?int
+    {
+        return preg_match('/^p(\d+)_/', $this->id, $m) === 1 ? (int) $m[1] : null;
+    }
+
+    /** Propriétaire, ou `$controller` quand l'id ne le dit pas (voir ownerId()). */
+    public function ownerOr(int $controller): int
+    {
+        return $this->ownerId() ?? $controller;
+    }
+
     public function isLand(): bool
     {
         return $this->hasType(self::LAND);
@@ -518,13 +577,15 @@ final class CardInstance
             + ($this->tappedAfterOwnTurn > 0 ? ['tappedAfterOwnTurn' => $this->tappedAfterOwnTurn] : []) // idem
             + ($this->statics === [] ? [] : ['statics' => $this->statics]) // idem
             + ($this->kicker === null ? [] : ['kicker' => $this->kicker]) // idem
+            + ($this->altCasts === [] ? [] : ['altCasts' => $this->altCasts]) // idem
+            + ($this->entersWithCounters === [] ? [] : ['entersWithCounters' => $this->entersWithCounters]) // idem
             + ($this->replacements === [] ? [] : ['replacements' => array_map(static fn (ReplacementEffect $r) => $r->toArray(), $this->replacements)]); // idem
     }
 
     public function toArray(): array
     {
         $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint)) . ($this->grantedAbilities === [] ? '' : '|g' . count($this->grantedAbilities))
-            . ($this->counters === [] ? '' : '|c' . json_encode($this->counters));
+            . ($this->counters === [] ? '' : '|c' . json_encode($this->counters)) . ($this->dashed ? '|dash' : '') . ($this->original === null ? '' : '|o');
         if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
             return $this->arrayMemo;
         }
@@ -536,7 +597,9 @@ final class CardInstance
             + ($this->deathtouchDamage ? ['deathtouchDamage' => true] : [])
             + ($this->imprint === [] ? [] : ['imprint' => $this->imprint])
             + ($this->grantedAbilities === [] ? [] : ['granted' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->grantedAbilities)])
-            + ($this->counters === [] ? [] : ['counters' => $this->counters]);
+            + ($this->counters === [] ? [] : ['counters' => $this->counters])
+            + ($this->dashed ? ['dashed' => true] : [])
+            + ($this->original === null ? [] : ['original' => $this->original->toArray()]);
     }
 
     public static function fromArray(array $d): self
@@ -572,7 +635,11 @@ final class CardInstance
             $d['statics'] ?? [],
             $d['kicker'] ?? null,
             array_map([ReplacementEffect::class, 'fromArray'], $d['replacements'] ?? []),
+            $d['altCasts'] ?? [],
+            array_map('intval', $d['entersWithCounters'] ?? []),
         );
+        $card->dashed = (bool) ($d['dashed'] ?? false);
+        $card->original = isset($d['original']) ? self::fromArray($d['original']) : null;
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);
         $card->imprint = $d['imprint'] ?? [];

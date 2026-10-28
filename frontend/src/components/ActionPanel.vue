@@ -27,6 +27,7 @@ const groups = computed(() => {
   const listed = [
     { title: 'Main de départ', items: actions.filter((a) => a.type === 'keep' || a.type === 'mulligan') },
     { title: 'Mettre au fond', items: actions.filter((a) => a.type === 'bottom') },
+    { title: 'Avant-partie : commencer avec cette carte en jeu ?', items: actions.filter((a) => a.type === 'pregame') },
     { title: 'Attaquer', items: actions.filter((a) => a.type === 'attack') },
     { title: 'Bloquer', items: actions.filter((a) => a.type === 'block') },
     { title: 'Répartir les dégâts de combat', items: actions.filter((a) => a.type === 'assign') },
@@ -37,7 +38,7 @@ const groups = computed(() => {
     { title: 'Remettre une carte de ta main sur ta bibliothèque', items: actions.filter((a) => a.type === 'putBack') },
     { title: 'Remettre les cartes du dessus dans l’ordre, ou mélanger', items: actions.filter((a) => a.type === 'arrange') },
     { title: 'Chain of Vapor : sacrifier un terrain pour copier le sort ?', items: actions.filter((a) => a.type === 'chain') },
-    { title: 'Effet de remplacement : défausser un terrain ?', items: actions.filter((a) => a.type === 'replace') },
+    { title: 'Effet de remplacement : comment arrive-t-il ?', items: actions.filter((a) => a.type === 'replace') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },

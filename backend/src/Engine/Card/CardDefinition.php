@@ -58,6 +58,10 @@ final class CardDefinition
         public readonly ?string $kicker = null,
         /** @var list<ReplacementEffect> */
         public readonly array $replacements = [],
+        /** @var array<string, string> Flashback, Dash (voir CardInstance::ALT_CASTS) */
+        public readonly array $altCasts = [],
+        /** @var array<string, int> marqueurs à l'arrivée (Wishclaw Talisman) */
+        public readonly array $entersWithCounters = [],
     ) {
         $this->effects = $effects !== [] ? array_values($effects) : ($effect === null ? [] : [new SpellEffect($effect, $amount, $adds)]);
     }
@@ -68,7 +72,7 @@ final class CardDefinition
             $id, $this->name, $this->type, $this->cost, null, 0, false, $commander,
             $this->power, $this->toughness, 0, 0, $this->manaCost, $this->produces, $this->abilities, null, false,
             $this->triggers, $this->subtypes, $this->keywords, $this->supertypes, $this->effects, $this->untappedLifeCost, $this->altCost, $this->noUntap, $this->extraCost, $this->tappedAfterOwnTurn,
-            $this->statics, $this->kicker, $this->replacements,
+            $this->statics, $this->kicker, $this->replacements, $this->altCasts, $this->entersWithCounters,
         );
     }
 
@@ -81,7 +85,9 @@ final class CardDefinition
             'subtypes' => $this->subtypes, 'keywords' => $this->keywords, 'supertypes' => $this->supertypes,
         ] + ($this->untappedLifeCost > 0 ? ['untappedLifeCost' => $this->untappedLifeCost] : []) + ($this->altCost === null ? [] : ['altCost' => $this->altCost]) + ($this->noUntap ? ['noUntap' => true] : []) + ($this->extraCost === null ? [] : ['extraCost' => $this->extraCost]) + ($this->tappedAfterOwnTurn > 0 ? ['tappedAfterOwnTurn' => $this->tappedAfterOwnTurn] : [])
             + ($this->statics === [] ? [] : ['statics' => $this->statics]) + ($this->kicker === null ? [] : ['kicker' => $this->kicker])
-            + ($this->replacements === [] ? [] : ['replacements' => array_map(static fn (ReplacementEffect $r) => $r->toArray(), $this->replacements)]) + (count($this->effects) > 1
+            + ($this->replacements === [] ? [] : ['replacements' => array_map(static fn (ReplacementEffect $r) => $r->toArray(), $this->replacements)])
+            + ($this->altCasts === [] ? [] : ['altCasts' => $this->altCasts])
+            + ($this->entersWithCounters === [] ? [] : ['entersWithCounters' => $this->entersWithCounters]) + (count($this->effects) > 1
             ? ['effects' => array_map(static fn (SpellEffect $e) => $e->toArray(), $this->effects)]
             : ['spell' => isset($this->effects[0]) ? $this->effects[0]->toArray() : []]);
     }
@@ -98,6 +104,8 @@ final class CardDefinition
             $d['subtypes'] ?? [], $d['keywords'] ?? [], $d['supertypes'] ?? [], $effects, (int) ($d['untappedLifeCost'] ?? 0), $d['altCost'] ?? null, (bool) ($d['noUntap'] ?? false), $d['extraCost'] ?? null, (int) ($d['tappedAfterOwnTurn'] ?? 0),
             $d['statics'] ?? [], $d['kicker'] ?? null,
             array_map([ReplacementEffect::class, 'fromArray'], $d['replacements'] ?? []),
+            $d['altCasts'] ?? [],
+            array_map('intval', $d['entersWithCounters'] ?? []),
         );
     }
 }

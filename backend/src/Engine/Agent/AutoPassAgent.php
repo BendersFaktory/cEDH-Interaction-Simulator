@@ -7,6 +7,7 @@ namespace App\Engine\Agent;
 use App\Engine\Action\Action;
 use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\BottomCard;
+use App\Engine\Action\PregameChoice;
 use App\Engine\Action\ChainCopy;
 use App\Engine\Action\ReplaceChoice;
 use App\Engine\Action\Discard;
@@ -49,7 +50,7 @@ final class AutoPassAgent implements PlayerAgent
         // main ; Ponder : l'ordre actuel) : le premier choix proposé (déterministe). Jamais de mulligan.
         foreach ($legal as $action) {
             if ($action instanceof Discard || $action instanceof PutTrigger || $action instanceof KeepLegend || $action instanceof KeepHand || $action instanceof BottomCard || $action instanceof ScryArrange || $action instanceof PayCost
-                || $action instanceof PutBack || $action instanceof ArrangeTop || $action instanceof ChainCopy || $action instanceof ReplaceChoice) {
+                || $action instanceof PutBack || $action instanceof ArrangeTop || $action instanceof ChainCopy || $action instanceof ReplaceChoice || $action instanceof PregameChoice) {
                 return $action;
             }
         }

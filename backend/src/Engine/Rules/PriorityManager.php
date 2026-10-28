@@ -20,6 +20,7 @@ use App\Engine\Action\ScryArrange;
 use App\Engine\Agent\AgentRegistry;
 use App\Engine\Decision\IllegalActionException;
 use App\Engine\Game\CardInstance;
+use App\Engine\Game\PlayerState;
 use App\Engine\Game\GameState;
 use App\Engine\Game\PriorityState;
 use App\Engine\Mana\ManaCost;
@@ -321,7 +322,10 @@ final class PriorityManager
         if ($a->discardId !== null && !($s->player($a->player())->findInHand($a->discardId)?->isLand() ?? false)) {
             throw new IllegalActionException('Carte de terrain à défausser absente de la main');
         }
-        $s->finishReplacement($a->player(), $sel['owner'] ?? $a->player(), CardInstance::fromArray($source), $a->discardId);
+        if ($a->copyId !== null && !in_array($a->copyId, array_map(static fn (CardInstance $c) => $c->id, $s->copyCandidates((int) ($sel['maxValue'] ?? -1))), true)) {
+            throw new IllegalActionException('Créature à copier invalide');
+        }
+        $s->finishReplacement($a->player(), $sel['owner'] ?? $a->player(), CardInstance::fromArray($source), $a->discardId, $a->copyId);
         $this->finishSelection($s);
     }
 
@@ -386,16 +390,29 @@ final class PriorityManager
     private function playLand(GameState $s, PlayLand $a): void
     {
         $p = $s->player($a->player());
-        $card = $p->takeFromHand($a->cardId) ?? throw new IllegalActionException('Terrain absent de la main');
+        $card = $p->takeFromHand($a->cardId);
+        $owner = null;
+        if ($card === null) {
+            $play = $s->exilePlayFor($a->player(), $a->cardId);
+            if ($play === null || !$play['lands'] || !$play['card']->isLand()) {
+                throw new IllegalActionException('Terrain absent de la main');
+            }
+            ['card' => $card, 'owner' => $owner] = $s->takeExilePlayable($a->player(), $a->cardId); // Opposition Agent : terrain exilé joué
+        }
         $s->landsPlayed++;
-        $s->putLandOntoBattlefield($a->player(), $card, $a->payLife, 'LandPlayed');
+        $s->putLandOntoBattlefield($a->player(), $card, $a->payLife, 'LandPlayed', fromExileOf: $owner);
         $s->queueLandPlayedTriggers($a->player(), $card); // City of Traitors
     }
 
     private function cast(GameState $s, CastSpell $a): void
     {
         $p = $s->player($a->player());
-        $card = $p->findCastable($a->cardId) ?? throw new IllegalActionException('Carte absente de la main et de la zone de commandement');
+        $altCast = in_array($a->alt, CardInstance::ALT_CASTS, true) ? $a->alt : null; // Flashback, Dash
+        $card = ($altCast === CardInstance::CAST_FLASHBACK ? self::inGraveyard($p, $a->cardId) : $s->castable($a->player(), $a->cardId))
+            ?? throw new IllegalActionException('Carte absente de la main, de la zone de commandement et de l\'exil jouable');
+        if ($altCast !== null && (!isset($card->altCasts[$altCast]) || ($altCast === CardInstance::CAST_DASH && $p->findInHand($card->id) === null))) {
+            throw new IllegalActionException('Ce sort ne se lance pas ainsi');
+        }
         if ($card->isModal() ? !in_array($a->mode, $card->modes(), true) : $a->mode !== 0) {
             throw new IllegalActionException('Mode invalide pour ce sort');
         }
@@ -413,7 +430,7 @@ final class PriorityManager
         }
 
         // Coût calculé AVANT d'incrémenter le compteur de lancements (taxe de commandant).
-        $cost = $p->castCost($card);
+        $cost = $altCast !== null ? ManaCost::parse($card->altCasts[$altCast]) : $s->castCostFor($a->player(), $card);
         if ($a->x < 0 || ($a->x > 0 && !$cost->hasX())) {
             throw new IllegalActionException('X invalide pour ce sort');
         }
@@ -424,7 +441,7 @@ final class PriorityManager
             $cost = ManaCost::parse((string) $cost . $card->kicker); // Orim's Chant : {W} de plus
         }
         $plan = null; // coût alternatif : rien à payer en mana
-        if ($a->alt === null) {
+        if ($a->alt === null || ($altCast !== null && $a->x === 0)) {
             $plan = ManaPayment::plan($p, $cost, $a->x, $s->turn, null, $card) ?? throw new IllegalActionException('Mana insuffisant pour ce sort');
         } elseif ($a->x !== 0) {
             throw new IllegalActionException('Coût alternatif sans X');
@@ -432,7 +449,9 @@ final class PriorityManager
         $pitch = null;
         $pitchLife = 0;
         $returned = [];
-        if ($a->alt === CastSpell::ALT_FREE) {
+        if ($altCast !== null) {
+            // Flashback, Dash : coût de mana déjà vérifié.
+        } elseif ($a->alt === CastSpell::ALT_FREE) {
             if (!(($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander())
                 || ($card->altCost === CardInstance::ALT_OPPONENT_THREE_SPELLS && self::opponentCastThree($s, $a->player())))) {
                 throw new IllegalActionException('Coût alternatif gratuit indisponible');
@@ -469,11 +488,13 @@ final class PriorityManager
             }
         }
 
-        $card = $p->takeFromHand($a->cardId);
+        $card = $altCast === CardInstance::CAST_FLASHBACK ? self::takeFromGraveyard($p, $a->cardId) : $p->takeFromHand($a->cardId);
         $fromCommand = false;
-        if ($card === null) {
-            $card = $p->takeFromCommand($a->cardId);
+        $owner = null; // propriétaire d'une carte exilée lancée (Ragavan : la carte d'un adversaire)
+        if ($card === null && ($card = $p->takeFromCommand($a->cardId)) !== null) {
             $fromCommand = true;
+        } elseif ($card === null) {
+            ['card' => $card, 'owner' => $owner] = $s->takeExilePlayable($a->player(), $a->cardId) ?? throw new IllegalActionException('Carte introuvable');
         }
         ['tapped' => $tapped, 'paid' => $paid, 'fromPool' => $fromPool, 'sacrifice' => $sacrifice, 'pain' => $pain] = $plan === null
             ? ['tapped' => [], 'paid' => [], 'fromPool' => [], 'sacrifice' => [], 'pain' => []]
@@ -495,7 +516,8 @@ final class PriorityManager
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
 
-        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode, kicked: $a->kicked);
+        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode, kicked: $a->kicked,
+            owner: $owner !== null && $owner !== $a->player() ? $owner : null, altCast: $altCast);
         $s->stack[] = $item;
 
         $s->emit('SpellCast', [
@@ -512,7 +534,7 @@ final class PriorityManager
             'pool' => $p->pool->toArray(),
         ] + $p->pool->restrictedField() + [
             'fromCommand' => $fromCommand,
-        ] + ($a->mode > 0 ? ['mode' => $a->mode] : []) + ($a->kicked ? ['kicked' => true] : []));
+        ] + ($owner !== null ? ['fromExile' => true, 'owner' => $owner] : []) + ($altCast !== null ? ['altCast' => $altCast] : []) + ($a->mode > 0 ? ['mode' => $a->mode] : []) + ($a->kicked ? ['kicked' => true] : []));
         if ($sacrificed !== null && !in_array($sacrificed->id, $sacrifice, true)) {
             $sacrifice[] = $sacrificed->id;
         }
@@ -538,6 +560,25 @@ final class PriorityManager
         // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
         $s->priority->passed = [];
         $s->priority->announced = false; // le lanceur reçoit la priorité en premier
+    }
+
+    private static function inGraveyard(PlayerState $p, string $cardId): ?CardInstance
+    {
+        foreach ($p->graveyard as $card) {
+            if ($card->id === $cardId) {
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
+    private static function takeFromGraveyard(PlayerState $p, string $cardId): ?CardInstance
+    {
+        $card = self::inGraveyard($p, $cardId);
+        $p->graveyard = array_values(array_filter($p->graveyard, static fn (CardInstance $c) => $c->id !== $cardId));
+
+        return $card;
     }
 
     /** Un adversaire de `$player` a-t-il lancé trois sorts ou plus ce tour (Mindbreak Trap) ? */

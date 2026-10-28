@@ -23,7 +23,6 @@ use App\Engine\Game\StackItem;
 use App\Engine\Rules\LegalActionGenerator;
 use App\Engine\Rules\StackResolver;
 use App\Service\Deck\CardMapper;
-use App\Service\Deck\UnsupportedCard;
 use App\Tests\Service\Deck\ScryfallFixtures;
 use PHPUnit\Framework\TestCase;
 
@@ -119,15 +118,8 @@ final class KraumH2CardsTest extends TestCase
             'Mox Opal', 'Mox Amber', 'Starting Town', 'City of Traitors', 'Otawara, Soaring City', 'Pyroblast', 'Red Elemental Blast', 'Gamble', 'Ranger-Captain of Eos'] as $name) {
             self::assertInstanceOf(CardDefinition::class, self::def($name), $name);
         }
-        // Misdirection et Commandeer : acceptées depuis le lot H3 (KraumH3CardsTest).
-        foreach (['Gemstone Caverns' => 'opening hand', 'Wishclaw Talisman' => 'wish counters'] as $name => $why) {
-            try {
-                self::def($name);
-                self::fail("$name devrait être refusée");
-            } catch (UnsupportedCard $e) {
-                self::assertStringContainsString($why, $e->getMessage());
-            }
-        }
+        // Misdirection et Commandeer : acceptées depuis le lot H3 (KraumH3CardsTest) ; Gemstone Caverns et Wishclaw Talisman
+        // depuis l'étape 13 (KraumH5aCardsTest).
     }
 
     public function testNewFieldsRoundTripAndAreOmittedByDefault(): void

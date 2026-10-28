@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { abilityText, colorsOf, frameOf, spellText, triggerText, typeLine } from './cardText'
+import { abilityText, altCastText, colorsOf, frameOf, spellText, triggerText, typeLine } from './cardText'
 import type { PublicCard } from '../types/engine'
 
 const card = (c: Partial<PublicCard>): PublicCard => ({ id: 'c1', name: 'X', type: 'instant', cost: 0, effect: null, amount: 0, ...c })
@@ -16,6 +16,25 @@ describe('cardText', () => {
   it('ligne de type avec sous-types et commandant', () => {
     expect(typeLine(card({ type: ['artifact', 'creature'], subtypes: { creature: ['Eldrazi'] } }))).toBe('Artefact Créature — Eldrazi')
     expect(typeLine(card({ type: 'creature', commander: true }))).toBe('Commandant · Créature')
+  })
+
+  it('lot H5a : triggers, capacités et mana à marqueur', () => {
+    expect(triggerText({ event: 'any_cast', effect: 'lose_life_treasure', amount: 1, filter: 'second_spell' })).toBe(
+      'Quand un joueur lance un sort (son deuxième du tour) : perd 1 PV et crée un Trésor',
+    )
+    expect(triggerText({ event: 'opponent_draw', effect: 'treasure', amount: 1, spec: 'tapped', filter: 'off_turn_once' })).toBe(
+      'Quand un adversaire pioche une carte hors de son tour (une fois par tour) : crée 1 Trésor engagé',
+    )
+    expect(abilityText({ isManaAbility: false, effect: 'two_players_draw', tap: false, manaCost: '{2}{W}', amount: 1 })).toBe('{2}{W} : deux joueurs ciblés piochent 1')
+    expect(abilityText({ isManaAbility: true, effect: 'mana', tap: true, spec: 'luck', options: [] })).toContain('marqueur de chance')
+  })
+
+  it('Flashback et Dash', () => {
+    expect(altCastText(card({ altCasts: { flashback: '{2}{R}', dash: '{1}{R}' } }))).toEqual([
+      'Flashback {2}{R} (depuis le cimetière, puis exilée)',
+      'Dash {1}{R} (célérité, revient en main à la fin du tour)',
+    ])
+    expect(altCastText(card({}))).toEqual([])
   })
 
   it('textes : sort, capacité, trigger', () => {
@@ -35,6 +54,18 @@ describe('cardText', () => {
     ).toBe('inflige 2 dégâts, puis pioche 1')
     expect(abilityText({ isManaAbility: false, effect: 'draw', tap: true, manaCost: '{2}', amount: 1 })).toBe('{2}, {T} : pioche 1')
     expect(triggerText({ event: 'etb', effect: 'damage', amount: 2 })).toBe('Quand elle arrive en jeu : inflige 2 dégâts')
+    expect(triggerText({ event: 'etb', effect: 'treasure', amount: 1, spec: 'tapped' })).toBe('Quand elle arrive en jeu : crée 1 Trésor engagé')
+    expect(
+      spellText(
+        card({
+          effect: 'counter',
+          effects: [
+            { effect: 'counter', target: 'noncreature' },
+            { effect: 'treasure', amount: 2, target: 'spell_controller' },
+          ],
+        }),
+      ),
+    ).toContain('le contrôleur du sort visé crée 2 Trésor')
     expect(triggerText({ event: 'draw_step', effect: 'self_damage', amount: 1, filter: 'tapped' })).toBe('Au début de ton étape de pioche, si elle est engagée : inflige 1 dégâts à son contrôleur')
     expect(abilityText({ isManaAbility: false, effect: 'untap', tap: false, manaCost: '{4}', upkeepOnly: true })).toBe('{4} : se dégage (à ton entretien)')
     expect(spellText(card({ effect: 'counter', effects: [{ effect: 'counter', payCost: '{1}' }] }))).toBe('contrecarre le sort ciblé sauf si son contrôleur paie {1}')

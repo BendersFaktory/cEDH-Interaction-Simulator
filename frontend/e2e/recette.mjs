@@ -80,6 +80,21 @@ const DECK_G_J1 = DECK_21.replace('44 Plains', '1 Daze\n1 Rhystic Study\n42 Plai
 const DECK_REMORA = DECK_21.replace('1 Divination', '1 Mystic Remora')
 // Scénario 40 (effets de remplacement) : J0 avec Mox Diamond à la place de Divination.
 const DECK_MOX = DECK_21.replace('1 Divination', '1 Mox Diamond')
+// Scénarios 41 et 42 (lot H5a) : J0 avec Wishclaw Talisman, puis avec Gemstone Caverns (à la place de Divination).
+// Wishclaw Talisman coûte {1}{B} : deck à deux commandants Kraum / Tymna (W, U, B, R), 100 cartes.
+const DECK_WISHCLAW = `Commander
+1 Kraum, Ludevic's Opus
+1 Tymna the Weaver
+
+Deck
+1 Wishclaw Talisman
+1 Sol Ring
+1 Mind Stone
+1 Wall of Omens
+31 Plains
+31 Island
+32 Swamp`
+const DECK_CAVERNS = DECK_21.replace('1 Divination', '1 Gemstone Caverns')
 const J0_J1_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
 const T0 = Date.now()
 try {
@@ -249,6 +264,8 @@ async function run() {
     ['38', (b) => scenario(b, '38', s38)],
     ['39', (b) => scenario(b, '39', s39)],
     ['40', (b) => scenario(b, '40', s40)],
+    ['41', (b) => scenario(b, '41', s41)],
+    ['42', (b) => scenario(b, '42', s42)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -1928,4 +1945,69 @@ async function s40({ page, log, shot, problem, openGame }) {
   if (!label.startsWith('Défausser')) problem(`recette Mox Diamond : choix inattendu (« ${label} »)`)
   if (!line.includes('Mox Diamond arrive sur le champ de bataille')) problem(`recette Mox Diamond : arrivée absente du journal (« ${line} »)`)
   if (applied?.payload.destination !== 'battlefield' || !applied?.payload.discarded) problem('recette Mox Diamond : ReplacementApplied sans arrivée ni terrain défaussé')
+}
+
+// 41 : CHANGEMENT DE CONTRÔLE (Wishclaw Talisman). J0 lance Wishclaw Talisman puis, pendant son tour, l'active (retirer un
+// marqueur de souhait) en choisissant une carte de sa bibliothèque ; à la résolution, la carte va en main et J1 prend le
+// contrôle du Talisman (il passe sur son champ de bataille avec ses deux marqueurs restants).
+async function s41({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_WISHCLAW),
+    (p) => (p.actions.some((a) => a.type === 'ability' && a.label.includes('Wishclaw Talisman')) ? 'stop' : (castOf(p.actions, 'Wishclaw Talisman') ?? null)),
+    { card: 'Wishclaw Talisman' },
+  )
+  if (!found) return problem('recette Wishclaw : aucune graine où J0 peut activer Wishclaw Talisman')
+  log('41 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('41a-wishclaw-activation')
+  const label = await clickIn(page, 'Capacités', 'Wishclaw Talisman')
+  // La pile se résout quand tous ont passé : J0 passe par l'API, puis la partie est rechargée.
+  let sim = await api.get(found.sim.id)
+  for (let i = 0; i < 20 && sim.status === 'waiting' && !(await api.events(found.sim.id)).some((e) => e.type === 'PermanentControlChanged'); i++) {
+    const pass = sim.pending?.actions?.find((a) => a.type === 'pass')
+    if (!pass) break
+    sim = await api.decide(sim.id, pass.id)
+  }
+  // Page rechargée : rouvrir la même partie sans recharger la placerait à la fin avant l'arrivée des nouveaux événements.
+  await page.reload()
+  await openGame(found.sim.id)
+  const line = await logLine(page, 'prend le contrôle de Wishclaw Talisman')
+  const events = await api.events(found.sim.id)
+  const changed = events.find((e) => e.type === 'PermanentControlChanged')
+  const removed = events.find((e) => e.type === 'CountersRemoved')
+  const st = await api.state(found.sim.id)
+  const onJ1 = st.players[changed?.payload.player ?? 1].battlefield.some((c) => c.name === 'Wishclaw Talisman')
+  log('41 activation :', label, '| journal :', line, '| marqueurs restants :', removed?.payload.count, '| chez J' + changed?.payload.player, onJ1)
+  await shot('41b-wishclaw-donne')
+  if (!line.includes('prend le contrôle de Wishclaw Talisman (J0)')) problem(`recette Wishclaw : changement de contrôle absent du journal (« ${line} »)`)
+  if (changed?.payload.from !== 0 || changed?.payload.player === 0) problem('recette Wishclaw : PermanentControlChanged attendu de J0 vers un adversaire')
+  if (removed?.payload.count !== 2) problem('recette Wishclaw : un marqueur de souhait aurait dû être retiré (2 restants)')
+  if (!onJ1) problem("recette Wishclaw : le Talisman n'est pas sur le champ de bataille de son nouveau contrôleur")
+  if (st.players[0].battlefield.some((c) => c.name === 'Wishclaw Talisman')) problem('recette Wishclaw : le Talisman est resté chez J0')
+}
+
+// 42 : AVANT-PARTIE (Gemstone Caverns). J0, qui n'est pas premier joueur, a Gemstone Caverns en main de départ : il commence la
+// partie avec elle en jeu (marqueur de chance) en exilant une autre carte de sa main.
+async function s42({ page, log, shot, problem, openGame }) {
+  let found = null
+  for (let seed = 1; seed <= 300 && !found; seed++) {
+    const sim = await api.createHumanWithDeck(seed, DECK_CAVERNS)
+    if (sim.status === 'waiting' && sim.pending?.actions?.some((a) => a.type === 'pregame')) found = { seed, sim }
+  }
+  if (!found) return problem('recette Gemstone Caverns : aucune graine où J0 (pas premier joueur) a Gemstone Caverns en main de départ')
+  log('42 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('42a-caverns-choix')
+  const label = await clickIn(page, 'Avant-partie', 'Commencer avec Gemstone Caverns en jeu')
+  const line = await logLine(page, 'J0 commence la partie avec Gemstone Caverns en jeu')
+  const events = await api.events(found.sim.id)
+  const placed = events.find((e) => e.type === 'PregameCardPlaced')
+  const luck = events.find((e) => e.type === 'CountersAdded' && e.payload.kind === 'luck')
+  const exiled = events.find((e) => e.type === 'CardExiled' && e.payload.source === 'Gemstone Caverns')
+  const first = events.find((e) => e.type === 'GameStarted')?.payload.firstPlayer
+  log('42 choix :', label, '| journal :', line, '| premier joueur : J' + first, '| exilée :', exiled?.payload.card.name)
+  await shot('42b-caverns-posee')
+  if (first === 0) problem('recette Gemstone Caverns : J0 est premier joueur, la décision ne devait pas être proposée')
+  if (!line.includes('Gemstone Caverns en jeu')) problem(`recette Gemstone Caverns : pose absente du journal (« ${line} »)`)
+  if (placed?.payload.player !== 0 || luck?.payload.count !== 1 || !exiled) problem('recette Gemstone Caverns : PregameCardPlaced, marqueur de chance ou carte exilée manquant')
 }

@@ -72,8 +72,9 @@ final class CardMapper
         $keywords = [];
         foreach ($card['keywords'] ?? [] as $keyword) {
             $key = strtolower((string) $keyword);
-            if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel', 'mill', 'kicker', 'gift', 'mobilize', 'amass', 'cumulative upkeep'], true)) {
-                continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Kicker {W} », « Mobilize 2 ») est traité ligne par ligne
+            if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel', 'mill', 'kicker', 'gift', 'mobilize', 'amass', 'cumulative upkeep',
+                'treasure', 'flashback', 'dash', "scions' secretary"], true)) {
+                continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Kicker {W} », « Mobilize 2 », « Flashback {2}{R} ») est traité ligne par ligne
             }
             if (!isset(self::KEYWORDS[$key])) {
                 throw $fail("mot-clé non modélisé ($keyword)");
@@ -98,9 +99,12 @@ final class CardMapper
         $replacements = []; // effets de remplacement « de soi » (Mox Diamond)
         $kicker = null; // « Kicker {W} » (Orim's Chant)
         $gift = null; // « Gift a tapped Fish » : jeton promis (Into the Flood Maw)
+        $altCasts = []; // « Flashback {2}{R} » (Strike It Rich), « Dash {1}{R} » (Ragavan)
+        $entersWithCounters = []; // « ~ enters with three wish counters on it. » (Wishclaw Talisman)
 
         foreach ($this->oracleLines((string) ($card['oracle_text'] ?? ''), $name) as $line) {
             $line = $this->anyColor($line);
+            $line = (string) preg_replace("/^Scions' Secretary — /u", '', $line); // mot d'aptitude (Tataru Taru) : sans effet de règle
             if ($this->isKeywordLine($line)) {
                 continue;
             }
@@ -116,7 +120,27 @@ final class CardMapper
                 $mode = $modal;
                 $line = $bullet[1];
             }
-            if ($isSpell && preg_match('/^Kicker ((?:\{(?:\d+|[WUBRG])\})+)$/', $line, $m)) {
+            if (($isSpell || $isCreature) && preg_match('/^(Flashback|Dash) ((?:\{(?:\d+|[WUBRG])\})+)$/', $line, $m)
+                && ($m[1] === 'Flashback') === $isSpell) {
+                $altCasts[strtolower($m[1])] = $m[2]; // Flashback : sort depuis le cimetière ; Dash : créature
+            } elseif (!$isSpell && preg_match('/^~ enters with (one|two|three|four) ([a-z]+) counters? on it\.$/', $line, $m)) {
+                $entersWithCounters[$m[2]] = self::NUMBER[$m[1]]; // Wishclaw Talisman
+            } elseif (!$isSpell && !$isLand && preg_match('/^((?:\{\d+\})+), \{T\}, Remove an? ([a-z]+) counter from ~: Search your library for a card, put it into your hand, then shuffle\. An opponent gains control of ~\. Activate only during your turn\.$/', $line, $m)) {
+                $abilities[] = ActivatedAbility::tutorGiveControl($m[1], $m[2]); // Wishclaw Talisman
+            } elseif ($isCreature && $line === "You control your opponents while they're searching their libraries.") {
+                $statics[] = CardInstance::STATIC_OPPOSITION_AGENT; // Opposition Agent (le contrôle pendant la recherche n'est pas modélisé)
+            } elseif ($isCreature && $line === 'While an opponent is searching their library, they exile each card they find. You may play those cards for as long as they remain exiled, and you may spend mana as though it were mana of any color to cast them.') {
+                $statics[] = CardInstance::STATIC_OPPOSITION_AGENT; // dédoublonné ci-dessous
+            } elseif ($isCreature && $line === "You may have ~ enter as a copy of any creature on the battlefield with mana value less than or equal to the amount of mana spent to cast ~, except it's a Bird in addition to its other types and it has flying.") {
+                $replacements[] = new ReplacementEffect(ReplacementEffect::ENTERS, ReplacementEffect::COPY_CREATURE, ReplacementEffect::ENTER); // Mockingbird
+            } elseif ($isLand && $line === "If this card is in your opening hand and you're not the starting player, you may begin the game with ~ on the battlefield with a luck counter on it. If you do, exile a card from your hand.") {
+                $statics[] = CardInstance::STATIC_PREGAME_LUCK; // Gemstone Caverns
+            } elseif ($isLand && $line === '{T}: Add {C}. If ~ has a luck counter on it, instead add ' . self::ANY_COLOR . '.') {
+                $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_LUCK); // Gemstone Caverns
+            } elseif ($isSpell && $line === 'Counter target noncreature spell. Its controller creates two Treasure tokens.') {
+                $effects[] = new SpellEffect('counter', 0, null, 'noncreature'); // An Offer You Can't Refuse
+                $effects[] = new SpellEffect('treasure', 2, target: SpellEffect::TREASURE_SPELL_CONTROLLER);
+            } elseif ($isSpell && preg_match('/^Kicker ((?:\{(?:\d+|[WUBRG])\})+)$/', $line, $m)) {
                 $kicker = $m[1]; // Orim's Chant
             } elseif ($isSpell && $line === 'Gift a tapped Fish') {
                 $gift = 'Fish:1/1'; // Into the Flood Maw (le jeton est créé engagé)
@@ -327,7 +351,7 @@ final class CardMapper
             $name, $type, (int) ($card['cmc'] ?? 0), $manaCost === '' ? null : $manaCost, $power, $toughness,
             null, 0, null, $produces, $abilities, $triggers, $subtypes, array_values(array_unique($keywords)),
             in_array('Legendary', $supertypes, true) ? [CardInstance::LEGENDARY] : [], $this->effectList($effects, $fail), $untappedLifeCost, $altCost, $noUntap,
-            $extraCost, $tappedAfterOwnTurn, $statics, $kicker, $replacements,
+            $extraCost, $tappedAfterOwnTurn, array_values(array_unique($statics)), $kicker, $replacements, $altCasts, $entersWithCounters,
         );
     }
 
@@ -363,6 +387,9 @@ final class CardMapper
     {
         $text = (string) preg_replace('/\([^)]*\)/', '', $text);
         $text = str_replace($name, '~', $text);
+        if (str_contains($name, ', ')) {
+            $text = (string) preg_replace('/\b' . preg_quote(explode(', ', $name, 2)[0], '/') . '\b/', '~', $text); // nom court d'une légende (« Ragavan »)
+        }
         $text = (string) preg_replace('/\bthis (creature|artifact|enchantment|permanent|land|spell)\b/i', '~', $text);
         $text = str_replace('enters the battlefield', 'enters', $text);
 
@@ -420,6 +447,9 @@ final class CardMapper
         }
         if (!$tap && !$sacrifice && $cost !== null && $m[2] === 'Each player draws a card.') {
             return ActivatedAbility::eachDraw(1, $cost); // Faerie Mastermind
+        }
+        if (!$tap && !$sacrifice && $cost !== null && $m[2] === 'Two target players each draw a card.') {
+            return ActivatedAbility::twoPlayersDraw(1, $cost); // Gleaming Splendor
         }
         if ($tap && $sacrifice && $cost === null && $m[2] === 'Add ' . self::ANY_COLOR . '.') {
             return ActivatedAbility::treasure(); // Lotus Petal : {T}, sacrifier : un mana de la couleur de son choix
@@ -486,6 +516,21 @@ final class CardMapper
         }
         if ($line === 'Whenever an opponent draws their second card each turn, you draw a card.') {
             return [new TriggeredAbility(TriggeredAbility::OPPONENT_DRAW, 'draw', 1, filter: TriggeredAbility::SECOND_DRAW)]; // Faerie Mastermind
+        }
+        if ($line === 'Whenever an opponent draws their second card each turn, you create a Treasure token.') {
+            return [new TriggeredAbility(TriggeredAbility::OPPONENT_DRAW, 'treasure', 1, filter: TriggeredAbility::SECOND_DRAW)]; // Gleaming Splendor
+        }
+        if ($isCreature && $line === "Whenever ~ deals combat damage to a player, create a Treasure token and exile the top card of that player's library. Until end of turn, you may cast that card.") {
+            return [new TriggeredAbility(TriggeredAbility::COMBAT_DAMAGE_PLAYER, 'treasure_exile_top')]; // Ragavan, Nimble Pilferer
+        }
+        if ($line === 'Whenever a player casts their second spell each turn, you lose 1 life and create a Treasure token.') {
+            return [new TriggeredAbility(TriggeredAbility::ANY_CAST, 'lose_life_treasure', 1, filter: TriggeredAbility::SECOND_SPELL)]; // Lotho, Corrupt Shirriff
+        }
+        if ($isCreature && $line === 'When ~ enters, you draw a card and target opponent may draw a card.') {
+            return [new TriggeredAbility(TriggeredAbility::ETB, 'draw_opponent_may', 1)]; // Tataru Taru
+        }
+        if ($line === "Whenever an opponent draws a card, if it isn't that player's turn, create a tapped Treasure token. This ability triggers only once each turn.") {
+            return [new TriggeredAbility(TriggeredAbility::OPPONENT_DRAW, 'treasure', 1, TriggeredAbility::TREASURE_TAPPED, TriggeredAbility::OFF_TURN_ONCE)]; // Tataru Taru
         }
         $trigger = $this->trigger($line, $isCreature);
 

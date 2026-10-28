@@ -33,8 +33,10 @@ final class PlayLand implements Action
     public function describe(GameState $state): string
     {
         $card = $state->player($this->player)->findInHand($this->cardId);
+        $exiled = $card === null ? $state->exilePlayFor($this->player, $this->cardId)['card'] ?? null : null; // Opposition Agent
+        $card ??= $exiled;
 
-        return 'Jouer ' . ($card?->name ?? $this->cardId) . match ($this->payLife) {
+        return 'Jouer ' . ($card?->name ?? $this->cardId) . ($exiled !== null ? ' (exil)' : '') . match ($this->payLife) {
             null => '',
             true => " (payer {$card?->untappedLifeCost} PV)",
             false => ' (engagé)',

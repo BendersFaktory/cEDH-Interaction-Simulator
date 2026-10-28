@@ -84,6 +84,18 @@ final class ManaCost
         return new self($this->generic + $n, $this->colored, $this->hybrid, $this->x, $this->phyrexian);
     }
 
+    /**
+     * « Comme si c'était du mana de n'importe quelle couleur » (Opposition Agent) : chaque symbole coloré, hybride ou phyrexian
+     * devient générique ; {C} reste dû en mana incolore. Approximation : un symbole phyrexian ne se paie plus en PV.
+     */
+    public function withAnyType(): self
+    {
+        $colorless = $this->colored['C'] ?? 0;
+        $colored = array_sum($this->colored) - $colorless;
+
+        return new self($this->generic + $colored + count($this->hybrid) + count($this->phyrexian), $colorless > 0 ? ['C' => $colorless] : [], [], $this->x);
+    }
+
     /** Forme canonique : X, générique, hybrides, puis couleurs dans l'ordre WUBRGC. */
     public function __toString(): string
     {

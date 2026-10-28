@@ -300,6 +300,55 @@ describe('reducer — capacités et réserve de mana', () => {
     expect([a.counters, a.power, a.toughness]).toEqual([{ '+1/+1': 2 }, 2, 2])
     expect([r.counters, r.power]).toEqual([{ age: 1 }, undefined])
   })
+
+  it('CountersRemoved et PregameCardPlaced (valeurs absolues)', () => {
+    const v = start()
+    const caverns = { id: 'p0_c9', name: 'Gemstone Caverns', type: 'land' as const, cost: 0, effect: null, amount: 0 }
+    v.players[0].hand.push({ ...caverns, tapped: false })
+    applyEvent(v, ev(4, 'PregameCardPlaced', { player: 0, card: caverns, hand: 0 }))
+    applyEvent(v, ev(5, 'CountersAdded', { player: 0, card: 'p0_c9', kind: 'wish', count: 2 }))
+    applyEvent(v, ev(6, 'CountersRemoved', { player: 0, card: 'p0_c9', kind: 'wish', count: 1 }))
+    const c = v.players[0].battlefield.find((x) => x.id === 'p0_c9')
+    expect(v.players[0].hand.some((x) => x.id === 'p0_c9')).toBe(false)
+    expect(c?.counters).toEqual({ wish: 1 })
+    applyEvent(v, ev(7, 'CountersRemoved', { player: 0, card: 'p0_c9', kind: 'wish', count: 0 }))
+    expect(c?.counters).toEqual({})
+  })
+
+  it('SpellCast par flashback retire la carte du cimetière', () => {
+    const v = start()
+    const rich = { id: 'p0_c4', name: 'Strike It Rich', type: 'sorcery' as const, cost: 1, effect: 'treasure', amount: 0 }
+    v.players[0].graveyard.push({ ...rich, tapped: false })
+    applyEvent(v, ev(4, 'SpellCast', { player: 0, card: rich, stackId: 's9', targets: [], tapped: [], fromCommand: false, altCast: 'flashback' }))
+    expect(v.players[0].graveyard).toEqual([])
+    expect(v.stack.map((i) => i.id)).toEqual(['s9'])
+  })
+
+  it("SpellCast et LandPlayed avec `fromExile` retirent la carte de l'exil de son propriétaire", () => {
+    const v = start()
+    const goblin = { id: 'p1_c9', name: 'Goblin', type: 'creature' as const, cost: 1, effect: null, amount: 0, power: 1, toughness: 1 }
+    const wastes = { id: 'p1_c8', name: 'Wastes', type: 'land' as const, cost: 0, effect: null, amount: 0 }
+    v.players[1].exile.push({ ...goblin, tapped: false }, { ...wastes, tapped: false })
+    applyEvent(v, ev(4, 'ExilePlayGranted', { player: 0, card: goblin, owner: 1, until: 'turn', source: 'Ragavan, Nimble Pilferer' }))
+    applyEvent(v, ev(5, 'SpellCast', { player: 0, card: goblin, stackId: 's9', targets: [], tapped: [], fromCommand: false, fromExile: true, owner: 1 }))
+    applyEvent(v, ev(6, 'LandPlayed', { player: 0, card: wastes, fromExile: true, owner: 1 }))
+    expect(v.players[1].exile).toEqual([])
+    expect(v.stack.map((i) => i.id)).toEqual(['s9'])
+    expect(v.players[0].battlefield.some((c) => c.id === 'p1_c8')).toBe(true)
+  })
+
+  it('PermanentControlChanged déplace le permanent ; à son départ, `owner` le range chez son propriétaire', () => {
+    const v = start()
+    const talisman = { id: 'p0_c50', name: 'Wishclaw Talisman', type: 'artifact' as const, cost: 1, effect: null, amount: 0 }
+    v.players[0].battlefield.push({ ...talisman, tapped: false })
+    applyEvent(v, ev(4, 'PermanentControlChanged', { player: 1, from: 0, card: talisman, tapped: true, source: 'Wishclaw Talisman' }))
+    expect(v.players[0].battlefield.some((c) => c.id === 'p0_c50')).toBe(false)
+    expect(v.players[1].battlefield.find((c) => c.id === 'p0_c50')?.tapped).toBe(true)
+    applyEvent(v, ev(5, 'PermanentSacrificed', { player: 1, card: talisman, destination: 'graveyard', owner: 0 }))
+    expect(v.players[1].battlefield.some((c) => c.id === 'p0_c50')).toBe(false)
+    expect(v.players[1].graveyard).toEqual([])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['p0_c50'])
+  })
 })
 
 describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', () => {

@@ -53,6 +53,7 @@ final class TurnManager
             $s->noncreatureLocks = []; // « ce tour » : Ranger-Captain of Eos
             $s->castLocks = [];        // Silence, Orim's Chant
             $s->flashGrants = [];      // Borne Upon a Wind
+            $s->expireExilePlays();    // Ragavan : « jusqu'à la fin du tour »
             $s->attackLocked = false;  // Orim's Chant avec kicker
             foreach ($s->players as $p) {
                 foreach ($p->battlefield as $card) {
@@ -133,6 +134,7 @@ final class TurnManager
         $s->spellsCast = [];
         $s->noncreatureCast = [];
         $s->cardsDrawn = [];
+        $s->onceTriggered = [];
         $s->combatDamaged = [];
         $s->phase = Phase::Untap;
         $s->stepStarted = false;

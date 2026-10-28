@@ -29,6 +29,7 @@ final class StackItem
         public readonly bool $copy = false, // copie d'un sort (Storm, Chain of Vapor) : jamais lancée, cesse d'exister en quittant la pile (CR 707.10a)
         public readonly bool $kicked = false, // kicker payé (Orim's Chant)
         public readonly ?int $owner = null, // propriétaire, s'il n'est pas le contrôleur (sort dont Commandeer a pris le contrôle)
+        public readonly ?string $altCast = null, // lancé pour son coût de Flashback ou de Dash (CardInstance::ALT_CASTS)
     ) {
     }
 
@@ -38,7 +39,13 @@ final class StackItem
         $controller ??= $this->controller;
 
         return new self($this->id, $this->card, $controller, $targets ?? $this->targets, $this->x, $this->ability, $this->abilityIndex, $this->trigger,
-            $this->mode, $this->copy, $this->kicked, $controller === $this->ownerId() ? null : $this->ownerId());
+            $this->mode, $this->copy, $this->kicked, $controller === $this->ownerId() ? null : $this->ownerId(), $this->altCast);
+    }
+
+    /** Lancé pour son coût de Flashback : exilé au lieu d'aller où que ce soit en quittant la pile (CR 702.34a). */
+    public function flashback(): bool
+    {
+        return $this->altCast === CardInstance::CAST_FLASHBACK;
     }
 
     /** Propriétaire de la carte : le joueur dans le cimetière duquel elle ira. */
@@ -79,12 +86,13 @@ final class StackItem
             'ability' => $this->ability?->toArray(),
             'abilityIndex' => $this->abilityIndex,
         ] + ($this->trigger === null ? [] : ['trigger' => $this->trigger->toArray()]) + ($this->mode === 0 ? [] : ['mode' => $this->mode])
-            + ($this->copy ? ['copy' => true] : []) + ($this->kicked ? ['kicked' => true] : []) + ($this->owner === null ? [] : ['owner' => $this->owner]);
+            + ($this->copy ? ['copy' => true] : []) + ($this->kicked ? ['kicked' => true] : []) + ($this->owner === null ? [] : ['owner' => $this->owner])
+            + ($this->altCast === null ? [] : ['altCast' => $this->altCast]);
     }
 
     public static function fromArray(array $d): self
     {
         return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets'], (int) ($d['x'] ?? 0), isset($d['ability']) ? ActivatedAbility::fromArray($d['ability']) : null, (int) ($d['abilityIndex'] ?? 0), isset($d['trigger']) ? TriggeredAbility::fromArray($d['trigger']) : null, (int) ($d['mode'] ?? 0),
-            (bool) ($d['copy'] ?? false), (bool) ($d['kicked'] ?? false), isset($d['owner']) ? (int) $d['owner'] : null);
+            (bool) ($d['copy'] ?? false), (bool) ($d['kicked'] ?? false), isset($d['owner']) ? (int) $d['owner'] : null, $d['altCast'] ?? null);
     }
 }

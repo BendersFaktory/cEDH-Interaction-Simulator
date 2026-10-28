@@ -57,11 +57,12 @@ final class ActivatedAbility
         public readonly bool $discardHand = false, // coût : défausser toute sa main (Lion's Eye Diamond)
         public readonly ?string $requires = null,  // condition d'activation : REQ_METALCRAFT (Mox Opal : trois artefacts ou plus)
         public readonly int $legendaryDiscount = 0, // coût réduit de {N} générique par créature légendaire contrôlée (Otawara : 1)
+        public readonly string $removeCounter = '', // coût : retirer un marqueur de cette sorte de la source (Wishclaw Talisman : `wish`)
     ) {
         if ($fromHand !== '' && !in_array($fromHand, ['exile', 'discard'], true)) {
             throw new \InvalidArgumentException("Coût depuis la main inconnu : $fromHand");
         }
-        if ($requires !== null && $requires !== self::REQ_METALCRAFT) {
+        if ($requires !== null && !in_array($requires, [self::REQ_METALCRAFT, self::REQ_YOUR_TURN], true)) {
             throw new \InvalidArgumentException("Condition d'activation inconnue : $requires");
         }
         if ($effect === 'fetch') {
@@ -76,6 +77,17 @@ final class ActivatedAbility
     }
 
     public const REQ_METALCRAFT = 'metalcraft';
+    /** « Activate only during your turn. » (Wishclaw Talisman). */
+    public const REQ_YOUR_TURN = 'your_turn';
+
+    /**
+     * Wishclaw Talisman : `$cost, {T}, retirer un marqueur $counter : chercher une carte, la mettre en main, mélanger ; un
+     * adversaire prend le contrôle de la source` (effet `tutor_give_control`), seulement pendant son tour.
+     */
+    public static function tutorGiveControl(string $cost, string $counter): self
+    {
+        return new self(false, 'tutor_give_control', true, ManaCost::parse($cost), requires: self::REQ_YOUR_TURN, removeCounter: $counter);
+    }
 
     /**
      * `{T}: ajoute …` ; `$spec` = alternatives séparées par `|`, ex. `{C}{C}`, `{R}|{G}` ou `{C}{C}@eldrazi` (restreinte).
@@ -135,6 +147,7 @@ final class ActivatedAbility
     public const DYNAMIC_OPPONENT_LAND = 'oppland'; // Fellwar Stone, Exotic Orchard : couleurs que produit un terrain adverse
     public const DYNAMIC_IMPRINT = 'imprint';       // Chrome Mox : couleurs de la carte exilée
     public const DYNAMIC_LEGENDARY = 'legendary';   // Mox Amber : couleurs des créatures et planeswalkers légendaires que l'on contrôle
+    public const DYNAMIC_LUCK = 'luck';             // Gemstone Caverns : {C}, ou n'importe quelle couleur avec un marqueur de chance
 
     /**
      * `{T}: un mana d'une couleur parmi celles que `$kind` autorise` : cinq alternatives à une couleur, dont seules les
@@ -142,17 +155,17 @@ final class ActivatedAbility
      */
     public static function dynamicMana(string $kind): self
     {
-        if (!in_array($kind, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY], true)) {
+        if (!in_array($kind, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY, self::DYNAMIC_LUCK], true)) {
             throw new \InvalidArgumentException("Mana dynamique inconnu : $kind");
         }
 
-        return new self(true, 'mana', true, null, array_map(self::parseOption(...), ['{W}', '{U}', '{B}', '{R}', '{G}']), spec: $kind);
+        return new self(true, 'mana', true, null, array_map(self::parseOption(...), [...($kind === self::DYNAMIC_LUCK ? ['{C}'] : []), '{W}', '{U}', '{B}', '{R}', '{G}']), spec: $kind);
     }
 
     /** Vrai pour une capacité de mana dont les couleurs dépendent de l'état de la partie (`dynamicMana()`). */
     public function isDynamicMana(): bool
     {
-        return $this->isManaAbility && ($this->spec === self::DYNAMIC_OPPONENT_LAND || $this->spec === self::DYNAMIC_IMPRINT || $this->spec === self::DYNAMIC_LEGENDARY);
+        return $this->isManaAbility && in_array($this->spec, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY, self::DYNAMIC_LUCK], true);
     }
 
     /** `[coût] : dégager la source` (Grim Monolith : `{4}` ; Mana Vault : `{4}` pendant son entretien seulement). Non-mana, passe par la pile. */
@@ -229,6 +242,12 @@ final class ActivatedAbility
     public static function eachDraw(int $n, string $cost): self
     {
         return new self(false, 'each_draw', false, ManaCost::parse($cost), [], $n);
+    }
+
+    /** `$cost : deux joueurs ciblés piochent chacun $n cartes` (Gleaming Splendor : `{2}{W}`), sans engagement. */
+    public static function twoPlayersDraw(int $n, string $cost): self
+    {
+        return new self(false, 'two_players_draw', false, ManaCost::parse($cost), [], $n);
     }
 
     /** `[coût], [{T}] : créer $n jetons $spec` (`Nom:F/E`, ex. Kher Keep : `{1}{R}`, {T} -> `Kobold:0/1`). */
@@ -332,6 +351,7 @@ final class ActivatedAbility
             $this->sacrificeCreature ? 'sacrifier une créature' : '',
             $this->discard > 0 ? "défausser {$this->discard}" : '',
             $this->lifeCost > 0 ? "payer {$this->lifeCost} PV" : '',
+            $this->removeCounter !== '' ? "retirer un marqueur {$this->removeCounter}" : '',
         ], static fn (string $p) => $p !== ''));
         $what = match ($this->effect) {
             'mana' => implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? []))
@@ -339,6 +359,8 @@ final class ActivatedAbility
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
             'each_draw' => sprintf('chaque joueur pioche %d', $this->amount),
+            'two_players_draw' => sprintf('deux joueurs ciblés piochent %d', $this->amount),
+            'tutor_give_control' => 'chercher une carte ; un adversaire prend le contrôle de cette carte (pendant votre tour)',
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'pump' => $this->spec,
             'untap' => $this->upkeepOnly ? 'dégager (entretien)' : 'dégager',
@@ -374,6 +396,7 @@ final class ActivatedAbility
             'discardHand' => $this->discardHand,
             'requires' => $this->requires,
             'legendaryDiscount' => $this->legendaryDiscount,
+            'removeCounter' => $this->removeCounter,
         ]);
     }
 
@@ -401,6 +424,7 @@ final class ActivatedAbility
             (bool) ($d['discardHand'] ?? false),
             $d['requires'] ?? null,
             (int) ($d['legendaryDiscount'] ?? 0),
+            (string) ($d['removeCounter'] ?? ''),
         );
     }
 

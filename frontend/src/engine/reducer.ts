@@ -122,7 +122,8 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
     case 'LandPlayed': {
       const pl = v.players[p.player]
-      removeCard(pl.hand, p.card.id)
+      // Opposition Agent : terrain joué depuis l'exil de son propriétaire.
+      removeCard(p.fromExile ? v.players[p.owner].exile : pl.hand, p.card.id)
       pl.battlefield.push({ ...board(p.card), tapped: p.tapped === true }) // shockland non payée : arrive engagée
       break
     }
@@ -157,8 +158,9 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
 
     case 'SpellCast': {
       const pl = v.players[p.player]
-      // Un commandant est lancé depuis la zone de commandement, le reste depuis la main.
-      removeCard(p.fromCommand ? pl.command : pl.hand, p.card.id)
+      // Un commandant est lancé depuis la zone de commandement, une carte exilée (Ragavan) depuis l'exil de son propriétaire, le reste depuis la main.
+      // Flashback (Strike It Rich) : depuis le cimetière.
+      removeCard(p.fromCommand ? pl.command : p.fromExile ? v.players[p.owner].exile : p.altCast === 'flashback' ? pl.graveyard : pl.hand, p.card.id)
       for (const id of p.tapped as string[]) {
         const land = pl.battlefield.find((c) => c.id === id)
         if (land) land.tapped = true
@@ -272,7 +274,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       // Coût alternatif de Daze / Gush : l'Île revient en main (dégagée) ; un jeton cesse d'exister.
       const pl = v.players[p.player]
       removeCard(pl.battlefield, p.card.id)
-      if (p.destination === 'hand') pl.hand.push(board(p.card))
+      if (p.destination === 'hand') v.players[p.owner ?? p.player].hand.push(board(p.card))
       break
     }
 
@@ -330,11 +332,18 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'PermanentControlChanged': {
+      // Wishclaw Talisman : le permanent passe d'un champ de bataille à l'autre (même zone, même état).
+      removeCard(v.players[p.from].battlefield, p.card.id)
+      v.players[p.player].battlefield.push({ ...board(p.card), tapped: p.tapped === true })
+      break
+    }
+
     case 'PermanentDestroyed': // même effet sur l'état affiché : champ de bataille -> cimetière
     case 'CreatureDied': {
-      const pl = v.players[p.player]
-      removeCard(pl.battlefield, p.card.id)
-      zoneOf(pl, p.destination)?.push(board(p.card))
+      // `owner` : un permanent contrôlé par un autre joueur va dans la zone de son propriétaire.
+      removeCard(v.players[p.player].battlefield, p.card.id)
+      zoneOf(v.players[p.owner ?? p.player], p.destination)?.push(board(p.card))
       break
     }
 
@@ -357,8 +366,10 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
     case 'CardExiled': {
       // Champ de bataille (ou main, coût alternatif de Force of Will) → exil (`none` : un jeton cesse d'exister).
       const pl = v.players[p.player]
-      removeCard(p.from === 'hand' ? pl.hand : pl.battlefield, p.card.id)
-      zoneOf(pl, p.destination)?.push(board(p.card))
+      if (p.from === 'library')
+        pl.library = p.library // Ragavan : carte du dessus exilée
+      else removeCard(p.from === 'hand' ? pl.hand : pl.battlefield, p.card.id)
+      zoneOf(v.players[p.owner ?? p.player], p.destination)?.push(board(p.card))
       break
     }
 
@@ -390,6 +401,26 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'CountersRemoved': {
+      // Valeur absolue : marqueurs restants de la sorte (Wishclaw Talisman), clé retirée à 0.
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) {
+        const counters = { ...c.counters }
+        if (p.count > 0) counters[p.kind] = p.count
+        else delete counters[p.kind]
+        c.counters = counters
+      }
+      break
+    }
+
+    case 'PregameCardPlaced': {
+      // Gemstone Caverns : de la main au champ de bataille avant le premier tour (son marqueur et la carte exilée suivent).
+      const pl = v.players[p.player]
+      removeCard(pl.hand, p.card.id)
+      pl.battlefield.push(board(p.card))
+      break
+    }
+
     case 'CreatureBoosted': {
       // Valeurs absolues : force/endurance actuelles (bonus du tour compris, ou remises à la base au cleanup).
       const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
@@ -406,9 +437,8 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
 
     case 'PermanentSacrificed': {
-      const pl = v.players[p.player]
-      removeCard(pl.battlefield, p.card.id)
-      zoneOf(pl, p.destination)?.push(board(p.card))
+      removeCard(v.players[p.player].battlefield, p.card.id)
+      zoneOf(v.players[p.owner ?? p.player], p.destination)?.push(board(p.card))
       break
     }
 
@@ -417,7 +447,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       const pl = v.players[p.player]
       for (const r of p.removed) {
         removeCard(pl.battlefield, r.card.id)
-        zoneOf(pl, r.destination)?.push(board(r.card))
+        zoneOf(v.players[r.owner ?? p.player], r.destination)?.push(board(r.card))
       }
       break
     }
@@ -436,9 +466,8 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
 
     case 'PlayerLeftGame': {
-      // CR 800.4a : permanents et éléments de pile du joueur éliminé quittent la partie.
-      const pl = v.players[p.player]
-      pl.battlefield = pl.battlefield.filter((c) => !p.battlefield.includes(c.id))
+      // CR 800.4a : permanents (les siens, même contrôlés par un autre joueur) et éléments de pile du joueur éliminé quittent la partie.
+      for (const pl of Object.values(v.players)) pl.battlefield = pl.battlefield.filter((c) => !p.battlefield.includes(c.id))
       v.stack = v.stack.filter((i) => !p.stack.includes(i.id))
       break
     }

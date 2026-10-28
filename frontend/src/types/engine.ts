@@ -55,8 +55,27 @@ export interface TriggerView {
   filter?: TriggerFilter
 }
 
-export type TriggerEvent = 'etb' | 'dies' | 'upkeep' | 'attacks' | 'end_step' | 'cast' | 'opponent_cast' | 'discard' | 'draw_step' | 'next_upkeep' | 'next_main'
-export type TriggerFilter = 'instant_sorcery' | 'tapped'
+/** Événements de `TriggeredAbility` (PHP). */
+export type TriggerEvent =
+  | 'etb'
+  | 'dies'
+  | 'upkeep'
+  | 'attacks'
+  | 'end_step'
+  | 'cast'
+  | 'opponent_cast'
+  | 'discard'
+  | 'draw_step'
+  | 'postcombat_main'
+  | 'land_played'
+  | 'next_upkeep'
+  | 'next_main'
+  | 'next_end'
+  | 'opponent_draw'
+  | 'any_cast'
+  | 'combat_damage_player'
+/** Filtres de `TriggeredAbility` (PHP). */
+export type TriggerFilter = 'instant_sorcery' | 'tapped' | 'second_spell' | 'noncreature' | 'no_mana' | 'first_noncreature' | 'second_draw' | 'not_draw_step_first' | 'off_turn_once'
 
 export interface PublicCard {
   id: string
@@ -95,6 +114,8 @@ export interface PublicCard {
   }[]
   /** Coût alternatif : `pitch_blue`, `commander`, `pitch_blue_off_turn`, `return_islands:N` (absent = aucun). */
   altCost?: string
+  /** Autres façons de la lancer, sorte => coût de mana : `flashback` (depuis le cimetière, puis exilée), `dash` (célérité, revient en main à la fin du tour). */
+  altCasts?: Partial<Record<'flashback' | 'dash', string>>
   /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
   token?: boolean
   /** Triggers (absent = aucun). */
@@ -149,6 +170,7 @@ export interface ActionView {
     | 'arrange'
     | 'chain'
     | 'replace'
+    | 'pregame'
   player: number
   cardId?: string
   targets?: string[]
