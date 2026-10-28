@@ -39,6 +39,7 @@ const groups = computed(() => {
     { title: 'Remettre les cartes du dessus dans l’ordre, ou mélanger', items: actions.filter((a) => a.type === 'arrange') },
     { title: 'Chain of Vapor : sacrifier un terrain pour copier le sort ?', items: actions.filter((a) => a.type === 'chain') },
     { title: 'Effet de remplacement : comment arrive-t-il ?', items: actions.filter((a) => a.type === 'replace') },
+    { title: 'Choix pendant la résolution', items: actions.filter((a) => a.type === 'choice') },
     { title: 'Défausser', items: actions.filter((a) => a.type === 'discard') },
     { title: 'Triggers à mettre sur la pile', items: actions.filter((a) => a.type === 'trigger') },
     { title: 'Terrains', items: actions.filter((a) => a.type === 'land') },

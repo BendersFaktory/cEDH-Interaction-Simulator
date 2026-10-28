@@ -26,6 +26,7 @@ use App\Engine\Action\PregameChoice;
 use App\Engine\Action\PutBack;
 use App\Engine\Action\PutTrigger;
 use App\Engine\Action\ReplaceChoice;
+use App\Engine\Action\ResolutionChoice;
 use App\Engine\Card\ReplacementEffect;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameState;
@@ -61,6 +62,11 @@ final class HeuristicAgent implements PlayerAgent
 {
     /** PV au-dessus desquels l'IA paie une shockland plutôt que de l'avoir engagée. */
     private const SHOCK_LIFE_FLOOR = 10;
+    /** Ad Nauseam : l'IA révèle la carte suivante tant que ses PV dépassent ce seuil (non calibré, étape 16). */
+    private const AD_NAUSEAM_LIFE_FLOOR = 15;
+    /** Necropotence : l'IA paie 1 PV par carte tant que ses PV dépassent ce seuil et qu'elle a moins de cartes en attente que ce nombre. */
+    private const NECRO_LIFE_FLOOR = 20;
+    private const NECRO_MAX_PENDING = 3;
 
     /**
      * @param int  $counterThreshold menace minimale d'un sort adverse pour le contrer (voir `threat`)
@@ -100,6 +106,8 @@ final class HeuristicAgent implements PlayerAgent
             $p = $state->player($playerId);
             $elsewhere = static fn (Action $a) => ($a instanceof CastSpell && $p->findCastable($a->cardId) === null)
                 || ($a instanceof PlayLand && $p->findInHand($a->cardId) === null);
+            // Jamais lancées par l'IA, d'où qu'elles viennent (Escape d'Underworld Breach compris) : voir `neverCasts()`.
+            $legal = array_values(array_filter($legal, fn (Action $a) => !($a instanceof CastSpell && $elsewhere($a) && $this->neverCasts(self::cardOf($state, $a)))));
             $outside = array_values(array_filter($legal, $elsewhere));
             if ($outside !== []) {
                 $choice = $this->decide($state, $playerId, array_values(array_filter($legal, static fn (Action $a) => !$elsewhere($a))));
@@ -225,7 +233,16 @@ final class HeuristicAgent implements PlayerAgent
                 return $this->manaSparingCounter($state, $playerId, $pick, $legal) ?? $pick;
             }
 
-            // Plus rien à lancer, en phase principale 2 : jetons (Kher Keep), puis pioche (Tome ; Mind Stone seulement main vide).
+            // Plus rien à lancer, en phase principale 2 : Necropotence (1 PV par carte, voir `NECRO_LIFE_FLOOR`), jetons (Kher Keep),
+            // puis pioche (Tome ; Mind Stone seulement main vide).
+            if ($state->phase === Phase::Main2 && $state->player($playerId)->life > self::NECRO_LIFE_FLOOR
+                && count(array_filter($state->delayedTriggers, static fn ($t) => $t->controller === $playerId && $t->ability()->effect === 'necro_return')) < self::NECRO_MAX_PENDING) {
+                foreach ($legal as $action) {
+                    if ($action instanceof ActivateAbility && $this->ability($state, $action)?->effect === 'necro') {
+                        return $action;
+                    }
+                }
+            }
             if ($state->phase === Phase::Main2) {
                 foreach (['token', 'draw'] as $effect) {
                     foreach ($legal as $action) {
@@ -403,6 +420,10 @@ final class HeuristicAgent implements PlayerAgent
      */
     private function selectionDecision(GameState $state, int $playerId, array $legal): Action
     {
+        $choices = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ResolutionChoice));
+        if ($choices !== []) {
+            return $this->resolutionDecision($state, $playerId, $choices);
+        }
         // Mox Diamond : défausser le terrain le plus en double dans la main (le premier à égalité) plutôt que perdre le Mox.
         // Mockingbird : la créature copiable la plus forte (valeur de mana + force), sinon telle quelle.
         $copies = array_values(array_filter($legal, static fn (Action $a) => $a instanceof ReplaceChoice && $a->copyId !== null));
@@ -456,6 +477,51 @@ final class HeuristicAgent implements PlayerAgent
         }
 
         return $arranges[0];
+    }
+
+    /**
+     * Décisions de l'étape 14 (heuristiques simples, non calibrées ; les combos sont l'affaire de l'étape 16) : Ad Nauseam continue
+     * tant que ses PV dépassent `AD_NAUSEAM_LIFE_FLOOR` ; Tainted Pact prend la première carte non-terrain ; Thassa's Oracle et
+     * Lim-Dûl's Vault gardent dessus la première carte non-terrain regardée (le Vault ne paie jamais de PV) ; Scheming Symmetry :
+     * la carte la plus forte (`cardValue`) ; Beseech the Mirror : la lancer.
+     *
+     * @param list<ResolutionChoice> $choices
+     */
+    private function resolutionDecision(GameState $state, int $playerId, array $choices): ResolutionChoice
+    {
+        $p = $state->player($playerId);
+        $by = static fn (string $choice): ?ResolutionChoice => array_values(array_filter($choices, static fn (ResolutionChoice $c) => $c->choice === $choice))[0] ?? null;
+        switch ($state->selection['kind'] ?? '') {
+            case 'ad_nauseam':
+                return ($p->life > self::AD_NAUSEAM_LIFE_FLOOR ? $by('continue') : null) ?? $by('stop') ?? $choices[0];
+            case 'tainted_pact':
+                $card = ResolutionChoice::find($p->exile, (string) ($state->selection['cardId'] ?? ''));
+
+                return ($card !== null && $card->isLand() ? $by('continue') : null) ?? $choices[0];
+            case 'oracle':
+            case 'vault':
+                foreach ($choices as $c) {
+                    $card = ResolutionChoice::find($p->library, $c->cardId());
+                    if ($card !== null && !$card->isLand()) {
+                        return $c;
+                    }
+                }
+
+                return $choices[0];
+            case 'symmetry':
+                $best = $choices[0];
+                $score = -1;
+                foreach ($choices as $c) {
+                    $card = ResolutionChoice::find($p->library, $c->cardId());
+                    if ($card !== null && $this->cardValue($card, 0) > $score) {
+                        [$best, $score] = [$c, $this->cardValue($card, 0)];
+                    }
+                }
+
+                return $best;
+            default:
+                return $choices[0];
+        }
     }
 
     /** Scry : garder sur le dessus les cartes qui ne sont pas des terrains (dans l'ordre), mettre les terrains dessous. */
@@ -1532,7 +1598,25 @@ final class HeuristicAgent implements PlayerAgent
             return !($inHand >= 2 || ($inHand >= 1 && $inPlay >= 3));
         }
 
-        return $card !== null && ($card->isModal() || $card->extraCost !== null || $card->hasEffect('bounce') || $card->hasEffect('destroy') || $card->hasEffect('grant_sac_mana')
-            || $card->hasEffect('redirect') || $card->hasEffect('steal') || $card->hasEffect('exile_spells'));
+        $bargain = $card?->extraCost === CardInstance::EXTRA_BARGAIN; // Beseech the Mirror : lancé, mais sans rien sacrifier
+
+        return $card !== null && ($card->isModal() || ($card->extraCost !== null && !$bargain) || ($bargain && $action->sacrifice !== null)
+            || $card->hasEffect('bounce') || $card->hasEffect('destroy') || $card->hasEffect('grant_sac_mana')
+            || $card->hasEffect('redirect') || $card->hasEffect('steal') || $card->hasEffect('exile_spells') || $this->neverCasts($card));
+    }
+
+    /**
+     * Lot H5b, laissé à l'IA de combo (étape 16) : Final Fortune (perdre la partie), Demonic Consultation et Tainted Pact (exiler sa
+     * bibliothèque), Scheming Symmetry (faire chercher un adversaire).
+     */
+    private function neverCasts(?CardInstance $card): bool
+    {
+        return $card !== null && ($card->hasEffect('extra_turn') || $card->hasEffect('consult') || $card->hasEffect('tainted_pact') || $card->hasEffect('symmetry'));
+    }
+
+    /** La carte d'un lancement, d'où qu'elle vienne : main, zone de commandement, exil jouable ou cimetière (Flashback, Escape). */
+    private static function cardOf(GameState $state, CastSpell $cast): ?CardInstance
+    {
+        return $state->castable($cast->player(), $cast->cardId) ?? ResolutionChoice::find($state->player($cast->player())->graveyard, $cast->cardId);
     }
 }

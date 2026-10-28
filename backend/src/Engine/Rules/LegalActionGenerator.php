@@ -13,6 +13,7 @@ use App\Engine\Action\BottomCard;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\ChainCopy;
 use App\Engine\Action\ReplaceChoice;
+use App\Engine\Action\ResolutionChoice;
 use App\Engine\Action\Discard;
 use App\Engine\Action\DeclareAttacker;
 use App\Engine\Action\DeclareBlocker;
@@ -74,7 +75,11 @@ final class LegalActionGenerator
      *
      * Mox Diamond (`replace`) : décliner d'abord (ce que l'agent passif choisit), puis une carte de terrain de la main par nom.
      *
-     * @return list<PutBack|ArrangeTop|ChainCopy|ReplaceChoice>
+     * Étape 14 (`ResolutionChoice`, voir `GameState::$selection`) : le choix le plus naturel en premier (ce que l'agent passif
+     * choisit) — prendre la carte (Tainted Pact), s'arrêter (Ad Nauseam), garder les cartes regardées (Lim-Dûl's Vault, Thassa's
+     * Oracle : une action par carte à mettre dessus), la première carte par nom (Scheming Symmetry), la lancer (Beseech the Mirror).
+     *
+     * @return list<PutBack|ArrangeTop|ChainCopy|ReplaceChoice|ResolutionChoice>
      */
     private function selectionActions(GameState $s, int $playerId): array
     {
@@ -83,6 +88,18 @@ final class LegalActionGenerator
             return [];
         }
         $p = $s->player($playerId);
+        $choices = match ($sel['kind']) {
+            'tainted_pact' => ['take', 'continue'],
+            'ad_nauseam' => ['stop', 'continue'],
+            'beseech' => ['cast', 'hand'],
+            'vault' => [...array_map(static fn (CardInstance $c) => 'top:' . $c->id, array_slice($p->library, 0, $sel['count'])), ...($p->life >= 1 ? ['continue'] : [])],
+            'oracle' => [...array_map(static fn (CardInstance $c) => 'top:' . $c->id, array_slice($p->library, 0, $sel['count'])), 'none'],
+            'symmetry' => array_map(static fn (string $t) => $t === 'library:none' ? 'none' : 'card:' . substr($t, 8), self::libraryTargets($p)),
+            default => null,
+        };
+        if ($choices !== null) {
+            return array_map(static fn (string $c) => new ResolutionChoice($playerId, $c), $choices);
+        }
         if ($sel['kind'] === 'replace' && ($sel['instead'] ?? null) === \App\Engine\Card\ReplacementEffect::COPY_CREATURE) {
             // Mockingbird : arriver telle quelle, ou comme une copie d'une créature de valeur de mana ≤ mana dépensé (une par nom).
             $actions = [new ReplaceChoice($playerId)];
@@ -235,8 +252,11 @@ final class LegalActionGenerator
         // Interdictions (Silence, Lavinia, Voice of Victory…) : vérifiées seulement s'il y en a, le cas courant reste rapide.
         $restricted = $s->castLocks !== [] || $s->noncreatureLocks !== [] || self::opponentsHaveStatics($s, $playerId);
         $exiled = $s->exilePlays === [] ? [] : array_map(static fn (array $e) => $e['card'], $s->exilePlayable($playerId)); // Ragavan, Opposition Agent
-        // Flashback (Strike It Rich) : depuis le cimetière, seulement pour son coût de flashback.
-        $graveyard = array_values(array_filter($p->graveyard, static fn (CardInstance $c) => isset($c->altCasts[CardInstance::CAST_FLASHBACK])));
+        // Flashback (Strike It Rich) : depuis le cimetière, seulement pour son coût de flashback. Escape (Underworld Breach) : toute
+        // carte non-terrain du cimetière, avec trois autres cartes à exiler.
+        $escape = $p->graveyard !== [] && $s->controlsStatic($playerId, CardInstance::STATIC_ESCAPE);
+        $graveyard = array_values(array_filter($p->graveyard, static fn (CardInstance $c) => isset($c->altCasts[CardInstance::CAST_FLASHBACK])
+            || ($escape && !$c->isLand() && count($p->graveyard) >= 4)));
         foreach ([...$p->hand, ...$p->command, ...$exiled, ...$graveyard] as $card) {
             if ($card->isLand() || (!$sorcerySpeed && !$s->castsAtInstantSpeed($playerId, $card)) || ($restricted && !$s->canCast($playerId, $card))) {
                 continue;
@@ -284,6 +304,10 @@ final class LegalActionGenerator
                     $modes[] = $kind; // Dash : seulement depuis la main
                 }
             }
+            if ($inGraveyard && $escape && !$card->isLand() && count($p->graveyard) >= 4
+                && ManaPayment::plan($p, $p->castCost($card), 0, $s->turn, null, $card, $mana) !== null) {
+                $modes[] = CardInstance::CAST_ESCAPE;
+            }
             if ($modes === []) {
                 continue;
             }
@@ -296,6 +320,16 @@ final class LegalActionGenerator
                 foreach ($p->battlefield as $creature) {
                     if ($creature->isCreature() && !isset($sacrifices[$creature->name])) {
                         $sacrifices[$creature->name] = $creature->id;
+                    }
+                }
+                $sacrifices = array_values($sacrifices);
+            }
+            if ($card->extraCost === CardInstance::EXTRA_BARGAIN) {
+                // Bargain (Beseech the Mirror) : sans sacrifice, ou un artefact / enchantement / jeton par nom.
+                $sacrifices = ['' => null];
+                foreach ($p->battlefield as $permanent) {
+                    if (PriorityManager::bargainable($permanent) && !isset($sacrifices[$permanent->name])) {
+                        $sacrifices[$permanent->name] = $permanent->id;
                     }
                 }
                 $sacrifices = array_values($sacrifices);
@@ -558,6 +592,9 @@ final class LegalActionGenerator
             if ($ability->effect === 'counter_spell' && $pending->stackId !== null) {
                 $targetSets = [['stack:' . $pending->stackId]]; // Lavinia : le sort lancé sans mana
             }
+            if ($ability->effect === 'exile_discarded' && $pending->stackId !== null) {
+                $targetSets = [['card:' . $pending->stackId]]; // Necropotence : la carte défaussée
+            }
             if ($ability->choosesLibraryCard()) {
                 // Tuteur à l'entrée (Ranger-Captain of Eos) : une carte qui convient par nom, ou rien à chercher.
                 $targetSets = [];
@@ -804,6 +841,10 @@ final class LegalActionGenerator
             // Copie : une créature que le lanceur contrôle (`permanent:<id>`).
             'copy' => array_map(static fn (CardInstance $c) => 'permanent:' . $c->id, array_values(array_filter($s->player($playerId)->battlefield, static fn (CardInstance $c) => $c->isCreature()))),
             'damage' => array_map(static fn (int $id) => 'player:' . $id, $s->alivePlayerIds()),
+            // Demonic Consultation : un nom de carte de sa bibliothèque, ou un nom absent (`name:`, toute la bibliothèque exilée).
+            'consult' => ['name:', ...array_map(static fn (string $t) => 'name:' . self::cardName($s->player($playerId), substr($t, 8)), array_filter(self::libraryTargets($s->player($playerId)), static fn (string $t) => $t !== 'library:none'))],
+            // Scheming Symmetry : deux joueurs en vie distincts.
+            'symmetry' => array_map(static fn (array $pair) => 'players:' . substr($pair[0], 7) . '+' . substr($pair[1], 7), self::playerPairs($s)),
             // Un contresort ne cible que des sorts, pas des capacités activées ; Dispel seulement les instants (`SpellEffect::canCounter()`).
             'counter' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && $effect->canCounter($item->card, $item->x)))),
             default => [],
@@ -830,6 +871,11 @@ final class LegalActionGenerator
         }
 
         return $out === [] ? ['library:none'] : $out;
+    }
+
+    private static function cardName(PlayerState $p, string $id): string
+    {
+        return ResolutionChoice::find($p->library, $id)?->name ?? '';
     }
 
     /** @return list<list<string>> une cible par permanent non-terrain (capacité Channel), joueurs dans l'ordre du tour */
@@ -889,7 +935,7 @@ final class LegalActionGenerator
             };
         } else {
             $targeted = $item->card->targetedEffects($item->mode);
-            if (count($targeted) !== 1 || in_array($targeted[0]->effect, ['tutor', 'gift', 'redirect', 'exile_spells'], true)) {
+            if (count($targeted) !== 1 || in_array($targeted[0]->effect, ['tutor', 'gift', 'redirect', 'exile_spells', 'consult', 'symmetry'], true)) {
                 return [];
             }
             $candidates = $this->targetCandidates($s, $targeted[0], $item->controller);

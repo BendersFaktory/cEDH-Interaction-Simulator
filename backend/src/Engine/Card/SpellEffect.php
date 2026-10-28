@@ -44,14 +44,26 @@ use App\Engine\Game\CardInstance;
  * a été payé (Orim's Chant).
  * Étape 13 : `treasure` crée `amount` Treasure (0 = 1) pour le lanceur, ou, avec `target` = `spell_controller`, pour le contrôleur
  * du sort visé par le sort (An Offer You Can't Refuse : « its controller creates two Treasure tokens » ; rien si le sort fizzle).
+ * Étape 14 (combos, lot H5b) : `consult` (Demonic Consultation : cible `name:<nom>` choisie au lancement, ou `name:` = un nom
+ * absent de la bibliothèque ; exile les six cartes du dessus, puis révèle jusqu'à la carte nommée, mise en main, les autres
+ * exilées), `tainted_pact` (Tainted Pact), `ad_nauseam` (Ad Nauseam) et `vault` (Lim-Dûl's Vault, `amount` = 5) : décisions
+ * répétées au milieu de la résolution (`GameState::$selection`, action `ResolutionChoice`) ; `symmetry` (Scheming Symmetry :
+ * cible `players:<id>+<id>`, deux joueurs distincts ; chacun cherche une carte, mélange et la met sur le dessus, décision de
+ * chacun à la résolution) ; `extra_turn` (Final Fortune : un tour supplémentaire après celui-ci, `GameState::$extraTurns` ;
+ * `amount` = 1 : son contrôleur perd la partie au début de l'étape de fin de ce tour). `tutor` + `freeCastMax` (Beseech the
+ * Mirror) : la carte trouvée est exilée face cachée ; si le sort a été « bargained », son lanceur peut la lancer sans payer son
+ * coût si sa valeur de mana est au plus `freeCastMax`, sinon elle va en main.
  */
 final class SpellEffect
 {
     public const KINDS = ['damage', 'counter', 'mana', 'treasure', 'draw', 'exile', 'tutor', 'scry', 'copy', 'pact', 'put_back', 'arrange', 'bounce', 'destroy', 'grant_sac_mana',
-        'redirect', 'steal', 'exile_spells', 'mill', 'silence', 'silence_target', 'no_attacks', 'flash_grant', 'gift'];
+        'redirect', 'steal', 'exile_spells', 'mill', 'silence', 'silence_target', 'no_attacks', 'flash_grant', 'gift',
+        'consult', 'tainted_pact', 'ad_nauseam', 'vault', 'symmetry', 'extra_turn'];
     /** Effets qui demandent une décision de sélection au milieu de la résolution (voir l'en-tête). */
-    public const SELECTION = ['put_back', 'arrange'];
-    public const TARGETED = ['damage', 'counter', 'exile', 'tutor', 'copy', 'bounce', 'destroy', 'redirect', 'steal', 'exile_spells', 'mill', 'silence_target', 'gift'];
+    public const SELECTION = ['put_back', 'arrange', 'vault'];
+    /** `consult` (un nom) et `symmetry` (deux joueurs) sont choisis au lancement comme des cibles (pas des cibles au sens de CR 115 pour `consult`). */
+    public const TARGETED = ['damage', 'counter', 'exile', 'tutor', 'copy', 'bounce', 'destroy', 'redirect', 'steal', 'exile_spells', 'mill', 'silence_target', 'gift',
+        'consult', 'symmetry'];
     /** Genres de permanents qu'un effet `exile` / `bounce` / `destroy` peut cibler (`opponent_…` : contrôlé par un adversaire du lanceur). */
     public const PERMANENT_TARGETS = ['creature', 'permanent', 'nonland', 'opponent_creature', 'opponent_nonland'];
     /** Objets de pile qu'un effet `redirect` peut viser : un sort, ou un sort ou une capacité. */
@@ -93,6 +105,7 @@ final class SpellEffect
         public readonly int $mode = 0, // 0 = sort non modal ; N >= 1 : l'effet appartient au mode N (« choisissez un mode », Pyroblast)
         public readonly bool $chain = false, // `bounce` : Chain of Vapor (voir l'en-tête)
         public readonly bool $kicked = false, // l'effet n'a lieu que si le kicker a été payé
+        public readonly int $freeCastMax = 0, // `tutor` : Beseech the Mirror (voir l'en-tête), 0 = tuteur ordinaire
     ) {
         if (!in_array($effect, self::KINDS, true)) {
             throw new \InvalidArgumentException("Effet de sort inconnu « $effect »");
@@ -133,6 +146,9 @@ final class SpellEffect
         }
         if (($thresholdAdds !== null || $perGraveyardNamed) && $effect !== 'mana') {
             throw new \InvalidArgumentException("Options de rituel sur l'effet « $effect »");
+        }
+        if ($freeCastMax !== 0 && ($effect !== 'tutor' || $freeCastMax < 0)) {
+            throw new \InvalidArgumentException("« freeCastMax » n'a de sens que pour l'effet « tutor »");
         }
         if ($discardRandom && $effect !== 'tutor') {
             throw new \InvalidArgumentException("« discardRandom » n'a de sens que pour l'effet « tutor »");
@@ -222,7 +238,8 @@ final class SpellEffect
     {
         return $this->target !== null || $this->powerLife || $this->token !== null || $this->tutorTop || $this->tutorFilter !== null || $this->lifeLoss !== 0
             || $this->payCost !== null || $this->manaValue !== null || $this->counterTo !== null || $this->drainMana
-            || $this->thresholdAdds !== null || $this->perGraveyardNamed || $this->discardRandom || $this->blue !== null || $this->mode !== 0 || $this->chain || $this->kicked;
+            || $this->thresholdAdds !== null || $this->perGraveyardNamed || $this->discardRandom || $this->blue !== null || $this->mode !== 0 || $this->chain || $this->kicked
+            || $this->freeCastMax !== 0;
     }
 
     /** Forme sérialisée : `['effect' => …, 'amount' => …, 'adds' => …, 'target' => …]`, `amount`, `adds` et `target` omis à leur défaut. */
@@ -237,7 +254,7 @@ final class SpellEffect
             + ($this->counterTo !== null ? ['counterTo' => $this->counterTo] : []) + ($this->drainMana ? ['drainMana' => true] : [])
             + ($this->thresholdAdds !== null ? ['thresholdAdds' => $this->thresholdAdds] : []) + ($this->perGraveyardNamed ? ['perGraveyardNamed' => true] : [])
             + ($this->discardRandom ? ['discardRandom' => true] : []) + ($this->blue !== null ? ['blue' => $this->blue] : []) + ($this->mode !== 0 ? ['mode' => $this->mode] : [])
-            + ($this->chain ? ['chain' => true] : []) + ($this->kicked ? ['kicked' => true] : []);
+            + ($this->chain ? ['chain' => true] : []) + ($this->kicked ? ['kicked' => true] : []) + ($this->freeCastMax !== 0 ? ['freeCastMax' => $this->freeCastMax] : []);
     }
 
     public static function fromArray(array $d): self
@@ -246,6 +263,6 @@ final class SpellEffect
             $d['token'] ?? null, $d['tokenKeywords'] ?? [], (bool) ($d['tutorTop'] ?? false), $d['tutorFilter'] ?? null, (int) ($d['lifeLoss'] ?? 0),
             $d['payCost'] ?? null, isset($d['manaValue']) ? (int) $d['manaValue'] : null, $d['counterTo'] ?? null, (bool) ($d['drainMana'] ?? false),
             $d['thresholdAdds'] ?? null, (bool) ($d['perGraveyardNamed'] ?? false), (bool) ($d['discardRandom'] ?? false), $d['blue'] ?? null, (int) ($d['mode'] ?? 0),
-            (bool) ($d['chain'] ?? false), (bool) ($d['kicked'] ?? false));
+            (bool) ($d['chain'] ?? false), (bool) ($d['kicked'] ?? false), (int) ($d['freeCastMax'] ?? 0));
     }
 }

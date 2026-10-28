@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GameEvent } from '../types/engine'
-import { describeEvent } from './describe'
+import { describeEvent, target } from './describe'
 
 const spell = (payload: Record<string, unknown>): GameEvent => ({
   seq: 1,
@@ -128,5 +128,22 @@ describe('describeEvent — effets de remplacement', () => {
       'J0 défausse Island : Mox Diamond arrive sur le champ de bataille',
     )
     expect(describeEvent(e('ReplacementApplied', { player: 2, card: { name: 'Mox Diamond' }, destination: 'graveyard' }))).toBe('Mox Diamond (J2) : aucun terrain défaussé, va au cimetière')
+  })
+})
+
+describe('describeEvent — combos (lot H5b)', () => {
+  const e = (type: string, payload: Record<string, unknown>): GameEvent => ({ seq: 1, type, verbose: false, payload })
+  it('tours supplémentaires, mises en main, victoire', () => {
+    expect(describeEvent(e('ExtraTurnAdded', { player: 1, source: 'Final Fortune', pending: 1, loseAtEnd: true }))).toBe(
+      'Final Fortune : J1 jouera un tour supplémentaire et perdra la partie au début de son étape de fin',
+    )
+    expect(describeEvent(e('CardPutIntoHand', { player: 0, card: { name: 'Lib' }, from: 'exile', source: 'Tainted Pact' }))).toBe("J0 met Lib en main depuis l'exil (Tainted Pact)")
+    expect(describeEvent(e('CardExiled', { player: 0, card: { name: 'Lib' }, from: 'library', faceDown: true, source: 'Necropotence' }))).toBe(
+      'J0 exile face cachée une carte de sa bibliothèque (Necropotence)',
+    )
+    expect(describeEvent(e('GameOver', { winner: 2, reason: 'won', source: "Thassa's Oracle" }))).toBe("Victoire de J2 (Thassa's Oracle)")
+    expect(describeEvent(e('PlayerLost', { player: 1, reason: 'opponent_won' }))).toBe('J1 est éliminé (un adversaire gagne la partie)')
+    expect(target('name:')).toBe('un nom absent de la bibliothèque')
+    expect(target('players:0+2')).toBe('J0 et J2')
   })
 })

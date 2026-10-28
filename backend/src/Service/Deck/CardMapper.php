@@ -73,7 +73,7 @@ final class CardMapper
         foreach ($card['keywords'] ?? [] as $keyword) {
             $key = strtolower((string) $keyword);
             if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel', 'mill', 'kicker', 'gift', 'mobilize', 'amass', 'cumulative upkeep',
-                'treasure', 'flashback', 'dash', "scions' secretary"], true)) {
+                'treasure', 'flashback', 'dash', "scions' secretary", 'bargain'], true)) {
                 continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Kicker {W} », « Mobilize 2 », « Flashback {2}{R} ») est traité ligne par ligne
             }
             if (!isset(self::KEYWORDS[$key])) {
@@ -137,6 +137,34 @@ final class CardMapper
                 $statics[] = CardInstance::STATIC_PREGAME_LUCK; // Gemstone Caverns
             } elseif ($isLand && $line === '{T}: Add {C}. If ~ has a luck counter on it, instead add ' . self::ANY_COLOR . '.') {
                 $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_LUCK); // Gemstone Caverns
+            } elseif ($isCreature && $line === 'When ~ enters, look at the top X cards of your library, where X is your devotion to blue. Put up to one of them on top of your library and the rest on the bottom of your library in a random order. If X is greater than or equal to the number of cards in your library, you win the game.') {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::ETB, 'oracle'); // Thassa's Oracle
+            } elseif ($isSpell && $line === 'Choose a card name. Exile the top six cards of your library, then reveal cards from the top of your library until you reveal a card with the chosen name. Put that card into your hand and exile all other cards revealed this way.') {
+                $effects[] = new SpellEffect('consult'); // Demonic Consultation (nom choisi au lancement)
+            } elseif ($isSpell && $line === 'Exile the top card of your library. You may put that card into your hand unless it has the same name as another card exiled this way. Repeat this process until you put a card into your hand or you exile two cards with the same name, whichever comes first.') {
+                $effects[] = new SpellEffect('tainted_pact'); // Tainted Pact
+            } elseif ($isSpell && $line === 'Reveal the top card of your library and put that card into your hand. You lose life equal to its mana value. You may repeat this process any number of times.') {
+                $effects[] = new SpellEffect('ad_nauseam'); // Ad Nauseam
+            } elseif ($isSpell && $line === 'Take an extra turn after this one. At the beginning of that turn\'s end step, you lose the game.') {
+                $effects[] = new SpellEffect('extra_turn', 1); // Final Fortune
+            } elseif ($isSpell && $line === 'Look at the top five cards of your library. As many times as you choose, you may pay 1 life, put those cards on the bottom of your library in any order, then look at the top five cards of your library. Then shuffle and put the last cards you looked at this way on top in any order.') {
+                $effects[] = new SpellEffect('vault', 5); // Lim-Dûl's Vault
+            } elseif ($isSpell && $line === 'Choose two target players. Each of them searches their library for a card, then shuffles and puts that card on top.') {
+                $effects[] = new SpellEffect('symmetry'); // Scheming Symmetry
+            } elseif ($isSpell && $line === 'Bargain') {
+                $extraCost = CardInstance::EXTRA_BARGAIN; // Beseech the Mirror
+            } elseif ($isSpell && $extraCost === CardInstance::EXTRA_BARGAIN && $line === 'Search your library for a card, exile it face down, then shuffle. If ~ was bargained, you may cast the exiled card without paying its mana cost if that spell\'s mana value is 4 or less. Put the exiled card into your hand if it wasn\'t cast this way.') {
+                $effects[] = new SpellEffect('tutor', freeCastMax: 4); // Beseech the Mirror
+            } elseif (!$isSpell && !$isLand && $line === 'Skip your draw step.') {
+                $statics[] = CardInstance::STATIC_SKIP_DRAW; // Necropotence
+            } elseif (!$isSpell && !$isLand && $line === 'Whenever you discard a card, exile that card from your graveyard.') {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::DISCARD, 'exile_discarded'); // Necropotence
+            } elseif (!$isSpell && !$isLand && preg_match('/^Pay (\d+) life: Exile the top card of your library face down\. Put that card into your hand at the beginning of your next end step\.$/', $line, $m)) {
+                $abilities[] = ActivatedAbility::necro((int) $m[1]); // Necropotence
+            } elseif (!$isSpell && !$isLand && $line === 'Each nonland card in your graveyard has escape. The escape cost is equal to the card\'s mana cost plus exile three other cards from your graveyard.') {
+                $statics[] = CardInstance::STATIC_ESCAPE; // Underworld Breach
+            } elseif (!$isSpell && !$isLand && $line === 'At the beginning of the end step, sacrifice ~.') {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::EACH_END_STEP, 'sacrifice_self'); // Underworld Breach
             } elseif ($isSpell && $line === 'Counter target noncreature spell. Its controller creates two Treasure tokens.') {
                 $effects[] = new SpellEffect('counter', 0, null, 'noncreature'); // An Offer You Can't Refuse
                 $effects[] = new SpellEffect('treasure', 2, target: SpellEffect::TREASURE_SPELL_CONTROLLER);

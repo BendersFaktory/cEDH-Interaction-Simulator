@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { abilityText, altCastText, colorsOf, frameOf, spellText, triggerText, typeLine } from './cardText'
+import { abilityText, altCastText, colorsOf, frameOf, spellText, staticText, triggerText, typeLine } from './cardText'
 import type { PublicCard } from '../types/engine'
 
 const card = (c: Partial<PublicCard>): PublicCard => ({ id: 'c1', name: 'X', type: 'instant', cost: 0, effect: null, amount: 0, ...c })
@@ -104,5 +104,19 @@ describe('cardText', () => {
     ).toBe("regarde les 3 cartes du dessus et les remet dans l'ordre de son choix (ou mélange), puis pioche 1")
     expect(triggerText({ event: 'next_upkeep', effect: 'pact', amount: 0, spec: '{3}{U}{U}' })).toBe('Au début de ton prochain entretien : paie {3}{U}{U} ou perd la partie')
     expect(abilityText({ isManaAbility: true, effect: 'mana', tap: true, options: ['{W}', '{U}'], spec: 'oppland' })).toBe("{T} : un mana d'une couleur que produit un terrain adverse")
+  })
+})
+
+describe('cardText — combos (lot H5b)', () => {
+  const base: PublicCard = { id: 'x', name: 'X', type: 'sorcery', cost: 1, effect: null, amount: 0 }
+  it('effets, triggers, capacité et statiques des cartes de combo', () => {
+    expect(spellText({ ...base, effect: 'extra_turn', amount: 1 })).toBe("joue un tour supplémentaire après celui-ci ; perd la partie au début de l'étape de fin de ce tour")
+    expect(spellText({ ...base, effect: 'tutor', effects: [{ effect: 'tutor', freeCastMax: 4 }] })).toContain('valeur de mana ≤ 4')
+    expect(triggerText({ event: 'each_end_step', effect: 'sacrifice_self', amount: 0 })).toBe('Au début de chaque étape de fin : se sacrifie')
+    expect(abilityText({ isManaAbility: false, effect: 'necro', tap: false, lifeCost: 1 })).toBe('payer 1 PV : exile face cachée la carte du dessus ; elle arrive en main à ta prochaine étape de fin')
+    expect(staticText({ ...base, statics: ['skip_draw'], extraCost: 'bargain' })).toEqual([
+      'Passe ton étape de pioche',
+      'Bargain : tu peux sacrifier un artefact, un enchantement ou un jeton en le lançant',
+    ])
   })
 })

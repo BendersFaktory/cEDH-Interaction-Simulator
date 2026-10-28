@@ -67,7 +67,14 @@ final class GameState
      * Effet de remplacement d'entrée (kind `replace`, Mox Diamond) : `card` = le permanent qui devait arriver, `owner` son
      * propriétaire s'il n'est pas `player`, une décision `ReplaceChoice` (voir `replaceEntering()`).
      *
-     * @var array{player: int, kind: string, count: int, source: string, draw: int, card?: array<string, mixed>, owner?: int}|null
+     * Étape 14 (lot H5b), décisions `ResolutionChoice` (voir `StackResolver::choose()`) : `tainted_pact` (`cardId` = la carte
+     * exilée à prendre ou non, `names` = noms déjà exilés ainsi), `ad_nauseam` (continuer ou s'arrêter), `vault` (Lim-Dûl's
+     * Vault : `count` cartes du dessus regardées), `oracle` (Thassa's Oracle : `count` = X cartes du dessus regardées),
+     * `symmetry` (Scheming Symmetry : `player` cherche, `queue` = joueurs qui chercheront ensuite) et `beseech` (Beseech the
+     * Mirror : `cardId` = la carte exilée face cachée, à lancer sans payer son coût ou à mettre en main). Les clés en plus de
+     * `player`, `kind`, `count`, `source` et `draw` sont propres à chaque sorte et sérialisées telles quelles.
+     *
+     * @var array{player: int, kind: string, count: int, source: string, draw: int, card?: array<string, mixed>, owner?: int, cardId?: string, names?: list<string>, queue?: list<int>}|null
      */
     public ?array $selection = null;
     /**
@@ -158,6 +165,14 @@ final class GameState
     public array $exilePlays = [];
     /** Les créatures ne peuvent pas attaquer ce tour (Orim's Chant avec kicker) ; remis à faux au cleanup. Sérialisé sous `attackLocked`, omis à faux. */
     public bool $attackLocked = false;
+    /**
+     * Tours supplémentaires à venir (CR 500.7, Final Fortune) : le dernier créé est pris le premier, à la place du joueur suivant.
+     * `card` = le sort qui l'a créé (forme `CardInstance::toArray()`), `loseAtEnd` : son joueur perd la partie au début de l'étape
+     * de fin de ce tour. Sérialisé sous `extraTurns`, omis quand vide.
+     *
+     * @var list<array{player: int, card: array<string, mixed>, loseAtEnd?: true}>
+     */
+    public array $extraTurns = [];
 
     /** @var list<GameEvent> tampon vidé par drainEvents(), jamais sérialisé */
     private array $pendingEvents = [];
@@ -928,15 +943,146 @@ final class GameState
 
     /**
      * Met en file, pour chaque permanent du joueur, les triggers de l'événement `$event` (`upkeep`, `end_step`, `discard`,
-     * `cast` avec le sort lancé `$spell`), dans l'ordre du champ de bataille.
+     * `cast` avec le sort lancé `$spell`), dans l'ordre du champ de bataille. `$stackId` : pour `discard`, la carte défaussée
+     * (Necropotence l'exile), retenue par `PendingTrigger::$stackId`.
      */
-    public function queuePlayerTriggers(int $playerId, string $event, ?CardInstance $spell = null): void
+    public function queuePlayerTriggers(int $playerId, string $event, ?CardInstance $spell = null, ?string $stackId = null): void
     {
         foreach ($this->player($playerId)->battlefield as $card) {
             if ($card->triggers !== []) {
-                $this->queueTriggers($playerId, $card, $event, $spell);
+                $this->queueTriggers($playerId, $card, $event, $spell, stackId: $stackId);
             }
         }
+    }
+
+    /** « Au début de chaque étape de fin » (Underworld Breach) : triggers de tous les joueurs en vie, dans l'ordre APNAP. */
+    public function queueEachEndStepTriggers(): void
+    {
+        $id = $this->activePlayer;
+        foreach ($this->alivePlayerIds() as $ignored) {
+            if (!$this->player($id)->lost) {
+                $this->queuePlayerTriggers($id, TriggeredAbility::EACH_END_STEP);
+            }
+            $id = $this->nextAlive($id);
+        }
+    }
+
+    /** `$playerId` contrôle-t-il un permanent à la capacité statique `$static` (`CardInstance::STATICS`) ? */
+    public function controlsStatic(int $playerId, string $static): bool
+    {
+        foreach ($this->player($playerId)->battlefield as $card) {
+            if ($card->statics !== [] && $card->hasStatic($static)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Dévotion de `$playerId` à la couleur `$color` (CR 700.5) : symboles de cette couleur (hybrides compris) dans les coûts de mana de ses permanents. */
+    public function devotion(int $playerId, string $color): int
+    {
+        $n = 0;
+        foreach ($this->player($playerId)->battlefield as $card) {
+            if ($card->manaCost !== null && preg_match_all('/\{([^}]+)\}/', $card->manaCost, $m)) {
+                $n += count(array_filter($m[1], static fn (string $symbol) => str_contains($symbol, $color)));
+            }
+        }
+
+        return $n;
+    }
+
+    /**
+     * Exile la carte du dessus de la bibliothèque de `$playerId` (`CardExiled`, `from: library` ; `faceDown` : Necropotence) ;
+     * null si elle est vide.
+     */
+    public function exileTopOfLibrary(int $playerId, string $source, bool $faceDown = false): ?CardInstance
+    {
+        $p = $this->player($playerId);
+        $card = array_shift($p->library);
+        if ($card === null) {
+            return null;
+        }
+        $this->exile($playerId, $card);
+        $this->emit('CardExiled', ['player' => $playerId, 'card' => $card->toPublic(), 'from' => 'library', 'destination' => 'exile', 'source' => $source,
+            'exile' => count($p->exile), 'library' => count($p->library)] + ($faceDown ? ['faceDown' => true] : []));
+
+        return $card;
+    }
+
+    /**
+     * Met dans la main de `$playerId` la carte `$cardId` de sa zone d'exil (Tainted Pact, Necropotence, Beseech the Mirror) ou du
+     * dessus de sa bibliothèque (`$from` = `library` : Ad Nauseam, Demonic Consultation) ; ce n'est pas une pioche.
+     * `CardPutIntoHand`. Retourne la carte, ou null si elle n'y est plus.
+     */
+    public function putIntoHand(int $playerId, string $cardId, string $from, string $source): ?CardInstance
+    {
+        $p = $this->player($playerId);
+        $zone = $from === 'library' ? 'library' : 'exile';
+        foreach ($p->$zone as $i => $card) {
+            if ($card->id === $cardId) {
+                array_splice($p->$zone, $i, 1);
+                $p->hand[] = $card;
+                $this->emit('CardPutIntoHand', ['player' => $playerId, 'card' => $card->toPublic(), 'from' => $from, 'hand' => count($p->hand),
+                    $zone => count($p->$zone), 'source' => $source]);
+
+                return $card;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Escape accordé par Underworld Breach : les trois cartes que `$playerId` exile de son cimetière pour lancer `$card` (CR 702.138 :
+     * « exile three other cards »), ou null s'il n'en a pas assez. Approximation : le choix n'est pas proposé ; les terrains
+     * d'abord, puis les cartes arrivées le plus récemment (celles que Brain Freeze vient de meuler plutôt que les pièces du combo).
+     *
+     * @return list<string>|null
+     */
+    public function escapeExiles(int $playerId, CardInstance $card): ?array
+    {
+        $others = array_values(array_filter(array_reverse($this->player($playerId)->graveyard), static fn (CardInstance $c) => $c->id !== $card->id));
+        usort($others, static fn (CardInstance $a, CardInstance $b) => (int) $b->isLand() <=> (int) $a->isLand()); // tri stable (PHP 8)
+        if (count($others) < 3) {
+            return null;
+        }
+
+        return array_map(static fn (CardInstance $c) => $c->id, array_slice($others, 0, 3));
+    }
+
+    /** Exile du cimetière de `$playerId` les cartes `$ids` (coût d'escape) ; `CardExiled` avec `from: graveyard` pour chacune. */
+    public function exileFromGraveyard(int $playerId, array $ids, string $source): void
+    {
+        $p = $this->player($playerId);
+        foreach ($ids as $id) {
+            foreach ($p->graveyard as $i => $card) {
+                if ($card->id === $id) {
+                    array_splice($p->graveyard, $i, 1);
+                    $this->exile($playerId, $card);
+                    $this->emit('CardExiled', ['player' => $playerId, 'card' => $card->toPublic(), 'from' => 'graveyard', 'destination' => 'exile', 'source' => $source,
+                        'exile' => count($p->exile), 'graveyard' => count($p->graveyard)]);
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Prochain tour supplémentaire à prendre (le plus récent, CR 500.7), retiré de `$extraTurns` ; ceux d'un joueur éliminé
+     * disparaissent. Null s'il n'y en a pas : le joueur suivant joue.
+     *
+     * @return array{player: int, card: array<string, mixed>, loseAtEnd?: true}|null
+     */
+    public function takeExtraTurn(): ?array
+    {
+        while (($extra = array_pop($this->extraTurns)) !== null) {
+            if (!$this->player($extra['player'])->lost) {
+                return $extra;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -949,7 +1095,7 @@ final class GameState
         $card = $p->takeFromHand($cardId) ?? throw new \DomainException("Carte à défausser absente de la main : $cardId");
         $destination = $this->sendToGraveyard($playerId, $card);
         $this->emit('CardDiscarded', ['player' => $playerId, 'card' => $card->toPublic(), 'destination' => $destination, 'hand' => count($p->hand)]);
-        $this->queuePlayerTriggers($playerId, TriggeredAbility::DISCARD);
+        $this->queuePlayerTriggers($playerId, TriggeredAbility::DISCARD, stackId: $card->id); // Necropotence : la carte défaussée
     }
 
     /**
@@ -1240,6 +1386,9 @@ final class GameState
         if ($this->attackLocked) {
             $d['attackLocked'] = true;
         }
+        if ($this->extraTurns !== []) {
+            $d['extraTurns'] = $this->extraTurns;
+        }
 
         return $d;
     }
@@ -1276,8 +1425,9 @@ final class GameState
         $s->paymentPending = (bool) ($d['paymentPending'] ?? false);
         if (isset($d['selection'])) {
             $sel = $d['selection'];
+            // Clés propres à la sorte (`card`, `owner`, `instead`, `maxValue`, `cardId`, `names`, `queue`…) gardées telles quelles.
             $s->selection = ['player' => (int) $sel['player'], 'kind' => (string) $sel['kind'], 'count' => (int) $sel['count'], 'source' => (string) $sel['source'], 'draw' => (int) $sel['draw']]
-                + (isset($sel['card']) ? ['card' => $sel['card']] : []) + (isset($sel['owner']) ? ['owner' => (int) $sel['owner']] : []);
+                + (isset($sel['owner']) ? ['owner' => (int) $sel['owner']] : []) + $sel;
         }
         $s->delayedTriggers = array_map([PendingTrigger::class, 'fromArray'], $d['delayedTriggers'] ?? []);
         foreach ($d['spellsCast'] ?? [] as $id => $count) {
@@ -1303,6 +1453,7 @@ final class GameState
         $s->flashGrants = array_map('intval', $d['flashGrants'] ?? []);
         $s->exilePlays = $d['exilePlays'] ?? [];
         $s->attackLocked = (bool) ($d['attackLocked'] ?? false);
+        $s->extraTurns = $d['extraTurns'] ?? [];
         foreach ($d['stops'] ?? [] as $id => $config) {
             $s->stops[(int) $id] = StopConfig::fromArray($config);
         }

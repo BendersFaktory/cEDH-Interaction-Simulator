@@ -54,6 +54,13 @@ use App\Engine\Game\CardInstance;
  * `pay_untap` (Mana Vault, `upkeep`) : son contrôleur peut payer `spec` pour dégager la source (décision `PayCost` à la
  * résolution, proposée seulement si la source est encore engagée sur le champ de bataille).
  *
+ * Étape 14 (combos, lot H5b) : `each_end_step` (début de chaque étape de fin, quel que soit le joueur actif : Underworld Breach,
+ * effet `sacrifice_self`) ; `oracle` (Thassa's Oracle, `etb` : X = dévotion au bleu de son contrôleur ; il regarde les X cartes
+ * du dessus, en garde au plus une dessus et met le reste dessous dans un ordre aléatoire ; si X ≥ le nombre de cartes de sa
+ * bibliothèque, il gagne la partie) ; `exile_discarded` (Necropotence, `discard` : la carte défaussée, cible `card:<id>`, quitte
+ * le cimetière pour l'exil) ; triggers retardés `necro_return` (`next_end` : la carte exilée face cachée `spec` va en main) et
+ * `lose_game` (`next_end` : son contrôleur perd la partie, Final Fortune).
+ *
  * Forme sérialisée (`toArray`) : `spec` et `filter` omis s'ils sont vides.
  */
 final class TriggeredAbility
@@ -81,6 +88,8 @@ final class TriggeredAbility
     public const ANY_CAST = 'any_cast';
     /** La source inflige des dégâts de combat à un joueur (Ragavan) ; le joueur blessé est la cible du trigger. */
     public const COMBAT_DAMAGE_PLAYER = 'combat_damage_player';
+    /** Début de chaque étape de fin, celle de n'importe quel joueur (Underworld Breach : « At the beginning of the end step »). */
+    public const EACH_END_STEP = 'each_end_step';
 
     /** Coût `{X}` de `draw_unless` : X = force de la source (Esper Sentinel). */
     public const X_POWER = '{X}';
@@ -106,12 +115,12 @@ final class TriggeredAbility
     /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
     public const TAPPED = 'tapped';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW, self::ANY_CAST, self::COMBAT_DAMAGE_PLAYER];
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW, self::ANY_CAST, self::COMBAT_DAMAGE_PLAYER, self::EACH_END_STEP];
     /** `spec` d'un effet `treasure` : jetons créés engagés (Tataru Taru). */
     public const TREASURE_TAPPED = 'tapped';
     private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor',
         'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap', 'ping_amass', 'cumulative_upkeep', 'return_dashed',
-        'lose_life_treasure', 'draw_opponent_may', 'treasure_exile_top'];
+        'lose_life_treasure', 'draw_opponent_may', 'treasure_exile_top', 'oracle', 'exile_discarded', 'necro_return', 'lose_game'];
     private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA, self::FIRST_NONCREATURE, self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST, self::OFF_TURN_ONCE];
 
     public function __construct(
@@ -203,6 +212,7 @@ final class TriggeredAbility
             self::UPKEEP => 'Au début de votre entretien',
             self::ATTACKS => 'Quand elle attaque',
             self::END_STEP => 'Au début de votre étape de fin',
+            self::EACH_END_STEP => 'Au début de chaque étape de fin',
             self::CAST => match ($this->filter) {
                 self::INSTANT_SORCERY => 'Quand vous lancez un éphémère ou un rituel',
                 self::NONCREATURE => 'Quand vous lancez un sort non-créature',
@@ -256,6 +266,10 @@ final class TriggeredAbility
             'pay_untap' => sprintf('vous pouvez payer %s pour la dégager', $this->spec),
             'ping_amass' => sprintf('%d dégât%s, puis Amass %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'cumulative_upkeep' => sprintf('un marqueur d\'âge, puis payer %s par marqueur ou la sacrifier', $this->spec),
+            'oracle' => 'regarder les X cartes du dessus (X = dévotion au bleu), en garder une dessus, le reste dessous ; gagner si X ≥ la taille de la bibliothèque',
+            'exile_discarded' => 'exiler la carte défaussée de votre cimetière',
+            'necro_return' => 'mettre en main la carte exilée face cachée',
+            'lose_game' => 'perdre la partie',
         };
 
         return "$when : $what";

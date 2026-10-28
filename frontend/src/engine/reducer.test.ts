@@ -592,3 +592,49 @@ describe('reducer — effets de remplacement (Mox Diamond)', () => {
     expect(v.players[1].graveyard.map((c) => c.id)).toEqual(['mox2'])
   })
 })
+
+describe('reducer — combos (lot H5b)', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const c = (id: string, name: string): PublicCard => ({ id, name, type: 'sorcery', cost: 1, effect: null, amount: 0 })
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 10, controller: 'h' },
+          { id: 1, life: 40, library: 10, controller: 'ai' },
+        ],
+      }),
+    ])
+
+  it('CardPutIntoHand depuis la bibliothèque ou l’exil, CardExiled depuis le cimetière, escape depuis le cimetière', () => {
+    const v = start()
+    applyEvent(v, ev(2, 'CardPutIntoHand', { player: 0, card: c('a', 'Lib'), from: 'library', hand: 1, library: 9, source: 'Ad Nauseam' }))
+    expect([v.players[0].hand.map((x) => x.id), v.players[0].library]).toEqual([['a'], 9])
+    applyEvent(v, ev(3, 'CardExiled', { player: 0, card: c('b', 'Top'), from: 'library', destination: 'exile', source: 'Necropotence', exile: 1, library: 8, faceDown: true }))
+    applyEvent(v, ev(4, 'CardPutIntoHand', { player: 0, card: c('b', 'Top'), from: 'exile', hand: 2, exile: 0, source: 'Necropotence' }))
+    expect([v.players[0].hand.map((x) => x.id), v.players[0].exile]).toEqual([['a', 'b'], []])
+    v.players[0].graveyard.push({ ...c('g1', 'Old'), tapped: false }, { ...c('g2', 'Bolt'), tapped: false })
+    applyEvent(v, ev(5, 'CardExiled', { player: 0, card: c('g1', 'Old'), from: 'graveyard', destination: 'exile', source: 'Escape', exile: 1, graveyard: 1 }))
+    expect(v.players[0].exile.map((x) => x.id)).toEqual(['g1'])
+    applyEvent(
+      v,
+      ev(6, 'SpellCast', {
+        player: 0,
+        card: c('g2', 'Bolt'),
+        stackId: 's1',
+        targets: [],
+        tapped: [],
+        cost: 1,
+        manaCost: '{R}',
+        x: 0,
+        paid: {},
+        fromPool: [],
+        pool: [],
+        fromCommand: false,
+        altCast: 'escape',
+      }),
+    )
+    expect([v.players[0].graveyard, v.stack.map((i) => i.id)]).toEqual([[], ['s1']])
+  })
+})

@@ -95,6 +95,8 @@ Deck
 31 Island
 32 Swamp`
 const DECK_CAVERNS = DECK_21.replace('1 Divination', '1 Gemstone Caverns')
+// Scénario 43 (lot H5b) : J0 avec Ad Nauseam ({3}{B}{B}), même deck Kraum / Tymna que le 41.
+const DECK_AD_NAUSEAM = DECK_WISHCLAW.replace('1 Wishclaw Talisman', '1 Ad Nauseam')
 const J0_J1_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
 const T0 = Date.now()
 try {
@@ -266,6 +268,7 @@ async function run() {
     ['40', (b) => scenario(b, '40', s40)],
     ['41', (b) => scenario(b, '41', s41)],
     ['42', (b) => scenario(b, '42', s42)],
+    ['43', (b) => scenario(b, '43', s43)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -2010,4 +2013,33 @@ async function s42({ page, log, shot, problem, openGame }) {
   if (first === 0) problem('recette Gemstone Caverns : J0 est premier joueur, la décision ne devait pas être proposée')
   if (!line.includes('Gemstone Caverns en jeu')) problem(`recette Gemstone Caverns : pose absente du journal (« ${line} »)`)
   if (placed?.payload.player !== 0 || luck?.payload.count !== 1 || !exiled) problem('recette Gemstone Caverns : PregameCardPlaced, marqueur de chance ou carte exilée manquant')
+}
+
+// 43 : CHOIX PENDANT LA RÉSOLUTION (Ad Nauseam, lot H5b). J0 lance Ad Nauseam ; à la résolution, la première carte est révélée
+// et mise en main, puis J0 choisit dans le panneau de révéler la suivante, puis de s'arrêter.
+async function s43({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_AD_NAUSEAM),
+    (p) => (p.actions.some((a) => a.type === 'choice') ? 'stop' : (castOf(p.actions, 'Ad Nauseam') ?? null)),
+    { card: 'Ad Nauseam' },
+  )
+  if (!found) return problem('recette Ad Nauseam : aucune graine où J0 lance Ad Nauseam')
+  log('43 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('43a-ad-nauseam-choix')
+  const again = await clickIn(page, 'Choix pendant la résolution', 'Révéler la carte suivante')
+  const stop = await clickIn(page, 'Choix pendant la résolution', "S'arrêter")
+  const line = await logLine(page, 'en main (Ad Nauseam)')
+  const events = await api.events(found.sim.id)
+  const put = events.filter((e) => e.type === 'CardPutIntoHand' && e.payload.source === 'Ad Nauseam')
+  const lost = events.filter((e) => e.type === 'LifeLost' && e.payload.source === 'Ad Nauseam')
+  const st = await api.state(found.sim.id)
+  log('43 choix :', again, '/', stop, '| journal :', line, '| cartes mises en main :', put.map((e) => e.payload.card.name).join(', '), '| PV :', st.players[0].life)
+  await shot('43b-ad-nauseam-arret')
+  if (put.length !== 2) problem(`recette Ad Nauseam : deux cartes attendues en main, ${put.length} trouvée(s)`)
+  if (!line.includes('en main (Ad Nauseam)')) problem(`recette Ad Nauseam : mise en main absente du journal (« ${line} »)`)
+  // Une carte de valeur de mana 0 (terrain) ne fait rien perdre : sans LifeLost, rien à vérifier sur les PV.
+  const expected = lost.at(-1)?.payload.life
+  if (expected !== undefined && st.players[0].life !== expected) problem(`recette Ad Nauseam : PV de J0 ${st.players[0].life}, attendu ${expected}`)
+  if (st.selection) problem('recette Ad Nauseam : la sélection aurait dû se terminer')
 }

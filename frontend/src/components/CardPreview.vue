@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { hasType } from '../types/engine'
-import { abilityText, altCastText, frameOf, keywordsText, manaSymbols, spellText, symbolClass, triggerText, typeLine } from '../engine/cardText'
+import { abilityText, altCastText, frameOf, keywordsText, manaSymbols, spellText, staticText, symbolClass, triggerText, typeLine } from '../engine/cardText'
 import { useSimulationStore } from '../stores/simulation'
 
 const store = useSimulationStore()
@@ -12,7 +12,9 @@ const failed = ref<string | null>(null)
 const lines = computed(() => {
   const c = card.value
   if (!c) return []
-  return [keywordsText(c), hasType(c, 'land') ? '' : (spellText(c) ?? ''), ...(c.abilities ?? []).map(abilityText), ...(c.triggers ?? []).map(triggerText), ...altCastText(c)].filter(Boolean)
+  return [keywordsText(c), hasType(c, 'land') ? '' : (spellText(c) ?? ''), ...(c.abilities ?? []).map(abilityText), ...(c.triggers ?? []).map(triggerText), ...altCastText(c), ...staticText(c)].filter(
+    Boolean,
+  )
 })
 </script>
 

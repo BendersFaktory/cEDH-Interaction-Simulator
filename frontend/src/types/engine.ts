@@ -35,6 +35,8 @@ export interface AbilityView {
   requires?: string
   /** Coût réduit de {N} par créature légendaire contrôlée (Otawara). */
   legendaryDiscount?: number
+  /** Coût : payer N PV (Mana Confluence, fetchlands, Necropotence). */
+  lifeCost?: number
 }
 
 /** Trigger d'une carte (forme sérialisée par le moteur). */
@@ -74,6 +76,7 @@ export type TriggerEvent =
   | 'opponent_draw'
   | 'any_cast'
   | 'combat_damage_player'
+  | 'each_end_step'
 /** Filtres de `TriggeredAbility` (PHP). */
 export type TriggerFilter = 'instant_sorcery' | 'tapped' | 'second_spell' | 'noncreature' | 'no_mana' | 'first_noncreature' | 'second_draw' | 'not_draw_step_first' | 'off_turn_once'
 
@@ -111,11 +114,20 @@ export interface PublicCard {
     counterTo?: 'exile' | 'library_top'
     /** `counter` : Mana Drain ({C} à la prochaine phase principale). */
     drainMana?: boolean
+    /** `tutor` : Beseech the Mirror (lancer la carte trouvée sans payer son coût si sa valeur de mana est au plus ce nombre). */
+    freeCastMax?: number
   }[]
   /** Coût alternatif : `pitch_blue`, `commander`, `pitch_blue_off_turn`, `return_islands:N` (absent = aucun). */
   altCost?: string
   /** Autres façons de la lancer, sorte => coût de mana : `flashback` (depuis le cimetière, puis exilée), `dash` (célérité, revient en main à la fin du tour). */
   altCasts?: Partial<Record<'flashback' | 'dash', string>>
+  /**
+   * Capacités statiques (absent = aucune) : `noncreature_flash`, `opponents_mv_lands`, `opponents_no_cast_your_turn`,
+   * `pregame_luck`, `opposition_agent`, `skip_draw` (Necropotence), `escape` (Underworld Breach).
+   */
+  statics?: string[]
+  /** Coût additionnel : `sacrifice_creature`, `bargain` (Beseech the Mirror ; absent = aucun). */
+  extraCost?: string
   /** Jeton (absent = carte) : cesse d'exister en quittant le champ de bataille. */
   token?: boolean
   /** Triggers (absent = aucun). */
@@ -171,6 +183,7 @@ export interface ActionView {
     | 'chain'
     | 'replace'
     | 'pregame'
+    | 'choice'
   player: number
   cardId?: string
   targets?: string[]

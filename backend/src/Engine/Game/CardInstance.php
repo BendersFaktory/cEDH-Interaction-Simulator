@@ -56,11 +56,17 @@ final class CardInstance
     public const LUCK = 'luck';
     /** Un adversaire qui cherche dans sa bibliothèque exile ce qu'il trouve ; le contrôleur peut jouer ces cartes (Opposition Agent). */
     public const STATIC_OPPOSITION_AGENT = 'opposition_agent';
+    /** « Skip your draw step. » : son contrôleur passe son étape de pioche (Necropotence, `TurnManager`). */
+    public const STATIC_SKIP_DRAW = 'skip_draw';
+    /** Chaque carte non-terrain du cimetière de son contrôleur a l'escape (Underworld Breach, `CAST_ESCAPE`). */
+    public const STATIC_ESCAPE = 'escape';
     public const STATICS = [self::STATIC_NONCREATURE_FLASH, self::STATIC_OPPONENTS_MV_LANDS, self::STATIC_OPPONENTS_NO_CAST_YOUR_TURN, self::STATIC_PREGAME_LUCK,
-        self::STATIC_OPPOSITION_AGENT];
+        self::STATIC_OPPOSITION_AGENT, self::STATIC_SKIP_DRAW, self::STATIC_ESCAPE];
 
     /** Coût additionnel (`extraCost`) : sacrifier une créature que l'on contrôle (Culling the Weak, Diabolic Intent). */
     public const EXTRA_SACRIFICE_CREATURE = 'sacrifice_creature';
+    /** Bargain (CR 702.166) : coût additionnel facultatif, sacrifier un artefact, un enchantement ou un jeton (Beseech the Mirror). */
+    public const EXTRA_BARGAIN = 'bargain';
     /**
      * Façons de lancer la carte pour un autre coût (`$altCasts` : sorte => coût de mana). Flashback (CR 702.34) : depuis le
      * cimetière, au rythme habituel, puis exilée quand elle quitte la pile (Strike It Rich). Dash (CR 702.109) : depuis la main ;
@@ -68,7 +74,12 @@ final class CardInstance
      */
     public const CAST_FLASHBACK = 'flashback';
     public const CAST_DASH = 'dash';
-    public const ALT_CASTS = [self::CAST_FLASHBACK, self::CAST_DASH];
+    /**
+     * Escape (CR 702.138) : depuis le cimetière, pour son coût de mana plus l'exil de trois autres cartes de ce cimetière ; jamais
+     * portée par la carte, accordée par Underworld Breach (`STATIC_ESCAPE`). Un sort lancé ainsi retourne au cimetière.
+     */
+    public const CAST_ESCAPE = 'escape';
+    public const ALT_CASTS = [self::CAST_FLASHBACK, self::CAST_DASH, self::CAST_ESCAPE];
 
     // Mots-clés de combat (CR 702).
     public const FLYING = 'flying';

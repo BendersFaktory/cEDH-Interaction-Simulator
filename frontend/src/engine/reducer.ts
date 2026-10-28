@@ -160,7 +160,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       const pl = v.players[p.player]
       // Un commandant est lancé depuis la zone de commandement, une carte exilée (Ragavan) depuis l'exil de son propriétaire, le reste depuis la main.
       // Flashback (Strike It Rich) : depuis le cimetière.
-      removeCard(p.fromCommand ? pl.command : p.fromExile ? v.players[p.owner].exile : p.altCast === 'flashback' ? pl.graveyard : pl.hand, p.card.id)
+      removeCard(p.fromCommand ? pl.command : p.fromExile ? v.players[p.owner].exile : p.altCast === 'flashback' || p.altCast === 'escape' ? pl.graveyard : pl.hand, p.card.id)
       for (const id of p.tapped as string[]) {
         const land = pl.battlefield.find((c) => c.id === id)
         if (land) land.tapped = true
@@ -367,9 +367,18 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       // Champ de bataille (ou main, coût alternatif de Force of Will) → exil (`none` : un jeton cesse d'exister).
       const pl = v.players[p.player]
       if (p.from === 'library')
-        pl.library = p.library // Ragavan : carte du dessus exilée
-      else removeCard(p.from === 'hand' ? pl.hand : pl.battlefield, p.card.id)
+        pl.library = p.library // Ragavan, Demonic Consultation, Necropotence : carte du dessus exilée
+      else removeCard(p.from === 'hand' ? pl.hand : p.from === 'graveyard' ? pl.graveyard : pl.battlefield, p.card.id) // cimetière : escape, Necropotence
       zoneOf(v.players[p.owner ?? p.player], p.destination)?.push(board(p.card))
+      break
+    }
+
+    case 'CardPutIntoHand': {
+      // Mise en main sans pioche (Ad Nauseam, Tainted Pact, Demonic Consultation, Necropotence, Beseech the Mirror).
+      const pl = v.players[p.player]
+      if (p.from === 'library') pl.library = p.library
+      else removeCard(pl.exile, p.card.id)
+      pl.hand.push(board(p.card))
       break
     }
 
@@ -477,7 +486,7 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       v.winner = p.winner
       break
 
-    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled', 'CostNotPaid', 'DelayedTriggerCreated', 'NoncreatureLockApplied', 'CastLockApplied', 'AttacksLocked', 'FlashGranted' et autres : pas d'effet sur l'état affiché.
+    // 'CreatureDamaged', 'DeclarationFinished', 'SpellFizzled', 'CostNotPaid', 'DelayedTriggerCreated', 'NoncreatureLockApplied', 'CastLockApplied', 'AttacksLocked', 'FlashGranted', 'ExtraTurnAdded', 'ExtraTurnStarted', 'StepSkipped' et autres : pas d'effet sur l'état affiché.
   }
 
   return v

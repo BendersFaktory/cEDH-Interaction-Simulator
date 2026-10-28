@@ -44,7 +44,8 @@ final class TurnManager
         // Triggers « au début de votre étape de fin » : idem, à l'étape de fin du joueur actif.
         if ($s->phase === Phase::End) {
             $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::END_STEP);
-            $s->fireDelayedTriggers(TriggeredAbility::NEXT_END); // Mobilize : sacrifier les jetons
+            $s->queueEachEndStepTriggers(); // Underworld Breach : « at the beginning of the end step »
+            $s->fireDelayedTriggers(TriggeredAbility::NEXT_END); // Mobilize : sacrifier les jetons ; Necropotence ; Final Fortune
         }
 
         $this->combat->beginStep($s);
@@ -110,7 +111,7 @@ final class TurnManager
         $this->emptyPools($s);
 
         $next = $s->phase->next();
-        while ($next !== null && $this->combat->skips($next, $s)) {
+        while ($next !== null && ($this->combat->skips($next, $s) || $this->skipsDraw($s, $next))) {
             $next = $next->next();
         }
         if ($next !== null) {
@@ -129,7 +130,9 @@ final class TurnManager
 
             return;
         }
-        $s->activePlayer = $s->nextAlive($s->activePlayer);
+        // Tour supplémentaire (Final Fortune) : à la place du joueur suivant (CR 500.7).
+        $extra = $s->takeExtraTurn();
+        $s->activePlayer = $extra['player'] ?? $s->nextAlive($s->activePlayer);
         $s->landsPlayed = 0;
         $s->spellsCast = [];
         $s->noncreatureCast = [];
@@ -138,5 +141,23 @@ final class TurnManager
         $s->combatDamaged = [];
         $s->phase = Phase::Untap;
         $s->stepStarted = false;
+        if ($extra !== null) {
+            $s->emit('ExtraTurnStarted', ['player' => $extra['player'], 'turn' => $s->turn, 'pending' => count($s->extraTurns)]);
+            if (isset($extra['loseAtEnd'])) {
+                // « At the beginning of that turn's end step, you lose the game » : sa prochaine étape de fin est celle de ce tour.
+                $s->addDelayedTrigger($extra['player'], CardInstance::fromArray($extra['card']), new TriggeredAbility(TriggeredAbility::NEXT_END, 'lose_game'));
+            }
+        }
+    }
+
+    /** « Skip your draw step » (Necropotence) : l'étape de pioche du joueur actif n'a pas lieu (`StepSkipped`). */
+    private function skipsDraw(GameState $s, Phase $next): bool
+    {
+        if ($next !== Phase::Draw || !$s->controlsStatic($s->activePlayer, CardInstance::STATIC_SKIP_DRAW)) {
+            return false;
+        }
+        $s->emit('StepSkipped', ['player' => $s->activePlayer, 'phase' => Phase::Draw->value]);
+
+        return true;
     }
 }

@@ -250,6 +250,15 @@ final class ActivatedAbility
         return new self(false, 'two_players_draw', false, ManaCost::parse($cost), [], $n);
     }
 
+    /**
+     * Necropotence : `Pay $life life` : exiler face cachée la carte du dessus de sa bibliothèque ; elle va dans sa main au début
+     * de sa prochaine étape de fin (effet `necro`, trigger retardé `necro_return`).
+     */
+    public static function necro(int $life): self
+    {
+        return new self(false, 'necro', false, lifeCost: $life);
+    }
+
     /** `[coût], [{T}] : créer $n jetons $spec` (`Nom:F/E`, ex. Kher Keep : `{1}{R}`, {T} -> `Kobold:0/1`). */
     public static function token(string $spec, int $n, ?string $cost, bool $tap = true): self
     {
@@ -360,6 +369,7 @@ final class ActivatedAbility
             'draw' => sprintf('piocher %d', $this->amount),
             'each_draw' => sprintf('chaque joueur pioche %d', $this->amount),
             'two_players_draw' => sprintf('deux joueurs ciblés piochent %d', $this->amount),
+            'necro' => 'exiler face cachée la carte du dessus ; elle arrive en main à votre prochaine étape de fin',
             'tutor_give_control' => 'chercher une carte ; un adversaire prend le contrôle de cette carte (pendant votre tour)',
             'token' => sprintf('%d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
             'pump' => $this->spec,

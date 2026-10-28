@@ -152,6 +152,11 @@ final class StackResolver
                 'sacrifice_tokens' => $this->sacrificeTokens($s, $item->controller, $ability->spec),
                 'return_dashed' => $this->returnDashed($s, $ability->spec),
                 'pump_untap' => $this->pumpUntap($s, $item->controller, $ability->spec), // Valley Floodcaller
+                'oracle' => $this->oracle($s, $item->controller, $card->name), // Thassa's Oracle
+                'exile_discarded' => $this->exileDiscarded($s, $item->controller, $item->targets[0] ?? '', $card->name), // Necropotence
+                'necro' => $this->necro($s, $item->controller, $card), // Necropotence
+                'necro_return' => $s->putIntoHand($item->controller, $ability->spec, 'exile', $card->name),
+                'lose_game' => (new StateBasedActions())->eliminate($s, $item->controller, 'lose_effect'), // Final Fortune
                 default => null,
             };
 
@@ -226,7 +231,7 @@ final class StackResolver
                 'treasure' => $this->treasures($s, $effect->target === SpellEffect::TREASURE_SPELL_CONTROLLER ? $spellController ?? $item->controller : $item->controller, max(1, $effect->amount)),
                 'draw' => $this->draw($s, $item->controller, $effect->amount),
                 'exile' => $this->exileTarget($s, $target, $effect, $card->name),
-                'tutor' => $this->tutor($s, $item->controller, $target, $effect, $card->name),
+                'tutor' => $effect->freeCastMax > 0 ? $this->beseech($s, $item, $target, $effect) : $this->tutor($s, $item->controller, $target, $effect, $card->name),
                 'copy' => $this->copy($s, $item->controller, $target),
                 'scry' => null, // rangement déjà décidé avant la résolution (PriorityManager::scry)
                 'put_back' => $this->startSelection($s, $item->controller, 'put_back', min($effect->amount, count($s->player($item->controller)->hand)), $card->name),
@@ -241,7 +246,317 @@ final class StackResolver
                 'no_attacks' => $this->lockAttacks($s, $card->name),
                 'flash_grant' => $this->grantFlash($s, $item->controller, $card->name),
                 'gift' => $this->gift($s, $target, (string) $effect->token, $card->name),
+                'consult' => $this->consult($s, $item->controller, $target, $card->name),
+                'tainted_pact' => $this->taintedPactStep($s, $item->controller, [], $card->name),
+                'ad_nauseam' => $this->adNauseamStep($s, $item->controller, $card->name),
+                'vault' => $this->vaultLook($s, $item->controller, $effect->amount, $card->name),
+                'symmetry' => $this->symmetryNext($s, self::symmetryPlayers($target), $card->name),
+                'extra_turn' => $this->extraTurn($s, $item->controller, $card, $effect->amount > 0),
             };
+        }
+    }
+
+    /**
+     * Suite d'une décision `ResolutionChoice` (étape 14, voir `GameState::$selection`) : applique le choix, puis ouvre la décision
+     * suivante (même sorte, ou autre joueur pour Scheming Symmetry) ou laisse `$selection` à null quand la résolution est finie.
+     * Beseech the Mirror (`cast`) : retourne la carte à lancer sans payer son coût et son propriétaire (`PriorityManager` la lance).
+     *
+     * @return array{card: CardInstance, owner: int}|null
+     */
+    public function choose(GameState $s, \App\Engine\Action\ResolutionChoice $a): ?array
+    {
+        $sel = $s->selection ?? throw new \LogicException('Aucune sélection en cours');
+        $s->selection = null;
+        $player = $a->player();
+        $source = $sel['source'];
+        switch ($sel['kind']) {
+            case 'tainted_pact':
+                if ($a->choice === 'take') {
+                    $s->putIntoHand($player, (string) $sel['cardId'], 'exile', $source);
+                } else {
+                    $this->taintedPactStep($s, $player, $sel['names'] ?? [], $source);
+                }
+                break;
+            case 'ad_nauseam':
+                if ($a->choice === 'continue') {
+                    $this->adNauseamStep($s, $player, $source);
+                }
+                break;
+            case 'vault':
+                $this->vaultChoice($s, $player, $sel['count'], $a->cardId(), $source);
+                break;
+            case 'oracle':
+                $this->oracleChoice($s, $player, $sel['count'], $a->cardId());
+                break;
+            case 'symmetry':
+                if ($a->cardId() !== null) {
+                    $this->tutor($s, $player, 'library:' . $a->cardId(), new SpellEffect('tutor', tutorTop: true), $source);
+                } else {
+                    $this->shuffle($s, $player);
+                }
+                $this->symmetryNext($s, $sel['queue'] ?? [], $source);
+                break;
+            case 'beseech':
+                $card = \App\Engine\Action\ResolutionChoice::find($s->player($player)->exile, (string) $sel['cardId']);
+                if ($a->choice === 'cast' && $card !== null) {
+                    $s->player($player)->exile = array_values(array_filter($s->player($player)->exile, static fn (CardInstance $c) => $c !== $card));
+
+                    return ['card' => $card, 'owner' => $player];
+                }
+                $s->putIntoHand($player, (string) $sel['cardId'], 'exile', $source);
+                break;
+            default:
+                throw new \LogicException('Sélection sans choix de résolution : ' . $sel['kind']);
+        }
+
+        return null;
+    }
+
+    /** Ouvre une décision `ResolutionChoice` de la sorte `$kind` pour `$player` (`$extra` : clés propres à la sorte). */
+    private static function ask(GameState $s, int $player, string $kind, string $source, int $count = 1, array $extra = []): void
+    {
+        $s->selection = ['player' => $player, 'kind' => $kind, 'count' => $count, 'source' => $source, 'draw' => 0] + $extra;
+    }
+
+    private function shuffle(GameState $s, int $player): void
+    {
+        $p = $s->player($player);
+        $p->library = $s->rng->shuffle($p->library);
+        $s->emit('LibraryShuffled', ['player' => $player, 'library' => count($p->library)]);
+    }
+
+    /**
+     * Demonic Consultation : le nom choisi au lancement (`name:<nom>`) ; exile les six cartes du dessus, puis révèle les cartes
+     * du dessus jusqu'à une carte de ce nom, mise en main (`CardPutIntoHand`), les autres révélées exilées. Nom absent : toute la
+     * bibliothèque est exilée.
+     */
+    private function consult(GameState $s, int $player, string $target, string $source): void
+    {
+        $name = str_starts_with($target, 'name:') ? substr($target, 5) : '';
+        for ($i = 0; $i < 6; $i++) {
+            $s->exileTopOfLibrary($player, $source);
+        }
+        $p = $s->player($player);
+        while ($p->library !== []) {
+            if ($p->library[0]->name === $name) {
+                $s->putIntoHand($player, $p->library[0]->id, 'library', $source);
+
+                return;
+            }
+            $s->exileTopOfLibrary($player, $source);
+        }
+    }
+
+    /**
+     * Tainted Pact : exile la carte du dessus ; si son nom est déjà celui d'une carte exilée ainsi (`$names`), c'est fini ; sinon
+     * son lanceur décide de la prendre en main ou de continuer (`tainted_pact`). Bibliothèque vide : fini.
+     *
+     * @param list<string> $names
+     */
+    private function taintedPactStep(GameState $s, int $player, array $names, string $source): void
+    {
+        $card = $s->exileTopOfLibrary($player, $source);
+        if ($card === null || in_array($card->name, $names, true)) {
+            return;
+        }
+        self::ask($s, $player, 'tainted_pact', $source, extra: ['cardId' => $card->id, 'names' => [...$names, $card->name]]);
+    }
+
+    /**
+     * Ad Nauseam : révèle la carte du dessus, la met en main (ce n'est pas une pioche) et fait perdre autant de PV que sa valeur
+     * de mana ; s'il en reste, son lanceur décide de recommencer (`ad_nauseam`).
+     */
+    private function adNauseamStep(GameState $s, int $player, string $source): void
+    {
+        $p = $s->player($player);
+        $card = $p->library[0] ?? null;
+        if ($card === null) {
+            return;
+        }
+        $s->putIntoHand($player, $card->id, 'library', $source);
+        $s->loseLife($player, $card->manaCost()->manaValue(), $source);
+        if ($p->library !== []) {
+            self::ask($s, $player, 'ad_nauseam', $source);
+        }
+    }
+
+    /** Lim-Dûl's Vault : regarder les `$n` cartes du dessus (moins s'il en reste moins) ; décision `vault`. */
+    private function vaultLook(GameState $s, int $player, int $n, string $source): void
+    {
+        $count = min($n, count($s->player($player)->library));
+        if ($count > 0) {
+            self::ask($s, $player, 'vault', $source, $count);
+        }
+    }
+
+    /**
+     * Lim-Dûl's Vault : continuer (`$top` null) = payer 1 PV, mettre les cartes regardées sous la bibliothèque (leur ordre est sans
+     * effet : elle sera mélangée), regarder les suivantes ; s'arrêter = mélanger le reste et remettre les cartes regardées dessus,
+     * `$top` en premier puis les autres dans leur ordre (approximation : seul le dessus est choisi).
+     */
+    private function vaultChoice(GameState $s, int $player, int $count, ?string $top, string $source): void
+    {
+        $p = $s->player($player);
+        $looked = array_slice($p->library, 0, $count);
+        $rest = array_slice($p->library, $count);
+        if ($top === null) {
+            $s->payLife($player, 1, $source);
+            $p->library = [...$rest, ...$looked];
+            $s->emit('Scried', ['player' => $player, 'top' => 0, 'bottom' => $count, 'library' => count($p->library)]);
+            $this->vaultLook($s, $player, 5, $source);
+
+            return;
+        }
+        $first = array_values(array_filter($looked, static fn (CardInstance $c) => $c->id === $top));
+        $others = array_values(array_filter($looked, static fn (CardInstance $c) => $c->id !== $top));
+        $p->library = $rest;
+        $this->shuffle($s, $player);
+        $p->library = [...$first, ...$others, ...$p->library];
+        $s->emit('Scried', ['player' => $player, 'top' => $count, 'bottom' => 0, 'library' => count($p->library)]);
+    }
+
+    /**
+     * Thassa's Oracle : X = dévotion au bleu de son contrôleur à la résolution. Si X ≥ le nombre de cartes de sa bibliothèque, il
+     * gagne la partie (le rangement est alors sans effet) ; sinon il regarde les X cartes du dessus (décision `oracle`).
+     */
+    private function oracle(GameState $s, int $player, string $source): void
+    {
+        $x = $s->devotion($player, 'U');
+        $p = $s->player($player);
+        if ($x >= count($p->library)) {
+            $this->win($s, $player, $source);
+
+            return;
+        }
+        if ($x > 0) {
+            self::ask($s, $player, 'oracle', $source, $x);
+        }
+    }
+
+    /** Thassa's Oracle : `$top` (ou aucune) reste sur le dessus, les autres cartes regardées vont dessous dans un ordre aléatoire. */
+    private function oracleChoice(GameState $s, int $player, int $count, ?string $top): void
+    {
+        $p = $s->player($player);
+        $looked = array_slice($p->library, 0, $count);
+        $first = array_values(array_filter($looked, static fn (CardInstance $c) => $c->id === $top));
+        $others = $s->rng->shuffle(array_values(array_filter($looked, static fn (CardInstance $c) => $c->id !== $top)));
+        $p->library = [...$first, ...array_slice($p->library, $count), ...$others];
+        $s->emit('Scried', ['player' => $player, 'top' => count($first), 'bottom' => count($others), 'library' => count($p->library)]);
+    }
+
+    /**
+     * « You win the game » (CR 104.2a) : chaque adversaire encore en vie perd (`PlayerLost`, raison `opponent_won`), puis la partie
+     * s'arrête (`GameOver`, raison `won`).
+     */
+    private function win(GameState $s, int $player, string $source): void
+    {
+        $sba = new StateBasedActions();
+        foreach ($s->alivePlayerIds() as $id) {
+            if ($id !== $player) {
+                $sba->eliminate($s, $id, 'opponent_won');
+            }
+        }
+        $s->over = true;
+        $s->winner = $player;
+        $s->emit('GameOver', ['winner' => $player, 'reason' => 'won', 'source' => $source]);
+    }
+
+    /** @return list<int> les deux joueurs d'une cible de Scheming Symmetry (`players:<id>+<id>`) */
+    private static function symmetryPlayers(string $target): array
+    {
+        return str_starts_with($target, 'players:') ? array_map('intval', explode('+', substr($target, 8))) : [];
+    }
+
+    /**
+     * Scheming Symmetry : le prochain joueur en vie de `$queue` cherche une carte (décision `symmetry`, la sienne) ; bibliothèque
+     * vide : il ne trouve rien et mélange, sans décision.
+     *
+     * @param list<int> $queue
+     */
+    private function symmetryNext(GameState $s, array $queue, string $source): void
+    {
+        while (($player = array_shift($queue)) !== null) {
+            if ($s->player($player)->lost) {
+                continue;
+            }
+            if ($s->player($player)->library === []) {
+                $this->shuffle($s, $player);
+                continue;
+            }
+            self::ask($s, $player, 'symmetry', $source, extra: ['queue' => $queue]);
+
+            return;
+        }
+    }
+
+    /** Final Fortune : un tour supplémentaire après celui-ci (`ExtraTurnAdded`) ; `$lose` : perdu au début de son étape de fin. */
+    private function extraTurn(GameState $s, int $player, CardInstance $card, bool $lose): void
+    {
+        $s->extraTurns[] = ['player' => $player, 'card' => $card->toArray()] + ($lose ? ['loseAtEnd' => true] : []);
+        $s->emit('ExtraTurnAdded', ['player' => $player, 'source' => $card->name, 'pending' => count($s->extraTurns)] + ($lose ? ['loseAtEnd' => true] : []));
+    }
+
+    /**
+     * Beseech the Mirror : la carte choisie (`library:<id>`) est exilée face cachée, puis la bibliothèque est mélangée. Sort
+     * « bargained » (`StackItem::$kicked`) et carte lançable sans payer son coût (valeur de mana ≤ `freeCastMax`, voir
+     * `freeCastable()`) : décision `beseech` ; sinon elle va en main. Opposition Agent : exilée chez son contrôleur à la place.
+     */
+    private function beseech(GameState $s, StackItem $item, string $target, SpellEffect $effect): void
+    {
+        $player = $item->controller;
+        $p = $s->player($player);
+        $id = substr($target, strlen('library:'));
+        $card = \App\Engine\Action\ResolutionChoice::find($p->library, $id);
+        if ($card === null) {
+            $this->shuffle($s, $player);
+
+            return;
+        }
+        $p->library = array_values(array_filter($p->library, static fn (CardInstance $c) => $c !== $card));
+        $watcher = $s->searchWatcher($player);
+        if ($watcher !== null) {
+            $s->exileFound($player, $card, $watcher);
+            $this->shuffle($s, $player);
+
+            return;
+        }
+        $s->exile($player, $card);
+        $s->emit('CardExiled', ['player' => $player, 'card' => $card->toPublic(), 'from' => 'library', 'destination' => 'exile', 'source' => $item->card->name,
+            'exile' => count($p->exile), 'library' => count($p->library), 'faceDown' => true]);
+        $this->shuffle($s, $player);
+        if ($item->kicked && self::freeCastable($s, $player, $card, $effect->freeCastMax)) {
+            self::ask($s, $player, 'beseech', $item->card->name, extra: ['cardId' => $card->id]);
+
+            return;
+        }
+        $s->putIntoHand($player, $card->id, 'exile', $item->card->name);
+    }
+
+    /**
+     * Lançable sans payer son coût au milieu d'une résolution (Beseech the Mirror) : sort non-terrain de valeur de mana ≤ `$max`,
+     * sans cible ni mode ni coût additionnel à choisir (approximation : une carte qui en demande va en main), que son lanceur a le
+     * droit de lancer (Silence…).
+     */
+    public static function freeCastable(GameState $s, int $player, CardInstance $card, int $max): bool
+    {
+        return !$card->isLand() && $card->manaCost()->manaValue() <= $max && $card->targetedEffects() === [] && !$card->isModal()
+            && $card->extraCost === null && $s->canCast($player, $card);
+    }
+
+    /** Necropotence : la carte défaussée (`card:<id>`) quitte le cimetière de son contrôleur pour l'exil, si elle y est encore. */
+    private function exileDiscarded(GameState $s, int $player, string $target, string $source): void
+    {
+        if (str_starts_with($target, 'card:')) {
+            $s->exileFromGraveyard($player, [substr($target, 5)], $source);
+        }
+    }
+
+    /** Necropotence : la carte du dessus est exilée face cachée ; elle ira en main au début de la prochaine étape de fin de son contrôleur. */
+    private function necro(GameState $s, int $player, CardInstance $source): void
+    {
+        $card = $s->exileTopOfLibrary($player, $source->name, true);
+        if ($card !== null) {
+            $s->addDelayedTrigger($player, $source, new TriggeredAbility(TriggeredAbility::NEXT_END, 'necro_return', spec: $card->id));
         }
     }
 

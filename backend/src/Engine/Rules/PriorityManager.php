@@ -12,6 +12,7 @@ use App\Engine\Action\ArrangeTop;
 use App\Engine\Action\CastSpell;
 use App\Engine\Action\ChainCopy;
 use App\Engine\Action\ReplaceChoice;
+use App\Engine\Action\ResolutionChoice;
 use App\Engine\Action\PassPriority;
 use App\Engine\Action\PayCost;
 use App\Engine\Action\PlayLand;
@@ -142,6 +143,11 @@ final class PriorityManager
 
             if ($action instanceof ReplaceChoice) {
                 $this->replaceChoice($s, $action);
+                continue;
+            }
+
+            if ($action instanceof ResolutionChoice) {
+                $this->resolutionChoice($s, $action);
                 continue;
             }
 
@@ -329,6 +335,41 @@ final class PriorityManager
         $this->finishSelection($s);
     }
 
+    /**
+     * Décision au milieu d'une résolution (étape 14, `StackResolver::choose()`). Tant qu'une décision suit (même joueur, ou un
+     * autre pour Scheming Symmetry), son joueur décide ; sinon nouvelle ronde comme après une résolution. Beseech the Mirror :
+     * la carte est d'abord lancée sans payer son coût (`castWithoutPaying()`).
+     */
+    private function resolutionChoice(GameState $s, ResolutionChoice $a): void
+    {
+        $source = (string) ($s->selection['source'] ?? '');
+        $free = $this->resolver->choose($s, $a);
+        if ($free !== null) {
+            $this->castWithoutPaying($s, $a->player(), $free['card'], $source);
+        }
+        if ($s->selection !== null) {
+            $s->priority = new PriorityState($s->selection['player'], [], true);
+
+            return;
+        }
+        $this->newRoundAfterResolution($s);
+    }
+
+    /**
+     * Lancer une carte sans payer son coût au milieu d'une résolution (CR 608.2g, Beseech the Mirror) : sans cible, X = 0
+     * (`StackResolver::freeCastable()`). Mêmes triggers de lancement qu'un sort lancé normalement (`afterCast()`).
+     */
+    private function castWithoutPaying(GameState $s, int $player, CardInstance $card, string $source): void
+    {
+        $p = $s->player($player);
+        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $player);
+        $s->stack[] = $item;
+        $s->emit('SpellCast', ['player' => $player, 'card' => $card->toPublic(), 'stackId' => $item->id, 'targets' => [], 'tapped' => [], 'cost' => 0,
+            'manaCost' => '{0}', 'x' => 0, 'paid' => [], 'fromPool' => [], 'pool' => $p->pool->toArray()] + $p->pool->restrictedField()
+            + ['fromCommand' => false, 'fromExile' => true, 'owner' => $player, 'free' => true, 'source' => $source]);
+        $this->afterCast($s, $player, $card, $item, false);
+    }
+
     /** Fin de la sélection : les pioches qui suivaient (Ponder) se font, puis nouvelle ronde comme après une résolution. */
     private function finishSelection(GameState $s): void
     {
@@ -407,10 +448,17 @@ final class PriorityManager
     private function cast(GameState $s, CastSpell $a): void
     {
         $p = $s->player($a->player());
-        $altCast = in_array($a->alt, CardInstance::ALT_CASTS, true) ? $a->alt : null; // Flashback, Dash
-        $card = ($altCast === CardInstance::CAST_FLASHBACK ? self::inGraveyard($p, $a->cardId) : $s->castable($a->player(), $a->cardId))
+        $altCast = in_array($a->alt, CardInstance::ALT_CASTS, true) ? $a->alt : null; // Flashback, Dash, Escape
+        $fromGraveyard = $altCast === CardInstance::CAST_FLASHBACK || $altCast === CardInstance::CAST_ESCAPE;
+        $card = ($fromGraveyard ? self::inGraveyard($p, $a->cardId) : $s->castable($a->player(), $a->cardId))
             ?? throw new IllegalActionException('Carte absente de la main, de la zone de commandement et de l\'exil jouable');
-        if ($altCast !== null && (!isset($card->altCasts[$altCast]) || ($altCast === CardInstance::CAST_DASH && $p->findInHand($card->id) === null))) {
+        $escapeExiles = null; // Escape (Underworld Breach) : trois autres cartes du cimetière exilées en coût
+        if ($altCast === CardInstance::CAST_ESCAPE) {
+            $escapeExiles = $card->isLand() || !$s->controlsStatic($a->player(), CardInstance::STATIC_ESCAPE) ? null : $s->escapeExiles($a->player(), $card);
+            if ($escapeExiles === null) {
+                throw new IllegalActionException('Escape indisponible');
+            }
+        } elseif ($altCast !== null && (!isset($card->altCasts[$altCast]) || ($altCast === CardInstance::CAST_DASH && $p->findInHand($card->id) === null))) {
             throw new IllegalActionException('Ce sort ne se lance pas ainsi');
         }
         if ($card->isModal() ? !in_array($a->mode, $card->modes(), true) : $a->mode !== 0) {
@@ -419,18 +467,24 @@ final class PriorityManager
         if (!$s->canCast($a->player(), $card, $a->x)) {
             throw new IllegalActionException('Une interdiction vous empêche de lancer ce sort');
         }
-        $sacrificed = null; // coût additionnel : créature sacrifiée (Culling the Weak, Diabolic Intent)
+        $sacrificed = null; // coût additionnel : créature sacrifiée (Culling the Weak, Diabolic Intent) ; Bargain (Beseech the Mirror)
         if ($card->extraCost === CardInstance::EXTRA_SACRIFICE_CREATURE) {
             $sacrificed = $a->sacrifice !== null ? $p->findOnBattlefield($a->sacrifice) : null;
             if ($sacrificed === null || !$sacrificed->isCreature()) {
                 throw new IllegalActionException('Créature à sacrifier introuvable');
+            }
+        } elseif ($card->extraCost === CardInstance::EXTRA_BARGAIN && $a->sacrifice !== null) {
+            $sacrificed = $p->findOnBattlefield($a->sacrifice);
+            if ($sacrificed === null || !self::bargainable($sacrificed)) {
+                throw new IllegalActionException('Artefact, enchantement ou jeton à sacrifier introuvable');
             }
         } elseif ($a->sacrifice !== null) {
             throw new IllegalActionException('Ce sort n\'a pas de coût de sacrifice');
         }
 
         // Coût calculé AVANT d'incrémenter le compteur de lancements (taxe de commandant).
-        $cost = $altCast !== null ? ManaCost::parse($card->altCasts[$altCast]) : $s->castCostFor($a->player(), $card);
+        $cost = $altCast === CardInstance::CAST_ESCAPE ? $p->castCost($card) // coût d'escape : le coût de mana de la carte
+            : ($altCast !== null ? ManaCost::parse($card->altCasts[$altCast]) : $s->castCostFor($a->player(), $card));
         if ($a->x < 0 || ($a->x > 0 && !$cost->hasX())) {
             throw new IllegalActionException('X invalide pour ce sort');
         }
@@ -450,7 +504,7 @@ final class PriorityManager
         $pitchLife = 0;
         $returned = [];
         if ($altCast !== null) {
-            // Flashback, Dash : coût de mana déjà vérifié.
+            // Flashback, Dash, Escape : coût de mana déjà vérifié.
         } elseif ($a->alt === CastSpell::ALT_FREE) {
             if (!(($card->altCost === CardInstance::ALT_COMMANDER && $p->controlsCommander())
                 || ($card->altCost === CardInstance::ALT_OPPONENT_THREE_SPELLS && self::opponentCastThree($s, $a->player())))) {
@@ -488,7 +542,10 @@ final class PriorityManager
             }
         }
 
-        $card = $altCast === CardInstance::CAST_FLASHBACK ? self::takeFromGraveyard($p, $a->cardId) : $p->takeFromHand($a->cardId);
+        $card = $fromGraveyard ? self::takeFromGraveyard($p, $a->cardId) : $p->takeFromHand($a->cardId);
+        if ($escapeExiles !== null) {
+            $s->exileFromGraveyard($a->player(), $escapeExiles, 'Escape');
+        }
         $fromCommand = false;
         $owner = null; // propriétaire d'une carte exilée lancée (Ragavan : la carte d'un adversaire)
         if ($card === null && ($card = $p->takeFromCommand($a->cardId)) !== null) {
@@ -516,7 +573,8 @@ final class PriorityManager
             $p->commanderCasts[$card->id] = ($p->commanderCasts[$card->id] ?? 0) + 1;
         }
 
-        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode, kicked: $a->kicked,
+        $bargained = $card->extraCost === CardInstance::EXTRA_BARGAIN && $sacrificed !== null; // retenu comme un kicker (`StackItem::$kicked`)
+        $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode, kicked: $a->kicked || $bargained,
             owner: $owner !== null && $owner !== $a->player() ? $owner : null, altCast: $altCast);
         $s->stack[] = $item;
 
@@ -534,32 +592,44 @@ final class PriorityManager
             'pool' => $p->pool->toArray(),
         ] + $p->pool->restrictedField() + [
             'fromCommand' => $fromCommand,
-        ] + ($owner !== null ? ['fromExile' => true, 'owner' => $owner] : []) + ($altCast !== null ? ['altCast' => $altCast] : []) + ($a->mode > 0 ? ['mode' => $a->mode] : []) + ($a->kicked ? ['kicked' => true] : []));
+        ] + ($owner !== null ? ['fromExile' => true, 'owner' => $owner] : []) + ($altCast !== null ? ['altCast' => $altCast] : []) + ($a->mode > 0 ? ['mode' => $a->mode] : []) + ($a->kicked ? ['kicked' => true] : []) + ($bargained ? ['bargained' => true] : []));
         if ($sacrificed !== null && !in_array($sacrificed->id, $sacrifice, true)) {
             $sacrifice[] = $sacrificed->id;
         }
         $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût, créature sacrifiée en coût additionnel
         $s->hurtByMana($a->player(), $pain);     // Ancient Tomb, Talismans, Mana Confluence
+        // Lavinia : « si aucun mana n'a été dépensé pour le lancer » (coût alternatif, ou coût de mana nul).
+        $this->afterCast($s, $a->player(), $card, $item, $paid !== [] || $fromPool !== []);
+
+        // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
+        $s->priority->passed = [];
+        $s->priority->announced = false; // le lanceur reçoit la priorité en premier
+    }
+
+    /** Bargain : un artefact, un enchantement ou un jeton. */
+    public static function bargainable(CardInstance $card): bool
+    {
+        return $card->token || $card->hasType(CardInstance::ARTIFACT) || $card->hasType(CardInstance::ENCHANTMENT);
+    }
+
+    /** Triggers et compteurs d'un sort lancé (`$manaSpent` : du mana a été dépensé pour le lancer, Lavinia). */
+    private function afterCast(GameState $s, int $player, CardInstance $card, \App\Engine\Game\StackItem $item, bool $manaSpent): void
+    {
         // « Quand vous lancez un sort » : posés au-dessus du sort (avant la priorité du lanceur), donc résolus avant lui.
-        $s->queuePlayerTriggers($a->player(), TriggeredAbility::CAST, $card);
-        $s->spellsCast[$a->player()] = ($s->spellsCast[$a->player()] ?? 0) + 1;
+        $s->queuePlayerTriggers($player, TriggeredAbility::CAST, $card);
+        $s->spellsCast[$player] = ($s->spellsCast[$player] ?? 0) + 1;
         if (!$card->isCreature()) {
-            $s->noncreatureCast[$a->player()] = ($s->noncreatureCast[$a->player()] ?? 0) + 1; // Esper Sentinel
+            $s->noncreatureCast[$player] = ($s->noncreatureCast[$player] ?? 0) + 1; // Esper Sentinel
         }
         if ($card->hasKeyword(CardInstance::STORM)) {
             // Storm (CR 702.40) : trigger du sort lui-même, une copie par sort lancé avant lui ce tour (tous joueurs confondus).
             $count = array_sum($s->spellsCast) - 1;
             if ($count > 0) {
                 $storm = new TriggeredAbility(TriggeredAbility::CAST, 'storm', $count, StackResolver::stormSpec($item));
-                $s->pendingTriggers[] = new \App\Engine\Game\PendingTrigger('tr' . $s->nextTriggerId++, $a->player(), clone $card, 0, $storm);
+                $s->pendingTriggers[] = new \App\Engine\Game\PendingTrigger('tr' . $s->nextTriggerId++, $player, clone $card, 0, $storm);
             }
         }
-        // Lavinia : « si aucun mana n'a été dépensé pour le lancer » (coût alternatif, ou coût de mana nul).
-        $s->queueOpponentCastTriggers($a->player(), $card, $item->id, $paid !== [] || $fromPool !== []); // Rhystic Study, Kraum, Lavinia
-
-        // Un sort sur la pile remet les passes à zéro : TOUS les autres joueurs (IA comprise) doivent repasser.
-        $s->priority->passed = [];
-        $s->priority->announced = false; // le lanceur reçoit la priorité en premier
+        $s->queueOpponentCastTriggers($player, $card, $item->id, $manaSpent); // Rhystic Study, Kraum, Lavinia
     }
 
     private static function inGraveyard(PlayerState $p, string $cardId): ?CardInstance

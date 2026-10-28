@@ -4,13 +4,23 @@ import { phaseLabel } from './phases'
 
 /**
  * Cible lisible : `player:N` → `JN`, `permanent:<id>` → `permanent <id>`, `stack:<id>` → `sort <id>` ; `stack:<id>><cible>`
- * (Deflecting Swat, Misdirection) → `sort <id> (nouvelle cible : …)` ; `stack:<id>+<id>` (Mindbreak Trap) → `sorts <id>, <id>`.
+ * (Deflecting Swat, Misdirection) → `sort <id> (nouvelle cible : …)` ; `stack:<id>+<id>` (Mindbreak Trap) → `sorts <id>, <id>` ;
+ * `name:<nom>` (Demonic Consultation) → `nom « … »` ; `players:<id>+<id>` (Scheming Symmetry) → `J0 et J2`.
  */
 export const target = (t: string): string => {
   const arrow = t.indexOf('>')
   if (arrow >= 0) return `${target(t.slice(0, arrow))} (nouvelle cible : ${target(t.slice(arrow + 1))})`
   if (t.startsWith('player:')) return `J${t.slice(7)}`
   if (t.startsWith('permanent:')) return `permanent ${t.slice(10)}`
+  if (t.startsWith('name:')) return t === 'name:' ? 'un nom absent de la bibliothèque' : `nom « ${t.slice(5)} »` // Demonic Consultation
+  if (t.startsWith('players:'))
+    return t
+      .slice(8)
+      .split('+')
+      .map((id) => `J${id}`)
+      .join(' et ') // Scheming Symmetry
+  if (t.startsWith('library:')) return 'une carte de la bibliothèque'
+  if (t.startsWith('card:')) return `carte ${t.slice(5)}`
   return t.includes('+') ? `sorts ${t.slice(6).split('+').join(', ')}` : `sort ${t.slice(6)}`
 }
 
@@ -63,9 +73,12 @@ export function describeEvent(e: GameEvent): string {
             ? ' depuis le cimetière (flashback)'
             : p.altCast === 'dash'
               ? ' (dash)'
-              : ''
+              : p.altCast === 'escape'
+                ? ' depuis le cimetière (escape)'
+                : ''
       const paid = p.manaCost ? ` (coût ${p.manaCost}${p.x !== undefined && p.manaCost.includes('{X}') ? `, X=${p.x}` : ''})` : p.fromCommand ? ` (coût ${p.cost})` : ''
-      return `J${p.player} lance ${p.card.name}${from}${paid}${t ? ` → ${t}` : ''}`
+      if (p.free) return `J${p.player} lance ${p.card.name} sans payer son coût (${p.source})`
+      return `J${p.player} lance ${p.card.name}${from}${paid}${p.bargained ? ' (bargain)' : ''}${t ? ` → ${t}` : ''}`
     }
     case 'ManaAbilityActivated': {
       const tapped = (p.tapped as string[] | undefined)?.length ? 'engage' : 'active'
@@ -162,7 +175,16 @@ export function describeEvent(e: GameEvent): string {
     case 'NoncreatureLockApplied':
       return `${p.source} : les adversaires de J${p.player} ne peuvent pas lancer de sort non-créature ce tour`
     case 'CardExiled':
-      return `${p.card.name} (J${p.player}) est exilé par ${p.source}${p.destination === 'none' ? " (le jeton cesse d'exister)" : ''}`
+      if (p.faceDown) return `J${p.player} exile face cachée une carte de sa bibliothèque (${p.source})`
+      return `${p.card.name} (J${p.player}) est exilé${p.from === 'graveyard' ? ' du cimetière' : p.from === 'library' ? ' de la bibliothèque' : ''} par ${p.source}${p.destination === 'none' ? " (le jeton cesse d'exister)" : ''}`
+    case 'CardPutIntoHand':
+      return `J${p.player} met ${p.card.name} en main${p.from === 'exile' ? " depuis l'exil" : ''} (${p.source})`
+    case 'ExtraTurnAdded':
+      return `${p.source} : J${p.player} jouera un tour supplémentaire${p.loseAtEnd ? ' et perdra la partie au début de son étape de fin' : ''}`
+    case 'ExtraTurnStarted':
+      return `Tour supplémentaire de J${p.player}`
+    case 'StepSkipped':
+      return `J${p.player} passe son étape de pioche`
     case 'CardImprinted':
       return `J${p.player} exile ${p.exiled} (imprint)${p.colors.length ? `, couleurs ${p.colors.join('')}` : ', sans couleur'}`
     case 'CommanderReturned':
@@ -184,11 +206,11 @@ export function describeEvent(e: GameEvent): string {
     case 'CombatEnded':
       return 'Fin du combat'
     case 'PlayerLost':
-      return `J${p.player} est éliminé (${p.reason === 'pact_unpaid' ? 'pacte non payé' : p.reason})`
+      return `J${p.player} est éliminé (${({ pact_unpaid: 'pacte non payé', opponent_won: 'un adversaire gagne la partie', lose_effect: 'perd la partie par un effet' } as Record<string, string>)[p.reason] ?? p.reason})`
     case 'PlayerLeftGame':
       return `Les objets de J${p.player} quittent la partie`
     case 'GameOver':
-      return p.winner === null ? `Fin de partie (${p.reason})` : `Victoire de J${p.winner}`
+      return p.winner === null ? `Fin de partie (${p.reason})` : `Victoire de J${p.winner}${p.reason === 'won' ? ` (${p.source})` : ''}`
     default:
       return e.type
   }

@@ -10,6 +10,7 @@ use App\Engine\Action\BottomCard;
 use App\Engine\Action\PregameChoice;
 use App\Engine\Action\ChainCopy;
 use App\Engine\Action\ReplaceChoice;
+use App\Engine\Action\ResolutionChoice;
 use App\Engine\Action\Discard;
 use App\Engine\Action\FinishDeclaration;
 use App\Engine\Action\KeepHand;
@@ -47,10 +48,12 @@ final class AutoPassAgent implements PlayerAgent
 
         // Défausse obligatoire / trigger à poser / légende à garder / avant-partie (garder la main, puis la première carte au fond) /
         // paiement demandé à la résolution (payer s'il est possible) / sélection de cartes (Brainstorm : la première carte de la
-        // main ; Ponder : l'ordre actuel) : le premier choix proposé (déterministe). Jamais de mulligan.
+        // main ; Ponder : l'ordre actuel ; choix au milieu d'une résolution, `ResolutionChoice` : le plus naturel) : le premier
+        // choix proposé (déterministe). Jamais de mulligan.
         foreach ($legal as $action) {
             if ($action instanceof Discard || $action instanceof PutTrigger || $action instanceof KeepLegend || $action instanceof KeepHand || $action instanceof BottomCard || $action instanceof ScryArrange || $action instanceof PayCost
-                || $action instanceof PutBack || $action instanceof ArrangeTop || $action instanceof ChainCopy || $action instanceof ReplaceChoice || $action instanceof PregameChoice) {
+                || $action instanceof PutBack || $action instanceof ArrangeTop || $action instanceof ChainCopy || $action instanceof ReplaceChoice || $action instanceof PregameChoice
+                || $action instanceof ResolutionChoice) {
                 return $action;
             }
         }
