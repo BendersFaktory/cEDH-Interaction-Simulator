@@ -270,7 +270,7 @@ final class LegalActionGenerator
             }
             if ($card->altCost === CardInstance::ALT_PITCH_TWO_BLUE) {
                 // Commandeer : deux cartes bleues distinctes de la main, dédoublonnées par paire de noms.
-                $blues = array_values(array_filter($p->hand, static fn (CardInstance $o) => $o->id !== $card->id && $o->isBlue()));
+                $blues = array_values(array_filter($p->hand, static fn (CardInstance $o) => $o->id !== $card->id && $o->isBlueColored()));
                 $pairs = [];
                 foreach ($blues as $i => $a) {
                     foreach (array_slice($blues, $i + 1) as $b) {
@@ -284,7 +284,7 @@ final class LegalActionGenerator
             if (($card->altCost === CardInstance::ALT_PITCH_BLUE && $p->life >= 1) || $card->altCost === CardInstance::ALT_PITCH_BLUE_FREE
                 || ($card->altCost === CardInstance::ALT_PITCH_BLUE_OFF_TURN && $s->activePlayer !== $playerId)) {
                 foreach ($p->hand as $other) {
-                    if ($other->id !== $card->id && $other->isBlue()) {
+                    if ($other->id !== $card->id && $other->isBlueColored()) {
                         $modes[] = CastSpell::ALT_PITCH . $other->id;
                     }
                 }

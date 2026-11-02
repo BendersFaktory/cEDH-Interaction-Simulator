@@ -147,6 +147,7 @@ final class ActivatedAbility
     public const DYNAMIC_OPPONENT_LAND = 'oppland'; // Fellwar Stone, Exotic Orchard : couleurs que produit un terrain adverse
     public const DYNAMIC_IMPRINT = 'imprint';       // Chrome Mox : couleurs de la carte exilée
     public const DYNAMIC_LEGENDARY = 'legendary';   // Mox Amber : couleurs des créatures et planeswalkers légendaires que l'on contrôle
+    public const DYNAMIC_IDENTITY = 'identity';     // Command Tower, Arcane Signet : couleurs de l'identité des commandants du contrôleur
     public const DYNAMIC_LUCK = 'luck';             // Gemstone Caverns : {C}, ou n'importe quelle couleur avec un marqueur de chance
 
     /**
@@ -155,7 +156,7 @@ final class ActivatedAbility
      */
     public static function dynamicMana(string $kind): self
     {
-        if (!in_array($kind, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY, self::DYNAMIC_LUCK], true)) {
+        if (!in_array($kind, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY, self::DYNAMIC_LUCK, self::DYNAMIC_IDENTITY], true)) {
             throw new \InvalidArgumentException("Mana dynamique inconnu : $kind");
         }
 
@@ -165,7 +166,7 @@ final class ActivatedAbility
     /** Vrai pour une capacité de mana dont les couleurs dépendent de l'état de la partie (`dynamicMana()`). */
     public function isDynamicMana(): bool
     {
-        return $this->isManaAbility && in_array($this->spec, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY, self::DYNAMIC_LUCK], true);
+        return $this->isManaAbility && in_array($this->spec, [self::DYNAMIC_OPPONENT_LAND, self::DYNAMIC_IMPRINT, self::DYNAMIC_LEGENDARY, self::DYNAMIC_LUCK, self::DYNAMIC_IDENTITY], true);
     }
 
     /** `[coût] : dégager la source` (Grim Monolith : `{4}` ; Mana Vault : `{4}` pendant son entretien seulement). Non-mana, passe par la pile. */

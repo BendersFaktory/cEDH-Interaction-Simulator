@@ -142,13 +142,15 @@ export function abilityText(a: AbilityView): string {
   const what =
     a.isManaAbility && a.spec === 'oppland'
       ? "un mana d'une couleur que produit un terrain adverse"
-      : a.isManaAbility && a.spec === 'luck'
-        ? "{C}, ou un mana de n'importe quelle couleur avec un marqueur de chance"
-        : a.isManaAbility && a.spec === 'imprint'
-          ? "un mana d'une couleur de la carte exilée"
-          : a.isManaAbility
-            ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ')
-            : effectText(a.effect, a.amount, a.spec)
+      : a.isManaAbility && a.spec === 'identity'
+        ? "un mana d'une couleur de l'identité de ton commandant"
+        : a.isManaAbility && a.spec === 'luck'
+          ? "{C}, ou un mana de n'importe quelle couleur avec un marqueur de chance"
+          : a.isManaAbility && a.spec === 'imprint'
+            ? "un mana d'une couleur de la carte exilée"
+            : a.isManaAbility
+              ? (a.options ?? []).map((o) => o.replace(/@(\w+)$/, ' ($1 seulement)')).join(' | ')
+              : effectText(a.effect, a.amount, a.spec)
   return `${cost} : ${what}${a.sorcerySpeed ? ' (rituel)' : ''}${a.upkeepOnly ? ' (à ton entretien)' : ''}`
 }
 

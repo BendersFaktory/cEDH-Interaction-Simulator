@@ -196,6 +196,11 @@ final class GameState
         foreach ($this->players as $p) {
             $id = $p->id;
             $p->opponentColors = static fn (): array => $self->get()?->opponentLandColors($id) ?? [];
+            // L'identité d'un commandant ne change jamais : calculée une fois par instance de partie.
+            $identity = null;
+            $p->commanderColors = static function () use ($self, $id, &$identity): array {
+                return $identity ??= $self->get()?->commanderIdentity($id) ?? [];
+            };
         }
     }
 
@@ -218,6 +223,10 @@ final class GameState
                     continue;
                 }
                 foreach ($card->abilities() as $ability) {
+                    if ($ability->isManaAbility && $ability->spec === \App\Engine\Ability\ActivatedAbility::DYNAMIC_IDENTITY) {
+                        $set += $this->commanderIdentity($o->id); // Command Tower adverse : l'identité de son contrôleur
+                        continue;
+                    }
                     if (!$ability->isManaAbility || $ability->effect !== 'mana' || $ability->isDynamicMana()) {
                         continue;
                     }
@@ -229,6 +238,40 @@ final class GameState
                         }
                     }
                 }
+            }
+        }
+
+        return $set;
+    }
+
+    /**
+     * Identité de couleurs réunie (lettres WUBRG, `[lettre => true]`) des commandants dont `$playerId` est le propriétaire, où
+     * qu'ils soient (zone de commandement, champ de bataille d'un joueur, main, cimetière, exil, bibliothèque, pile). Vide sans
+     * commandant : Command Tower ne produit alors rien (CR 903.4f).
+     *
+     * @return array<string, true>
+     */
+    public function commanderIdentity(int $playerId): array
+    {
+        $owned = [];
+        foreach ($this->stack as $item) {
+            if ($item->card->commander && $item->ownerId() === $playerId) {
+                $owned[] = $item->card;
+            }
+        }
+        foreach ($this->players as $p) {
+            foreach ([$p->command, $p->battlefield, $p->hand, $p->graveyard, $p->exile, $p->library] as $zone) {
+                foreach ($zone as $card) {
+                    if ($card->commander && $card->ownerOr($p->id) === $playerId) {
+                        $owned[] = $card; // id libre (test) : propriétaire = joueur qui la détient
+                    }
+                }
+            }
+        }
+        $set = [];
+        foreach ($owned as $card) {
+            foreach ($card->colorIdentity() as $color) {
+                $set[$color->symbol()] = true;
             }
         }
 

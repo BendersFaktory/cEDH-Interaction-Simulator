@@ -214,7 +214,7 @@ final class DeckLoaderTest extends TestCase
     public function testMapsDualLandsAndAnyColorMana(): void
     {
         self::assertSame(['U', 'B'], self::map('Underground Sea')->produces);
-        self::assertSame(['W', 'U', 'B', 'R', 'G'], self::map('Command Tower')->produces);
+        self::assertSame([], self::map('Command Tower')->produces); // mana dynamique de l'identité (étape 15, CardReviewTest)
         $birds = self::map('Birds of Paradise')->abilities[0];
         self::assertTrue($birds->isManaAbility);
         self::assertCount(5, $birds->options);

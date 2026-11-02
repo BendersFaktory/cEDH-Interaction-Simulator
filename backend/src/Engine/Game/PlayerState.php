@@ -45,6 +45,15 @@ final class PlayerState
     public ?\Closure $opponentColors = null;
 
     /**
+     * Couleurs (lettres WUBRG, `[lettre => true]`) de l'identité réunie des commandants dont ce joueur est le propriétaire, où
+     * qu'ils soient : branché par `GameState` comme `$opponentColors`. Sans lui, ou sans commandant, aucune (CR 903.4f).
+     * Sert aux capacités `ActivatedAbility::DYNAMIC_IDENTITY` (Command Tower, Arcane Signet).
+     *
+     * @var (\Closure(): array<string, true>)|null
+     */
+    public ?\Closure $commanderColors = null;
+
+    /**
      * @param list<CardInstance> $library    index 0 = dessus de la bibliothèque
      * @param list<CardInstance> $hand
      * @param list<CardInstance> $battlefield
@@ -103,6 +112,7 @@ final class PlayerState
     {
         $copy = self::fromArray($this->toArray());
         $copy->opponentColors = $this->opponentColors;
+        $copy->commanderColors = $this->commanderColors;
 
         return $copy;
     }
@@ -120,6 +130,9 @@ final class PlayerState
         }
         if ($ability->spec === ActivatedAbility::DYNAMIC_LUCK) {
             return ($card->counters[CardInstance::LUCK] ?? 0) > 0 ? array_fill_keys(['W', 'U', 'B', 'R', 'G'], true) : ['C' => true]; // Gemstone Caverns
+        }
+        if ($ability->spec === ActivatedAbility::DYNAMIC_IDENTITY) {
+            return $this->commanderColors === null ? [] : ($this->commanderColors)();
         }
         if ($ability->spec === ActivatedAbility::DYNAMIC_IMPRINT) {
             return array_fill_keys($card->imprint, true);

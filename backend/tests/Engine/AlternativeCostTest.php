@@ -57,6 +57,23 @@ final class AlternativeCostTest extends TestCase
         $this->assertSame([[['stack:x'], 'pitch:blue']], $this->casts($s, 'fow'), 'Seul le paiement par exil est possible : aucun terrain');
     }
 
+    public function testForceOfWillPitchesOnlyACardWhoseColorIsBlue(): void
+    {
+        // Étape 15 : Volcanic Island et un Signet ont du bleu dans leur identité, pas dans leur couleur (CR 105.2).
+        $volcanic = new CardInstance('vi', 'Volcanic Island', CardInstance::LAND, 0, null, 0, false, false, 0, 0, 0, 0, null, ['U', 'R']);
+        $signet = new CardInstance('sig', 'Izzet Signet', CardInstance::ARTIFACT, 2, manaCost: '{2}',
+            abilities: [\App\Engine\Ability\ActivatedAbility::mana('{U}{R}', '{1}')]);
+        foreach ([$volcanic, $signet] as $card) {
+            self::assertContains('U', array_map(static fn ($c) => $c->symbol(), $card->colorIdentity()), $card->name);
+            self::assertFalse($card->isBlueColored(), $card->name);
+        }
+        $s = (new ScenarioBuilder())->hand(0, self::fow(), $volcanic, $signet, self::blue())->build(self::PASS);
+        $s->stack[] = new StackItem('x', new CardInstance('x', 'Test Instant', CardInstance::INSTANT, 1), 1);
+        $s->priority = new PriorityState(0);
+
+        $this->assertSame([[['stack:x'], 'pitch:blue']], $this->casts($s, 'fow'));
+    }
+
     public function testPayingWithForceOfWillExilesTheBlueCardAndCostsOneLife(): void
     {
         $s = (new ScenarioBuilder())->hand(0, self::fow(), self::blue())->life(20)->build(self::PASS);

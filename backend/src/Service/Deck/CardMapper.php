@@ -319,6 +319,8 @@ final class CardMapper
                 $triggers[] = new TriggeredAbility(TriggeredAbility::ETB, 'imprint'); // Chrome Mox
             } elseif (!$isSpell && $line === '{T}: Add one mana of any of the exiled card\'s colors.') {
                 $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_IMPRINT);
+            } elseif (!$isSpell && $line === "{T}: Add one mana of any color in your commander's color identity.") {
+                $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_IDENTITY); // Command Tower, Arcane Signet
             } elseif (!$isSpell && $line === '{T}: Add one mana of any color that a land an opponent controls could produce.') {
                 $abilities[] = ActivatedAbility::dynamicMana(ActivatedAbility::DYNAMIC_OPPONENT_LAND); // Fellwar Stone, Exotic Orchard
             } elseif ($isLand && preg_match('/^Whenever ~ becomes tapped, it deals (\d+) damage to you\.$/', $line, $m)) {
@@ -513,12 +515,11 @@ final class CardMapper
 
     /**
      * « one mana of any color » → les cinq couleurs en alternatives. « … in your commander's color identity » (Command Tower,
-     * Arcane Signet) est traité pareil : `Decks::validate()` garantit que toutes les cartes du deck sont dans l'identité, et
-     * aucune carte ne permet de lancer celles d'un adversaire, donc une couleur hors identité ne paie jamais rien de plus.
+     * Arcane Signet) n'est pas touché : mana dynamique `DYNAMIC_IDENTITY` (étape 15 ; avant, les cinq couleurs).
      */
     private function anyColor(string $line): string
     {
-        return (string) preg_replace("/\\bone mana of any color(?: in your commander's color identity)?(?=\\.)/", self::ANY_COLOR, $line);
+        return (string) preg_replace('/\\bone mana of any color(?=\\.)/', self::ANY_COLOR, $line);
     }
 
     /**

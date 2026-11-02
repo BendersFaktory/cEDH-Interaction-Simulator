@@ -529,7 +529,7 @@ final class PriorityManager
             $pitch = [];
             foreach (array_unique($ids) as $id) {
                 $blue = $p->findHand($id);
-                if ($blue !== null && $blue->isBlue() && $blue->id !== $card->id) {
+                if ($blue !== null && $blue->isBlueColored() && $blue->id !== $card->id) {
                     $pitch[] = $blue;
                 }
             }

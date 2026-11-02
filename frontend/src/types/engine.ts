@@ -23,7 +23,7 @@ export interface AbilityView {
   discard?: number
   /** Activable seulement en rituel. */
   sorcerySpeed?: boolean
-  /** Jeton créé (`Nom:F/E`) ou bonus (`+F/+E`) ; `oppland` / `imprint` pour un mana dont les couleurs dépendent de la partie. */
+  /** Jeton créé (`Nom:F/E`) ou bonus (`+F/+E`) ; `oppland` / `imprint` / `identity` / `luck` / `legendary` pour un mana dont les couleurs dépendent de la partie. */
   spec?: string
   /** Activable seulement pendant l'entretien de son contrôleur (Mana Vault : payer {4} pour la dégager). */
   upkeepOnly?: boolean

@@ -298,7 +298,10 @@ final class CardInstance
         return array_values(array_filter($this->effects, static fn (SpellEffect $e) => $e->mode === $mode));
     }
 
-    /** Bleue (CR 105.2) : un symbole bleu dans son coût de mana (Pyroblast ; ≠ identité de couleurs, voir `isBlue()`). */
+    /**
+     * Bleue (CR 105.2) : un symbole bleu dans son coût de mana (Pyroblast ; carte bleue exilée par Force of Will). Pas l'identité
+     * de couleurs : une Volcanic Island ou un Signet n'est pas une carte bleue (corrigé à l'étape 15).
+     */
     public function isBlueColored(): bool
     {
         return in_array('U', $this->colors(), true);
@@ -329,18 +332,6 @@ final class CardInstance
     }
 
     /** Légendaire : soumis à la règle des légendes (CR 704.5j). */
-    /** Bleue : une de ses couleurs d'identité est le bleu (Force of Will exile une carte bleue de la main). */
-    public function isBlue(): bool
-    {
-        foreach ($this->colorIdentity() as $color) {
-            if ($color->symbol() === 'U') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     public function isLegendary(): bool
     {
         return in_array(self::LEGENDARY, $this->supertypes, true);

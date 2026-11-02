@@ -104,6 +104,7 @@ describe('cardText', () => {
     ).toBe("regarde les 3 cartes du dessus et les remet dans l'ordre de son choix (ou mélange), puis pioche 1")
     expect(triggerText({ event: 'next_upkeep', effect: 'pact', amount: 0, spec: '{3}{U}{U}' })).toBe('Au début de ton prochain entretien : paie {3}{U}{U} ou perd la partie')
     expect(abilityText({ isManaAbility: true, effect: 'mana', tap: true, options: ['{W}', '{U}'], spec: 'oppland' })).toBe("{T} : un mana d'une couleur que produit un terrain adverse")
+    expect(abilityText({ isManaAbility: true, effect: 'mana', tap: true, options: ['{W}', '{U}'], spec: 'identity' })).toBe("{T} : un mana d'une couleur de l'identité de ton commandant")
   })
 })
 
