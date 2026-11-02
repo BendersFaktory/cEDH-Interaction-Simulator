@@ -445,6 +445,27 @@ final class PriorityManager
         $s->queueLandPlayedTriggers($a->player(), $card); // City of Traitors
     }
 
+    /**
+     * Escape avec les cartes choisies : trois cartes distinctes du cimetière, autres que la carte lancée ; sinon null (escape
+     * indisponible).
+     *
+     * @param list<string> $ids
+     * @return list<string>|null
+     */
+    private static function chosenEscapeExiles(PlayerState $p, CardInstance $card, array $ids): ?array
+    {
+        if (count($ids) !== 3 || count(array_unique($ids)) !== 3 || in_array($card->id, $ids, true)) {
+            return null;
+        }
+        foreach ($ids as $id) {
+            if (self::inGraveyard($p, $id) === null) {
+                return null;
+            }
+        }
+
+        return $ids;
+    }
+
     private function cast(GameState $s, CastSpell $a): void
     {
         $p = $s->player($a->player());
@@ -454,10 +475,13 @@ final class PriorityManager
             ?? throw new IllegalActionException('Carte absente de la main, de la zone de commandement et de l\'exil jouable');
         $escapeExiles = null; // Escape (Underworld Breach) : trois autres cartes du cimetière exilées en coût
         if ($altCast === CardInstance::CAST_ESCAPE) {
-            $escapeExiles = $card->isLand() || !$s->controlsStatic($a->player(), CardInstance::STATIC_ESCAPE) ? null : $s->escapeExiles($a->player(), $card);
+            $escapeExiles = $card->isLand() || !$s->controlsStatic($a->player(), CardInstance::STATIC_ESCAPE) ? null
+                : ($a->exiles === null ? $s->escapeExiles($a->player(), $card) : self::chosenEscapeExiles($p, $card, $a->exiles));
             if ($escapeExiles === null) {
                 throw new IllegalActionException('Escape indisponible');
             }
+        } elseif ($a->exiles !== null) {
+            throw new IllegalActionException('Cartes à exiler sans escape');
         } elseif ($altCast !== null && (!isset($card->altCasts[$altCast]) || ($altCast === CardInstance::CAST_DASH && $p->findInHand($card->id) === null))) {
             throw new IllegalActionException('Ce sort ne se lance pas ainsi');
         }

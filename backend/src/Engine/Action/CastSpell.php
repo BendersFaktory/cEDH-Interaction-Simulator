@@ -33,6 +33,14 @@ final class CastSpell implements Action
         public readonly int $mode = 0, // mode choisi d'un sort modal (Pyroblast) ; 0 = sort non modal
         public readonly ?string $sacrifice = null, // créature sacrifiée en coût additionnel (Culling the Weak, Diabolic Intent)
         public readonly bool $kicked = false, // kicker payé en plus du coût (Orim's Chant)
+        /**
+         * Escape : les trois cartes du cimetière exilées en coût (CR 702.138a : le joueur les choisit). Null : choix automatique
+         * de `GameState::escapeExiles()`, seul proposé par `LegalActionGenerator` ; une liste explicite sert à l'IA de combo
+         * (étape 16), qui garde Lion's Eye Diamond, Brain Freeze et Thassa's Oracle.
+         *
+         * @var list<string>|null
+         */
+        public readonly ?array $exiles = null,
     ) {
     }
 
@@ -45,7 +53,8 @@ final class CastSpell implements Action
     {
         return sprintf('cast:%d:%s:%s', $this->player, $this->cardId, implode(',', $this->targets)) . ($this->x > 0 ? ':x=' . $this->x : '')
             . ($this->alt === null ? '' : ':alt=' . $this->alt) . ($this->mode > 0 ? ':mode=' . $this->mode : '')
-            . ($this->sacrifice === null ? '' : ':sac=' . $this->sacrifice) . ($this->kicked ? ':kicked' : '');
+            . ($this->sacrifice === null ? '' : ':sac=' . $this->sacrifice) . ($this->kicked ? ':kicked' : '')
+            . ($this->exiles === null ? '' : ':exiles=' . implode(',', $this->exiles));
     }
 
     public function describe(GameState $state): string
@@ -149,6 +158,7 @@ final class CastSpell implements Action
     {
         return ['type' => 'cast', 'player' => $this->player, 'cardId' => $this->cardId, 'targets' => $this->targets, 'x' => $this->x]
             + ($this->alt === null ? [] : ['alt' => $this->alt]) + ($this->mode > 0 ? ['mode' => $this->mode] : [])
-            + ($this->sacrifice === null ? [] : ['sacrifice' => $this->sacrifice]) + ($this->kicked ? ['kicked' => true] : []);
+            + ($this->sacrifice === null ? [] : ['sacrifice' => $this->sacrifice]) + ($this->kicked ? ['kicked' => true] : [])
+            + ($this->exiles === null ? [] : ['exiles' => $this->exiles]);
     }
 }

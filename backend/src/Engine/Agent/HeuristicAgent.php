@@ -54,6 +54,8 @@ use App\Engine\Mana\ManaPayment;
  * Sélection de cartes : Brainstorm remet les cartes qu'il défausserait (terrains en surplus d'abord, voir `discard`) ; Ponder
  * garde en ordre ce qui est utile (terrain s'il en manque, sort à portée de mana) et mélange si rien ne l'est. Rhystic Study :
  * paie {1} sauf si ça l'empêche de payer son contresort gardé (voir `reservedCounter`).
+ * Combos (étape 16) : `ComboPlanner` est interrogé en premier ; ses pièces (Thassa's Oracle, Underworld Breach, Brain Freeze, Ad
+ * Nauseam) ne sont jamais lancées par les heuristiques ci-dessus, et les pièces sont gardées en dernier à la défausse.
  * Profils (`AgentRegistry`) : `ai:heuristic` (défaut ci-dessus), `ai:aggro` (ne garde ni contresort ni bloqueur, attaque
  * le plus faible), `ai:control` (contre plus large, garde un bloqueur dès la moitié de ses PV menacée). Le profil est figé à
  * la construction : l'agent reste sans état.
@@ -62,8 +64,6 @@ final class HeuristicAgent implements PlayerAgent
 {
     /** PV au-dessus desquels l'IA paie une shockland plutôt que de l'avoir engagée. */
     private const SHOCK_LIFE_FLOOR = 10;
-    /** Ad Nauseam : l'IA révèle la carte suivante tant que ses PV dépassent ce seuil (non calibré, étape 16). */
-    private const AD_NAUSEAM_LIFE_FLOOR = 15;
     /** Necropotence : l'IA paie 1 PV par carte tant que ses PV dépassent ce seuil et qu'elle a moins de cartes en attente que ce nombre. */
     private const NECRO_LIFE_FLOOR = 20;
     private const NECRO_MAX_PENDING = 3;
@@ -98,6 +98,13 @@ final class HeuristicAgent implements PlayerAgent
 
     public function decide(GameState $state, int $playerId, array $legal): Action
     {
+        // Combo (étape 16, `ComboPlanner`) : seulement à une vraie priorité, hors décisions de résolution, de mulligan, de combat
+        // et de triggers à poser.
+        if ($state->selection === null && !$state->scryPending && !$state->paymentPending && $state->mulligan === null && $state->combat->declaring === null
+            && array_filter($legal, static fn (Action $a) => $a instanceof PutTrigger || $a instanceof Discard || $a instanceof KeepLegend) === []
+            && ($combo = ComboPlanner::next($state, $playerId, $legal)) !== null) {
+            return $combo;
+        }
         if ($state->exilePlays !== [] || $state->player($playerId)->graveyard !== []) {
             // Cartes jouables hors de la main et de la zone de commandement (exil : Ragavan, Opposition Agent ; cimetière :
             // Flashback) : les heuristiques ne regardent que la main et la zone de commandement, elles décident sans elles ;
@@ -107,7 +114,8 @@ final class HeuristicAgent implements PlayerAgent
             $elsewhere = static fn (Action $a) => ($a instanceof CastSpell && $p->findCastable($a->cardId) === null)
                 || ($a instanceof PlayLand && $p->findInHand($a->cardId) === null);
             // Jamais lancées par l'IA, d'où qu'elles viennent (Escape d'Underworld Breach compris) : voir `neverCasts()`.
-            $legal = array_values(array_filter($legal, fn (Action $a) => !($a instanceof CastSpell && $elsewhere($a) && $this->neverCasts(self::cardOf($state, $a)))));
+            $legal = array_values(array_filter($legal, fn (Action $a) => !($a instanceof CastSpell && $elsewhere($a)
+                && ($this->neverCasts(self::cardOf($state, $a)) || ComboPlanner::reserved(self::cardOf($state, $a))))));
             $outside = array_values(array_filter($legal, $elsewhere));
             if ($outside !== []) {
                 $choice = $this->decide($state, $playerId, array_values(array_filter($legal, static fn (Action $a) => !$elsewhere($a))));
@@ -480,8 +488,8 @@ final class HeuristicAgent implements PlayerAgent
     }
 
     /**
-     * Décisions de l'étape 14 (heuristiques simples, non calibrées ; les combos sont l'affaire de l'étape 16) : Ad Nauseam continue
-     * tant que ses PV dépassent `AD_NAUSEAM_LIFE_FLOOR` ; Tainted Pact prend la première carte non-terrain ; Thassa's Oracle et
+     * Décisions de l'étape 14 (heuristiques simples, non calibrées) : Ad Nauseam, et Tainted Pact pendant un combo, relèvent de
+     * `ComboPlanner::resolution()` ; sinon Tainted Pact prend la première carte non-terrain ; Thassa's Oracle et
      * Lim-Dûl's Vault gardent dessus la première carte non-terrain regardée (le Vault ne paie jamais de PV) ; Scheming Symmetry :
      * la carte la plus forte (`cardValue`) ; Beseech the Mirror : la lancer.
      *
@@ -489,11 +497,12 @@ final class HeuristicAgent implements PlayerAgent
      */
     private function resolutionDecision(GameState $state, int $playerId, array $choices): ResolutionChoice
     {
+        if (($combo = ComboPlanner::resolution($state, $playerId, $choices)) !== null) {
+            return $combo;
+        }
         $p = $state->player($playerId);
         $by = static fn (string $choice): ?ResolutionChoice => array_values(array_filter($choices, static fn (ResolutionChoice $c) => $c->choice === $choice))[0] ?? null;
         switch ($state->selection['kind'] ?? '') {
-            case 'ad_nauseam':
-                return ($p->life > self::AD_NAUSEAM_LIFE_FLOOR ? $by('continue') : null) ?? $by('stop') ?? $choices[0];
             case 'tainted_pact':
                 $card = ResolutionChoice::find($p->exile, (string) ($state->selection['cardId'] ?? ''));
 
@@ -1092,6 +1101,8 @@ final class HeuristicAgent implements PlayerAgent
                 } else {
                     $score = $lands < 4 ? -1000 : -1;
                 }
+            } elseif (ComboPlanner::keeps($card)) {
+                $score = -600; // pièce de combo : gardée en dernier, même hors de portée de mana aujourd'hui
             } else {
                 $cost = $card->manaCost();
                 $impossible = $lands >= 3 && array_diff_key($cost->colored, $reachable) !== [];
@@ -1602,7 +1613,8 @@ final class HeuristicAgent implements PlayerAgent
 
         return $card !== null && ($card->isModal() || ($card->extraCost !== null && !$bargain) || ($bargain && $action->sacrifice !== null)
             || $card->hasEffect('bounce') || $card->hasEffect('destroy') || $card->hasEffect('grant_sac_mana')
-            || $card->hasEffect('redirect') || $card->hasEffect('steal') || $card->hasEffect('exile_spells') || $this->neverCasts($card));
+            || $card->hasEffect('redirect') || $card->hasEffect('steal') || $card->hasEffect('exile_spells') || $this->neverCasts($card)
+            || ComboPlanner::reserved($card)); // Ad Nauseam : seulement par l'IA de combo
     }
 
     /**
