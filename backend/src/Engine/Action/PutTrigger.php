@@ -51,6 +51,10 @@ final class PutTrigger implements Action
                 }
             }
             $label .= $found === null ? ' → rien à chercher' : ' → ' . $found->name;
+        } elseif (str_starts_with($this->targets[0] ?? '', 'permanent:')) {
+            // Exalted, Selvala : la créature concernée ; Earthbend : le terrain ciblé.
+            $found = $state->findPermanent(substr($this->targets[0], 10));
+            $label .= ' → ' . ($found?->name ?? substr($this->targets[0], 10));
         } elseif ($this->targets !== []) {
             $label .= ' → joueur ' . substr($this->targets[0], 7);
         } elseif ($this->hasHandChoice($state)) {

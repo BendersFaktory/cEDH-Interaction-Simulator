@@ -50,6 +50,9 @@ final class AbilityManager
         if ($ability->isDynamicMana() && self::allowedOptions($p, $card, $ability) === []) {
             return false; // aucune couleur utilisable (Fellwar Stone sans terrain adverse, Chrome Mox sans carte colorée exilée)
         }
+        if ($ability->scale !== '' && $p->manaProduced($card, $ability, 0) === []) {
+            return false; // mana proportionnel nul (Gaea's Cradle sans créature, Selvala sans force)
+        }
         if ($ability->sorcerySpeed
             && !($p->id === $s->activePlayer && $s->phase->isMain() && $s->stack === [] && $s->combat->declaring === null)) {
             return false;
@@ -136,6 +139,14 @@ final class AbilityManager
                 array_values(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isCreature())),
             );
         }
+        if ($ability->sacrificeOther !== '') {
+            // Warren Soultrader : une autre créature ; Mount Doom : un artefact légendaire (jamais la source, déjà sacrifiée).
+            $sacrifices = array_map(
+                static fn (CardInstance $c) => [$c],
+                array_values(array_filter($p->battlefield, static fn (CardInstance $c) => $c !== $card && ($ability->sacrificeOther === ActivatedAbility::SACRIFICE_ANOTHER_CREATURE
+                    ? $c->isCreature() : $c->hasType(CardInstance::ARTIFACT) && $c->isLegendary()))),
+            );
+        }
         $discards = self::combinations($p->hand, $ability->discard);
 
         $out = [];
@@ -220,7 +231,7 @@ final class AbilityManager
             $sacrifice[] = $card->id; // Treasure, Mind Stone : sacrifié une fois activé
         }
         $discard = $a->costChoices;
-        if ($ability->sacrificeCreature) {
+        if ($ability->sacrificeCreature || $ability->sacrificeOther !== '') {
             $sacrifice[] = array_shift($discard);
         }
         if ($ability->discardHand) {
@@ -241,6 +252,7 @@ final class AbilityManager
             ] + $p->pool->restrictedField(), verbose: true);
             self::payCardCosts($s, $a->player(), $discard, $sacrifice, $card, $ability);
             $s->hurtByMana($a->player(), $pain);
+            $s->tappedForMana($a->player(), $tapped);
 
             return; // résolue sur-le-champ : la pile et les passes ne sont pas touchées
         }
@@ -266,6 +278,7 @@ final class AbilityManager
         ]);
         self::payCardCosts($s, $a->player(), $discard, $sacrifice, $card, $ability);
         $s->hurtByMana($a->player(), $pain);
+        $s->tappedForMana($a->player(), $payers);
 
         $s->priority->passed = [];
         $s->priority->announced = false; // l'activateur reçoit la priorité en premier

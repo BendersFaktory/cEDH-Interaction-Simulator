@@ -60,8 +60,16 @@ final class CardInstance
     public const STATIC_SKIP_DRAW = 'skip_draw';
     /** Chaque carte non-terrain du cimetière de son contrôleur a l'escape (Underworld Breach, `CAST_ESCAPE`). */
     public const STATIC_ESCAPE = 'escape';
+    /**
+     * Triggers de mana (CR 605.1b : « whenever you tap … for mana, add … », résolus aussitôt, sans pile), lus par
+     * `PlayerState::manaProduced()` tant que le permanent est sur le champ de bataille de son contrôleur : Kinnan (un permanent
+     * non-terrain engagé pour du mana donne un mana de plus d'un type qu'il a produit) et Badgermole Cub (une créature engagée
+     * pour du mana donne {G} de plus).
+     */
+    public const STATIC_MANA_NONLAND_EXTRA = 'mana_nonland_extra';
+    public const STATIC_MANA_CREATURE_G = 'mana_creature_g';
     public const STATICS = [self::STATIC_NONCREATURE_FLASH, self::STATIC_OPPONENTS_MV_LANDS, self::STATIC_OPPONENTS_NO_CAST_YOUR_TURN, self::STATIC_PREGAME_LUCK,
-        self::STATIC_OPPOSITION_AGENT, self::STATIC_SKIP_DRAW, self::STATIC_ESCAPE];
+        self::STATIC_OPPOSITION_AGENT, self::STATIC_SKIP_DRAW, self::STATIC_ESCAPE, self::STATIC_MANA_NONLAND_EXTRA, self::STATIC_MANA_CREATURE_G];
 
     /** Coût additionnel (`extraCost`) : sacrifier une créature que l'on contrôle (Culling the Weak, Diabolic Intent). */
     public const EXTRA_SACRIFICE_CREATURE = 'sacrifice_creature';
@@ -162,6 +170,13 @@ final class CardInstance
      */
     public ?CardInstance $original = null;
 
+    /**
+     * Terrain animé par Earthbend (Badgermole Cub, CR 701.66) : aussi une créature 0/0 avec la célérité, qui reste un terrain ;
+     * quand il meurt ou est exilé, il revient sur le champ de bataille engagé (`GameState::sendToGraveyard()`, `exile()`).
+     * Sérialisé sous `earthbent` par `toArray()`, omis à faux ; remis à faux quand la carte quitte le champ de bataille.
+     */
+    public bool $earthbent = false;
+
     /** La carte telle qu'elle est hors du champ de bataille : l'original d'une copie (Mockingbird), sinon elle-même. */
     public function printed(): self
     {
@@ -236,7 +251,7 @@ final class CardInstance
 
     public function hasType(string $type): bool
     {
-        return in_array($type, $this->types, true);
+        return in_array($type, $this->types, true) || ($this->earthbent && $type === self::CREATURE);
     }
 
     /** Premier effet de sort du genre `$effect` (`damage`, `counter`, `mana`, `treasure`, `draw`), ou null. */
@@ -344,7 +359,7 @@ final class CardInstance
 
     public function hasKeyword(string $keyword): bool
     {
-        return in_array($keyword, $this->keywords, true) || ($this->dashed && $keyword === self::HASTE);
+        return in_array($keyword, $this->keywords, true) || (($this->dashed || $this->earthbent) && $keyword === self::HASTE);
     }
 
     /** Incolore : aucun symbole coloré ni hybride dans le coût de mana (`{C}` est incolore). */
@@ -398,8 +413,8 @@ final class CardInstance
             if ($ability->manaCost !== null) {
                 $addCost($ability->manaCost);
             }
-            if (self::isAnyColor($ability->options)) {
-                continue;
+            if (self::isAnyColor($ability->options) || $ability->scale === ActivatedAbility::SCALE_VIVID) {
+                continue; // Bloom Tender : « one mana of that color », sans symbole de mana
             }
             foreach ($ability->options as $option) {
                 foreach ($option as $color) {
@@ -587,7 +602,7 @@ final class CardInstance
     public function toArray(): array
     {
         $key = ($this->tapped ? 't' : '') . ($this->deathtouchDamage ? 'd' : '') . "|$this->damage|$this->enteredTurn|$this->powerBonus|$this->toughnessBonus" . ($this->imprint === [] ? '' : '|' . implode('', $this->imprint)) . ($this->grantedAbilities === [] ? '' : '|g' . count($this->grantedAbilities))
-            . ($this->counters === [] ? '' : '|c' . json_encode($this->counters)) . ($this->dashed ? '|dash' : '') . ($this->original === null ? '' : '|o');
+            . ($this->counters === [] ? '' : '|c' . json_encode($this->counters)) . ($this->dashed ? '|dash' : '') . ($this->original === null ? '' : '|o') . ($this->earthbent ? '|e' : '');
         if ($this->arrayMemo !== null && $this->arrayMemoKey === $key) {
             return $this->arrayMemo;
         }
@@ -601,7 +616,8 @@ final class CardInstance
             + ($this->grantedAbilities === [] ? [] : ['granted' => array_map(static fn (ActivatedAbility $a) => $a->toArray(), $this->grantedAbilities)])
             + ($this->counters === [] ? [] : ['counters' => $this->counters])
             + ($this->dashed ? ['dashed' => true] : [])
-            + ($this->original === null ? [] : ['original' => $this->original->toArray()]);
+            + ($this->original === null ? [] : ['original' => $this->original->toArray()])
+            + ($this->earthbent ? ['earthbent' => true] : []);
     }
 
     public static function fromArray(array $d): self
@@ -641,6 +657,7 @@ final class CardInstance
             array_map('intval', $d['entersWithCounters'] ?? []),
         );
         $card->dashed = (bool) ($d['dashed'] ?? false);
+        $card->earthbent = (bool) ($d['earthbent'] ?? false);
         $card->original = isset($d['original']) ? self::fromArray($d['original']) : null;
         [$card->powerBonus, $card->toughnessBonus] = $d['boost'] ?? [0, 0];
         $card->deathtouchDamage = (bool) ($d['deathtouchDamage'] ?? false);

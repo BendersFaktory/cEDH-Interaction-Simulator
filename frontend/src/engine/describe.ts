@@ -195,6 +195,12 @@ export function describeEvent(e: GameEvent): string {
       return `J${p.player} commence la partie avec ${p.card.name} en jeu`
     case 'CountersAdded':
       return `${p.card} (J${p.player}) : ${p.count} marqueur${p.count > 1 ? 's' : ''} ${p.kind === 'age' ? "d'âge" : p.kind}${p.power !== undefined ? `, ${p.power}/${p.toughness}` : ''}`
+    case 'LandAnimated':
+      return `${p.source} : ${p.name} (J${p.player}) devient une créature ${p.power}/${p.toughness} avec la célérité (earthbend)`
+    case 'LandReturned':
+      return `${p.card.name} (J${p.player}) revient engagé sur le champ de bataille (${p.source})`
+    case 'CardPutOntoBattlefield':
+      return `J${p.player} met ${p.card.name} sur le champ de bataille depuis sa bibliothèque (${p.source})`
     case 'CreatureBoosted':
       return `${p.card} (J${p.player}) passe à ${p.power}/${p.toughness}`
     case 'TokenCreated':

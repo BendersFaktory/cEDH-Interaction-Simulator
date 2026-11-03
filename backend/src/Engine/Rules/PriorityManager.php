@@ -226,6 +226,7 @@ final class PriorityManager
         ] + $p->pool->restrictedField());
         $s->sacrifice($player, $sacrifice);
         $s->hurtByMana($player, $pain);
+        $s->tappedForMana($player, $tapped);
 
         return true;
     }
@@ -599,7 +600,8 @@ final class PriorityManager
 
         $bargained = $card->extraCost === CardInstance::EXTRA_BARGAIN && $sacrificed !== null; // retenu comme un kicker (`StackItem::$kicked`)
         $item = new \App\Engine\Game\StackItem('s' . $s->nextStackId++, $card, $a->player(), $a->targets, $a->x, mode: $a->mode, kicked: $a->kicked || $bargained,
-            owner: $owner !== null && $owner !== $a->player() ? $owner : null, altCast: $altCast);
+            owner: $owner !== null && $owner !== $a->player() ? $owner : null, altCast: $altCast,
+            uncounterable: array_sum($plan?->spendRestricted[\App\Engine\Mana\ManaRestriction::LEGENDARY_UNCOUNTERABLE] ?? []) > 0); // Delighted Halfling
         $s->stack[] = $item;
 
         $s->emit('SpellCast', [
@@ -622,6 +624,7 @@ final class PriorityManager
         }
         $s->sacrifice($a->player(), $sacrifice); // Treasures engagés pour le coût, créature sacrifiée en coût additionnel
         $s->hurtByMana($a->player(), $pain);     // Ancient Tomb, Talismans, Mana Confluence
+        $s->tappedForMana($a->player(), $tapped); // Forbidden Orchard
         // Lavinia : « si aucun mana n'a été dépensé pour le lancer » (coût alternatif, ou coût de mana nul).
         $this->afterCast($s, $a->player(), $card, $item, $paid !== [] || $fromPool !== []);
 

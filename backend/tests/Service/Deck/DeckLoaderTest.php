@@ -68,10 +68,11 @@ final class DeckLoaderTest extends TestCase
 
     public function testMapsDelightedHalflingLegendaryMana(): void
     {
+        // Texte réel (fixture corrigée à l'étape 17) : {C}, ou une couleur au choix pour un sort légendaire qui ne peut pas être contré.
         $halfling = self::map('Delighted Halfling');
-        self::assertContains(CardInstance::LEGENDARY, $halfling->supertypes);
-        self::assertCount(1, $halfling->abilities);
-        self::assertSame('legendary', $halfling->abilities[0]->restriction(0)?->kind);
+        self::assertCount(2, $halfling->abilities);
+        self::assertNull($halfling->abilities[0]->restriction(0));
+        self::assertSame('legendary_uncounterable', $halfling->abilities[1]->restriction(4)?->kind);
     }
 
     public function testMapsPreordainScryThenDraw(): void

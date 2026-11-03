@@ -15,7 +15,9 @@ use App\Engine\Game\GameState;
  *   `top:<id>` (garder les cartes regardées, celle-ci sur le dessus) ;
  * - Thassa's Oracle (`oracle`) : `top:<id>` (cette carte sur le dessus, les autres dessous) ou `none` (toutes dessous) ;
  * - Scheming Symmetry (`symmetry`) : `card:<id>` (la carte cherchée, mise sur le dessus) ou `none` (rien trouvé) ;
- * - Beseech the Mirror (`beseech`) : `cast` (la lancer sans payer son coût) ou `hand` (la mettre en main).
+ * - Beseech the Mirror (`beseech`) : `cast` (la lancer sans payer son coût) ou `hand` (la mettre en main) ;
+ * - Kinnan, Bonder Prodigy (`dig`) : `card:<id>` (cette créature non-Humain regardée va sur le champ de bataille) ou `none` ;
+ * - Mount Doom (`doom_keep`) : `card:<id>` (garder cette créature, jusqu'à deux) ou `none` (détruire toutes les autres).
  */
 final class ResolutionChoice implements Action
 {
@@ -64,6 +66,10 @@ final class ResolutionChoice implements Action
             $kind === 'symmetry' => 'Mettre ' . $name(substr($this->choice, 5), $p->library) . ' sur le dessus de sa bibliothèque',
             $kind === 'beseech' && $this->choice === 'cast' => "Lancer $exiled sans payer son coût de mana",
             $kind === 'beseech' => "Mettre $exiled en main",
+            $kind === 'dig' && $this->choice === 'none' => 'Ne rien mettre en jeu : tout mettre sous la bibliothèque',
+            $kind === 'dig' => 'Mettre ' . $name(substr($this->choice, 5), $p->library) . ' sur le champ de bataille, le reste dessous',
+            $kind === 'doom_keep' && $this->choice === 'none' => 'Détruire toutes les autres créatures',
+            $kind === 'doom_keep' => 'Garder ' . (($c = $state->findPermanent(substr($this->choice, 5))) === null ? substr($this->choice, 5) : $c->name),
             default => $this->choice,
         };
     }

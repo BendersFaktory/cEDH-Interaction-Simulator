@@ -251,16 +251,103 @@ final class PlayerState
      */
     public function activateManaSource(CardInstance $card, ActivatedAbility $ability, int $option): array
     {
+        $produced = $this->baseProduced($card, $ability, $option);
+        $bonus = $this->manaTriggerBonus($card, $ability, $produced);
         if ($ability->tap) {
             $card->tapped = true;
         }
-        $produced = $ability->produced($option);
         $restriction = $ability->restriction($option);
         foreach ($produced as $symbol => $n) {
             $this->pool->add(Color::fromSymbol($symbol), $n, $restriction);
         }
+        foreach ($bonus as $symbol => $n) {
+            $this->pool->add(Color::fromSymbol($symbol), $n); // mana d'un trigger de mana : jamais restreint
+            $produced[$symbol] = ($produced[$symbol] ?? 0) + $n;
+        }
 
         return $produced;
+    }
+
+    /**
+     * Mana que donnerait l'activation de l'alternative `$option` maintenant, par symbole : production propre (proportionnelle,
+     * `ActivatedAbility::$scale`) puis triggers de mana de ses permanents (`manaTriggerBonus()`). Partagé avec l'auto-paiement.
+     *
+     * @return array<string, int>
+     */
+    public function manaProduced(CardInstance $card, ActivatedAbility $ability, int $option): array
+    {
+        $produced = $this->baseProduced($card, $ability, $option);
+        foreach ($this->manaTriggerBonus($card, $ability, $produced) as $symbol => $n) {
+            $produced[$symbol] = ($produced[$symbol] ?? 0) + $n;
+        }
+
+        return $produced;
+    }
+
+    /**
+     * Production propre d'une alternative : `produced()` de la capacité, multipliée ou filtrée selon `scale` (Gaea's Cradle,
+     * Selvala, Bloom Tender). Un symbole à 0 est omis.
+     *
+     * @return array<string, int>
+     */
+    private function baseProduced(CardInstance $card, ActivatedAbility $ability, int $option): array
+    {
+        $produced = $ability->produced($option);
+        if ($ability->scale === '') {
+            return $produced;
+        }
+        if ($ability->scale === ActivatedAbility::SCALE_VIVID) {
+            $colors = [];
+            foreach ($this->battlefield as $c) {
+                foreach ($c->colors() as $symbol) {
+                    $colors[$symbol] = true;
+                }
+            }
+
+            return array_intersect_key($produced, $colors);
+        }
+        $factor = 0;
+        foreach ($this->battlefield as $c) {
+            if ($c->isCreature()) {
+                $factor = $ability->scale === ActivatedAbility::SCALE_CREATURES ? $factor + 1 : max($factor, $c->currentPower());
+            }
+        }
+
+        return $factor === 0 ? [] : array_map(static fn (int $n) => $n * $factor, $produced);
+    }
+
+    /**
+     * Triggers de mana (CR 605.1b) de ses permanents quand `$card` est engagée pour du mana (`{T}` dans le coût) : Kinnan
+     * (`STATIC_MANA_NONLAND_EXTRA`, source non-terrain : un mana de plus du premier type produit, dans l'ordre WUBRGC ; le choix du
+     * type est fixé, limite assumée) et Badgermole Cub (`STATIC_MANA_CREATURE_G`, source créature : {G} de plus). Un par permanent.
+     *
+     * @param array<string, int> $produced production propre
+     * @return array<string, int>
+     */
+    private function manaTriggerBonus(CardInstance $card, ActivatedAbility $ability, array $produced): array
+    {
+        if (!$ability->tap || $produced === []) {
+            return [];
+        }
+        $bonus = [];
+        foreach ($this->battlefield as $c) {
+            if ($c->statics === []) {
+                continue;
+            }
+            if ($c->hasStatic(CardInstance::STATIC_MANA_NONLAND_EXTRA) && !$card->isLand()) {
+                foreach (['W', 'U', 'B', 'R', 'G', 'C'] as $symbol) {
+                    if (($produced[$symbol] ?? 0) > 0) {
+                        $bonus[$symbol] = ($bonus[$symbol] ?? 0) + 1;
+                        break;
+                    }
+                }
+            }
+            if ($c->hasStatic(CardInstance::STATIC_MANA_CREATURE_G) && $card->isCreature()) {
+                $bonus['G'] = ($bonus['G'] ?? 0) + 1;
+            }
+        }
+
+        return $bonus;
     }
 
     /**

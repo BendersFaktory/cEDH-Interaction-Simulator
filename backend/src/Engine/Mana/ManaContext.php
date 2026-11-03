@@ -150,12 +150,14 @@ final class ManaContext
                     if ($restriction !== null && $withCost) {
                         continue;
                     }
-                    $prod = $ability->produced($oi);
+                    // Production réelle (mana proportionnel, triggers de mana : Gaea's Cradle, Kinnan). Une option restreinte ne compte
+                    // que sa propre production : le mana d'un trigger va dans la partie libre de la réserve (non planifié, pas perdu).
+                    $prod = $restriction === null ? $this->p->manaProduced($card, $ability, $oi) : $ability->produced($oi);
                     $total = array_sum($prod);
                     if ($total === 0) {
                         continue;
                     }
-                    $first = $ability->options[$oi][0]->symbol();
+                    $first = (string) array_key_first($prod);
                     $choice = ['ability' => $ai, 'option' => $oi, 'prod' => $prod, 'total' => $total, 'k' => $order[$first], 'sac' => $ability->sacrifice || $hurt > 0 ? 1 : 0, 'rk' => $restriction?->kind];
                     if ($withCost) {
                         $choice['cost'] = $ability->manaCost;

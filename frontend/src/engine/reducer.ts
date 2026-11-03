@@ -430,6 +430,34 @@ export function applyEvent(v: GameView, e: GameEvent): GameView {
       break
     }
 
+    case 'LandAnimated': {
+      // Earthbend (Badgermole Cub) : le terrain devient aussi une créature 0/0 avec la célérité (valeurs absolues).
+      const c = v.players[p.player].battlefield.find((x) => x.id === p.card)
+      if (c) {
+        c.type = p.type
+        c.power = p.power
+        c.toughness = p.toughness
+        c.keywords = p.keywords
+      }
+      break
+    }
+
+    case 'LandReturned': {
+      // Terrain animé par Earthbend mort ou exilé : il revient engagé, simple terrain.
+      const pl = v.players[p.player]
+      removeCard(p.from === 'exile' ? pl.exile : pl.graveyard, p.card.id)
+      pl.battlefield.push({ ...board(p.card), tapped: true })
+      break
+    }
+
+    case 'CardPutOntoBattlefield': {
+      // Kinnan, Bonder Prodigy : une créature regardée sur le dessus de la bibliothèque arrive en jeu.
+      const pl = v.players[p.player]
+      pl.library = p.library
+      pl.battlefield.push(board(p.card))
+      break
+    }
+
     case 'CreatureBoosted': {
       // Valeurs absolues : force/endurance actuelles (bonus du tour compris, ou remises à la base au cleanup).
       const c = v.players[p.player].battlefield.find((x) => x.id === p.card)

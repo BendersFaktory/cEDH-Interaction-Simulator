@@ -157,6 +157,16 @@ final class StackResolver
                 'necro' => $this->necro($s, $item->controller, $card), // Necropotence
                 'necro_return' => $s->putIntoHand($item->controller, $ability->spec, 'exile', $card->name),
                 'lose_game' => (new StateBasedActions())->eliminate($s, $item->controller, 'lose_effect'), // Final Fortune
+                // Étape 17 (lot S1a)
+                'exalted' => $this->exalted($s, $item->controller, $item->targets[0] ?? ''),
+                'selvala_draw' => $this->selvalaDraw($s, $item->targets[0] ?? ''),
+                'opponent_token' => ($opponent = $this->livingPlayer($s, $item->targets[0] ?? '')) === null ? null : $this->tokens($s, $opponent, $ability->spec, max(1, $ability->amount)), // Forbidden Orchard
+                'earthbend' => str_starts_with($item->targets[0] ?? '', 'permanent:') ? $s->earthbend($item->controller, substr($item->targets[0], 10), $ability->amount, $card->name) : null,
+                'return_tapped' => $s->returnLandTapped($item->controller, $ability->spec, $card->name),
+                'gy_exile_mana', 'gy_exile_drain', 'gy_exile_gain' => $this->graveyardExile($s, $item, $card->name), // Deathrite Shaman
+                'damage_each_opponent' => $this->damageEachOpponent($s, $item->controller, $ability->amount, $card->name), // Mount Doom
+                'doom_wrath' => $this->doomKeepStep($s, $item->controller, [], $card->name), // Mount Doom
+                'dig' => $this->digLook($s, $item->controller, $ability->amount, $card->name), // Kinnan, Bonder Prodigy
                 default => null,
             };
 
@@ -296,6 +306,16 @@ final class StackResolver
                 }
                 $this->symmetryNext($s, $sel['queue'] ?? [], $source);
                 break;
+            case 'dig':
+                $this->digChoice($s, $player, $sel['count'], $a->cardId(), $source);
+                break;
+            case 'doom_keep':
+                if ($a->cardId() !== null && count($sel['keep'] ?? []) < 1) {
+                    $this->doomKeepStep($s, $player, [...($sel['keep'] ?? []), $a->cardId()], $source);
+                } else {
+                    $this->doomWrath($s, [...($sel['keep'] ?? []), ...($a->cardId() !== null ? [$a->cardId()] : [])], $source);
+                }
+                break;
             case 'beseech':
                 $card = \App\Engine\Action\ResolutionChoice::find($s->player($player)->exile, (string) $sel['cardId']);
                 if ($a->choice === 'cast' && $card !== null) {
@@ -310,6 +330,152 @@ final class StackResolver
         }
 
         return null;
+    }
+
+    /** Exalted : la créature qui attaque seule (`permanent:<id>`) gagne +1/+1 jusqu'à la fin du tour, si elle est encore là. */
+    private function exalted(GameState $s, int $player, string $target): void
+    {
+        $card = str_starts_with($target, 'permanent:') ? $s->player($player)->findOnBattlefield(substr($target, 10)) : null;
+        if ($card === null) {
+            return;
+        }
+        $card->powerBonus++;
+        $card->toughnessBonus++;
+        $s->emit('CreatureBoosted', ['player' => $player, 'card' => $card->id, 'power' => $card->currentPower(), 'toughness' => $card->currentToughness()]);
+    }
+
+    /**
+     * Selvala : la créature arrivée (`permanent:<id>`) est-elle encore là, de force plus grande que celle de chaque autre créature ?
+     * Alors son contrôleur pioche une carte (« may » : choisi, sauf bibliothèque vide).
+     */
+    private function selvalaDraw(GameState $s, string $target): void
+    {
+        $id = str_starts_with($target, 'permanent:') ? substr($target, 10) : '';
+        foreach ($s->players as $p) {
+            $card = $p->lost ? null : $p->findOnBattlefield($id);
+            if ($card === null || !$card->isCreature()) {
+                continue;
+            }
+            foreach ($s->players as $q) {
+                foreach ($q->lost ? [] : $q->battlefield as $other) {
+                    if ($other !== $card && $other->isCreature() && $other->currentPower() >= $card->currentPower()) {
+                        return;
+                    }
+                }
+            }
+            if ($p->library !== []) {
+                $this->draw($s, $p->id, 1);
+            }
+
+            return;
+        }
+    }
+
+    /**
+     * Deathrite Shaman : exile la carte ciblée (`card:<id>`) si elle est encore dans un cimetière et du bon type, puis l'effet
+     * de la capacité : un mana de la couleur choisie (`mana:<lettre>`), chaque adversaire perd `amount` PV, ou on gagne `amount` PV.
+     * Cible partie : rien (CR 608.2b).
+     */
+    private function graveyardExile(GameState $s, StackItem $item, string $source): void
+    {
+        $ability = $item->ability;
+        $id = str_starts_with($item->targets[0] ?? '', 'card:') ? substr($item->targets[0], 5) : '';
+        foreach ($s->players as $p) {
+            foreach ($p->graveyard as $card) {
+                if ($card->id !== $id || !$ability->graveyardMatches($card)) {
+                    continue;
+                }
+                $s->exileFromGraveyard($p->id, [$id], $source);
+                match ($ability->effect) {
+                    'gy_exile_mana' => $this->addMana($s, $item->controller, '{' . substr($item->targets[1] ?? 'mana:C', 5) . '}', $item->id),
+                    'gy_exile_drain' => array_map(fn (int $o) => $s->loseLife($o, $ability->amount, $source), array_values(array_diff($s->alivePlayerIds(), [$item->controller]))),
+                    'gy_exile_gain' => $s->gainLife($item->controller, $ability->amount, $source),
+                };
+
+                return;
+            }
+        }
+        $s->emit('SpellFizzled', ['target' => $item->targets[0] ?? '']);
+    }
+
+    /** Mount Doom : `$amount` dégâts à chaque adversaire en vie de `$player`, dans l'ordre des ids. */
+    private function damageEachOpponent(GameState $s, int $player, int $amount, string $source): void
+    {
+        foreach ($s->alivePlayerIds() as $id) {
+            if ($id !== $player) {
+                $this->damage($s, 'player:' . $id, $amount, $source);
+            }
+        }
+    }
+
+    /**
+     * Mount Doom : « choisissez jusqu'à deux créatures » (une à la fois, décision `doom_keep` ; `$keep` = déjà gardées), puis
+     * détruire les autres. Aucune créature à choisir : destruction directe.
+     *
+     * @param list<string> $keep
+     */
+    private function doomKeepStep(GameState $s, int $player, array $keep, string $source): void
+    {
+        foreach ($s->players as $p) {
+            foreach ($p->lost ? [] : $p->battlefield as $card) {
+                if ($card->isCreature() && !in_array($card->id, $keep, true)) {
+                    self::ask($s, $player, 'doom_keep', $source, extra: ['keep' => $keep]);
+
+                    return;
+                }
+            }
+        }
+        $this->doomWrath($s, $keep, $source);
+    }
+
+    /** @param list<string> $keep créatures gardées : toutes les autres sont détruites (dans l'ordre des joueurs et du champ de bataille). */
+    private function doomWrath(GameState $s, array $keep, string $source): void
+    {
+        foreach ($s->players as $p) {
+            $doomed = $p->lost ? [] : array_values(array_filter($p->battlefield, static fn (CardInstance $c) => $c->isCreature() && !in_array($c->id, $keep, true)));
+            foreach ($doomed as $card) {
+                $s->destroyPermanent($p->id, $card->id, $source);
+            }
+        }
+    }
+
+    /** Kinnan : regarder les `$n` cartes du dessus (moins s'il en reste moins) ; décision `dig`. */
+    private function digLook(GameState $s, int $player, int $n, string $source): void
+    {
+        $count = min($n, count($s->player($player)->library));
+        if ($count > 0) {
+            self::ask($s, $player, 'dig', $source, $count);
+        }
+    }
+
+    /**
+     * Kinnan : la carte de créature non-Humain `$cardId` parmi les cartes regardées va sur le champ de bataille (null : aucune) ;
+     * les autres vont sous la bibliothèque dans un ordre aléatoire (`$rng`).
+     */
+    private function digChoice(GameState $s, int $player, int $count, ?string $cardId, string $source): void
+    {
+        $p = $s->player($player);
+        $looked = array_slice($p->library, 0, $count);
+        $p->library = array_slice($p->library, $count);
+        $chosen = null;
+        foreach ($looked as $i => $card) {
+            if ($card->id === $cardId && self::digMatches($card)) {
+                $chosen = $card;
+                unset($looked[$i]);
+            }
+        }
+        $p->library = [...$p->library, ...$s->rng->shuffle(array_values($looked))];
+        $s->emit('Scried', ['player' => $player, 'top' => 0, 'bottom' => count($looked), 'library' => count($p->library)]);
+        if ($chosen !== null) {
+            $s->enterBattlefield($player, $chosen);
+            $s->emit('CardPutOntoBattlefield', ['player' => $player, 'card' => $chosen->toPublic(), 'from' => 'library', 'library' => count($p->library), 'source' => $source]);
+        }
+    }
+
+    /** Kinnan : carte de créature non-Humain. */
+    public static function digMatches(CardInstance $card): bool
+    {
+        return $card->isCreature() && !$card->hasSubtype('Human', CardInstance::CREATURE);
     }
 
     /** Ouvre une décision `ResolutionChoice` de la sorte `$kind` pour `$player` (`$extra` : clés propres à la sorte). */
@@ -1359,6 +1525,9 @@ final class StackResolver
         }
         if ($effect->blue === SpellEffect::BLUE_IF && !$victim->card->isBlueColored()) {
             return; // Pyroblast : « counter target spell if it's blue »
+        }
+        if ($victim->uncounterable) {
+            return; // « can't be countered » (Delighted Halfling) : le contresort se résout sans effet
         }
         if ($effect->payCost !== null && $paid === true) {
             return; // le contrôleur du sort visé a payé (`CostPaid`)

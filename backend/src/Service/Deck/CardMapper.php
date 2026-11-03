@@ -73,8 +73,11 @@ final class CardMapper
         foreach ($card['keywords'] ?? [] as $keyword) {
             $key = strtolower((string) $keyword);
             if (in_array($key, ['imprint', 'scry', 'threshold', 'metalcraft', 'channel', 'mill', 'kicker', 'gift', 'mobilize', 'amass', 'cumulative upkeep',
-                'treasure', 'flashback', 'dash', "scions' secretary", 'bargain'], true)) {
+                'treasure', 'flashback', 'dash', "scions' secretary", 'bargain', 'vivid', 'earthbend'], true)) {
                 continue; // mot d'aptitude / action à mot-clé : le texte (« Imprint — … », « Scry N … », « Kicker {W} », « Mobilize 2 », « Flashback {2}{R} ») est traité ligne par ligne
+            }
+            if ($key === 'exalted') {
+                continue; // la ligne « Exalted » donne le trigger (ci-dessous)
             }
             if (!isset(self::KEYWORDS[$key])) {
                 throw $fail("mot-clé non modélisé ($keyword)");
@@ -108,6 +111,10 @@ final class CardMapper
             if ($this->isKeywordLine($line)) {
                 continue;
             }
+            if (!$isSpell && $line === 'Exalted') {
+                $triggers[] = new TriggeredAbility(TriggeredAbility::ATTACKS_ALONE, 'exalted'); // Noble Hierarch (CR 702.83)
+                continue;
+            }
             // Sort modal (Pyroblast) : chaque puce est un mode ; ses effets sont marqués de son numéro après le motif.
             $mode = 0;
             $firstEffect = count($effects);
@@ -120,7 +127,16 @@ final class CardMapper
                 $mode = $modal;
                 $line = $bullet[1];
             }
-            if (($isSpell || $isCreature) && preg_match('/^(Flashback|Dash) ((?:\{(?:\d+|[WUBRG])\})+)$/', $line, $m)
+            if (($s1a = $this->s1a($line, $isSpell, $isLand, $isCreature)) !== null) {
+                // Lot S1a (étape 17) : mana des créatures et des terrains.
+                if ($s1a instanceof ActivatedAbility) {
+                    $abilities[] = $s1a;
+                } elseif ($s1a instanceof TriggeredAbility) {
+                    $triggers[] = $s1a;
+                } else {
+                    $statics[] = $s1a;
+                }
+            } elseif (($isSpell || $isCreature) && preg_match('/^(Flashback|Dash) ((?:\{(?:\d+|[WUBRG])\})+)$/', $line, $m)
                 && ($m[1] === 'Flashback') === $isSpell) {
                 $altCasts[strtolower($m[1])] = $m[2]; // Flashback : sort depuis le cimetière ; Dash : créature
             } elseif (!$isSpell && preg_match('/^~ enters with (one|two|three|four) ([a-z]+) counters? on it\.$/', $line, $m)) {
@@ -385,6 +401,51 @@ final class CardMapper
         );
     }
 
+    /**
+     * Motifs du lot S1a (étape 17), textes réels : Delighted Halfling (mana restreint qui rend le sort incontrable), Bloom Tender
+     * (Vivid), Gaea's Cradle, Selvala, Kinnan, Badgermole Cub, Forbidden Orchard, Deathrite Shaman, Mount Doom, Warren Soultrader.
+     * Retourne la capacité, le trigger ou la capacité statique (constante `STATIC_…`) de la ligne ; null si elle n'est pas de ce lot.
+     */
+    private function s1a(string $line, bool $isSpell, bool $isLand, bool $isCreature): ActivatedAbility|TriggeredAbility|string|null
+    {
+        if ($isSpell) {
+            return null;
+        }
+        $legendaryUncounterable = '@' . ManaRestriction::LEGENDARY_UNCOUNTERABLE;
+        $m = [];
+
+        return match (true) {
+            $line === '{T}: Add ' . self::ANY_COLOR . '. Spend this mana only to cast a legendary spell, and that spell can\'t be countered.'
+                => ActivatedAbility::mana(implode('|', array_map(static fn (string $o) => $o . $legendaryUncounterable, explode(' or ', self::ANY_COLOR)))),
+            $line === 'Vivid — {T}: For each color among permanents you control, add one mana of that color.'
+                => ActivatedAbility::scaledMana('{W}{U}{B}{R}{G}', ActivatedAbility::SCALE_VIVID),
+            (bool) preg_match('/^\{T\}: Add (\{[WUBRGC]\}) for each creature you control\.$/', $line, $m)
+                => ActivatedAbility::scaledMana($m[1], ActivatedAbility::SCALE_CREATURES), // Gaea's Cradle
+            (bool) preg_match('/^((?:\{(?:\d+|[WUBRGC])\})+), \{T\}: Add X mana in any combination of colors, where X is the greatest power among creatures you control\.$/', $line, $m)
+                => ActivatedAbility::scaledMana('{W}|{U}|{B}|{R}|{G}', ActivatedAbility::SCALE_POWER, $m[1]), // Selvala (X mana d'une seule couleur)
+            $isCreature && $line === 'Whenever another creature enters, its controller may draw a card if its power is greater than each other creature\'s power.'
+                => new TriggeredAbility(TriggeredAbility::CREATURE_ENTERS, 'selvala_draw'),
+            $line === 'Whenever you tap a nonland permanent for mana, add one mana of any type that permanent produced.' => CardInstance::STATIC_MANA_NONLAND_EXTRA, // Kinnan
+            (bool) preg_match('/^((?:\{(?:\d+|[WUBRGC])\})+): Look at the top (five) cards of your library\. You may put a non-Human creature card from among them onto the battlefield\. Put the rest on the bottom of your library in a random order\.$/', $line, $m)
+                => ActivatedAbility::dig(5, $m[1]), // Kinnan
+            $isCreature && (bool) preg_match('/^When ~ enters, earthbend (\d+)\.$/', $line, $m) => new TriggeredAbility(TriggeredAbility::ETB, 'earthbend', (int) $m[1]), // Badgermole Cub
+            $line === 'Whenever you tap a creature for mana, add an additional {G}.' => CardInstance::STATIC_MANA_CREATURE_G, // Badgermole Cub
+            $isLand && $line === 'Whenever you tap ~ for mana, target opponent creates a 1/1 colorless Spirit creature token.'
+                => new TriggeredAbility(TriggeredAbility::TAPPED_FOR_MANA, 'opponent_token', 1, 'Spirit:1/1'), // Forbidden Orchard
+            // Deathrite Shaman : capacités ciblées, donc pas des capacités de mana (CR 605.1a) ; « Activate only as an instant » est un rappel.
+            $line === '{T}: Exile target land card from a graveyard. Add ' . self::ANY_COLOR . '.' => ActivatedAbility::graveyardExile('gy_exile_mana', CardInstance::LAND),
+            (bool) preg_match('/^(\{[WUBRG]\}), \{T\}: Exile target instant or sorcery card from a graveyard\. Each opponent loses (\d+) life\.$/', $line, $m)
+                => ActivatedAbility::graveyardExile('gy_exile_drain', CardInstance::INSTANT . '|' . CardInstance::SORCERY, (int) $m[2], $m[1]),
+            (bool) preg_match('/^(\{[WUBRG]\}), \{T\}: Exile target creature card from a graveyard\. You gain (\d+) life\.$/', $line, $m)
+                => ActivatedAbility::graveyardExile('gy_exile_gain', CardInstance::CREATURE, (int) $m[2], $m[1]),
+            (bool) preg_match('/^((?:\{(?:\d+|[WUBRGC])\})+), \{T\}: ~ deals (\d+) damage to each opponent\.$/', $line, $m) => ActivatedAbility::damageEachOpponent((int) $m[2], $m[1]), // Mount Doom
+            (bool) preg_match('/^((?:\{(?:\d+|[WUBRGC])\})+), \{T\}, Sacrifice ~ and a legendary artifact: Choose up to two creatures, then destroy the rest\. Activate only as a sorcery\.$/', $line, $m)
+                => ActivatedAbility::doomWrath($m[1]), // Mount Doom
+            $isCreature && (bool) preg_match('/^Pay (\d+) life, Sacrifice another creature: Create a Treasure token\.$/', $line, $m) => ActivatedAbility::sacrificeForTreasure((int) $m[1]), // Warren Soultrader
+            default => null,
+        };
+    }
+
     /** @return array{0: list<string>, 1: list<string>, 2: list<string>} types, supertypes, sous-types */
     private function parseTypeLine(string $typeLine, callable $fail): array
     {
@@ -519,7 +580,10 @@ final class CardMapper
      */
     private function anyColor(string $line): string
     {
-        return (string) preg_replace('/\\bone mana of any color(?=\\.)/', self::ANY_COLOR, $line);
+        $line = (string) preg_replace('/\\bone mana of any color(?=\\.)/', self::ANY_COLOR, $line);
+
+        // « Add {G}, {W}, or {U}. » (Noble Hierarch) : alternatives séparées par des virgules, ramenées à « {G} or {W} or {U} ».
+        return (string) preg_replace_callback('/\bAdd ((?:\{[WUBRGC]\}, )+)or (\{[WUBRGC]\})/', static fn (array $m): string => 'Add ' . implode(' or ', [...explode(', ', rtrim($m[1], ', ')), $m[2]]), $line);
     }
 
     /**

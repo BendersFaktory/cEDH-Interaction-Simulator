@@ -416,6 +416,7 @@ final class GameState
         if ($card->token) {
             return 'none';
         }
+        $this->earthbendReturn($ownerId, $card);
         $this->player($ownerId)->graveyard[] = $card;
 
         return 'graveyard';
@@ -435,9 +436,82 @@ final class GameState
         if ($card->token) {
             return 'none';
         }
+        $this->earthbendReturn($ownerId, $card);
         $this->player($ownerId)->exile[] = $card;
 
         return 'exile';
+    }
+
+    /**
+     * Terrain animé par Earthbend qui meurt ou est exilé : son trigger « revient engagé » est mis en file (contrôlé par son
+     * propriétaire, CR 701.66) ; il redevient un simple terrain.
+     */
+    private function earthbendReturn(int $ownerId, CardInstance $card): void
+    {
+        if (!$card->earthbent) {
+            return;
+        }
+        $card->earthbent = false;
+        $this->pendingTriggers[] = new PendingTrigger('tr' . $this->nextTriggerId++, $ownerId, clone $card, 0,
+            new TriggeredAbility(TriggeredAbility::DIES, 'return_tapped', spec: $card->id));
+    }
+
+    /**
+     * Earthbend `$n` (Badgermole Cub, CR 701.66) : le terrain `$cardId` de `$playerId` devient aussi une créature 0/0 avec la
+     * célérité (`CardInstance::$earthbent`), puis reçoit `$n` marqueurs +1/+1. `LandAnimated` porte ses types et sa force /
+     * endurance résultantes. Retourne false si ce n'est plus un terrain qu'il contrôle.
+     */
+    public function earthbend(int $playerId, string $cardId, int $n, string $source): bool
+    {
+        $card = $this->player($playerId)->findOnBattlefield($cardId);
+        if ($card === null || !$card->isLand()) {
+            return false;
+        }
+        $card->earthbent = true;
+        $this->emit('LandAnimated', ['player' => $playerId, 'card' => $card->id, 'name' => $card->name, 'type' => [...$card->types, ...($card->hasType(CardInstance::CREATURE) && !in_array(CardInstance::CREATURE, $card->types, true) ? [CardInstance::CREATURE] : [])],
+            'power' => $card->currentPower(), 'toughness' => $card->currentToughness(), 'keywords' => [...$card->keywords, CardInstance::HASTE], 'source' => $source]);
+        $this->addCounters($playerId, $card, CardInstance::PLUS_ONE, $n);
+
+        return true;
+    }
+
+    /**
+     * Le terrain `$cardId`, dans le cimetière ou l'exil de son propriétaire `$ownerId`, revient engagé sur son champ de bataille
+     * (trigger `return_tapped` d'Earthbend) : `LandReturned` (`from` : `graveyard` | `exile`). Rien s'il a quitté ces zones.
+     */
+    public function returnLandTapped(int $ownerId, string $cardId, string $source): void
+    {
+        $p = $this->player($ownerId);
+        foreach (['graveyard', 'exile'] as $zone) {
+            foreach ($p->$zone as $i => $card) {
+                if ($card->id === $cardId) {
+                    array_splice($p->$zone, $i, 1);
+                    $card->tapped = true;
+                    $this->enterBattlefield($ownerId, $card);
+                    $this->emit('LandReturned', ['player' => $ownerId, 'card' => $card->toPublic(), 'from' => $zone, 'tapped' => true, 'source' => $source]);
+
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Permanents de `$playerId` engagés pour du mana (`$ids` : sources d'une activation de mana ou d'un paiement) : met en file
+     * leurs triggers `tapped_for_mana` (Forbidden Orchard). Ces triggers ne sont pas des triggers de mana (ils ciblent) : ils
+     * passent par la pile.
+     *
+     * @param list<string> $ids
+     */
+    public function tappedForMana(int $playerId, array $ids): void
+    {
+        $p = $this->player($playerId);
+        foreach ($ids as $id) {
+            $card = $p->findOnBattlefield($id);
+            if ($card !== null && $card->triggers !== []) {
+                $this->queueTriggers($playerId, $card, TriggeredAbility::TAPPED_FOR_MANA);
+            }
+        }
     }
 
     /** Exile une carte de la main de `$playerId` payée en coût alternatif (Force of Will) ; `CardExiled` avec `from: hand`. */
@@ -936,6 +1010,17 @@ final class GameState
             $this->addCounters($playerId, $card, $kind, $n); // « enters with three wish counters » (Wishclaw Talisman)
         }
         $this->queueTriggers($playerId, $card, TriggeredAbility::ETB);
+        if ($card->isCreature()) {
+            // « Whenever another creature enters » (Selvala) : sur les permanents de chaque joueur en vie ; le contrôleur de la
+            // créature et son id suivent le trigger (`opponent`, `stackId`).
+            foreach ($this->players as $p) {
+                foreach ($p->lost ? [] : $p->battlefield as $other) {
+                    if ($other !== $card && $other->triggers !== []) {
+                        $this->queueTriggers($p->id, $other, TriggeredAbility::CREATURE_ENTERS, opponent: $playerId, stackId: $card->id);
+                    }
+                }
+            }
+        }
     }
 
     /**

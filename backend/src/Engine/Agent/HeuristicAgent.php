@@ -242,7 +242,8 @@ final class HeuristicAgent implements PlayerAgent
             }
 
             // Plus rien à lancer, en phase principale 2 : Necropotence (1 PV par carte, voir `NECRO_LIFE_FLOOR`), jetons (Kher Keep),
-            // puis pioche (Tome ; Mind Stone seulement main vide).
+            // puis pioche (Tome ; Mind Stone seulement main vide), Kinnan (regarder 5 cartes), Mount Doom (1 dégât à chaque
+            // adversaire), Deathrite Shaman (drain, puis gain). Jamais : le sacrifice de Warren Soultrader, le « wrath » de Mount Doom.
             if ($state->phase === Phase::Main2 && $state->player($playerId)->life > self::NECRO_LIFE_FLOOR
                 && count(array_filter($state->delayedTriggers, static fn ($t) => $t->controller === $playerId && $t->ability()->effect === 'necro_return')) < self::NECRO_MAX_PENDING) {
                 foreach ($legal as $action) {
@@ -252,7 +253,7 @@ final class HeuristicAgent implements PlayerAgent
                 }
             }
             if ($state->phase === Phase::Main2) {
-                foreach (['token', 'draw'] as $effect) {
+                foreach (['token', 'draw', 'dig', 'damage_each_opponent', 'gy_exile_drain', 'gy_exile_gain'] as $effect) {
                     foreach ($legal as $action) {
                         $ability = $action instanceof ActivateAbility ? $this->ability($state, $action) : null;
                         if ($ability?->effect === $effect && (!$ability->sacrifice || $state->player($playerId)->hand === [])
@@ -517,6 +518,30 @@ final class HeuristicAgent implements PlayerAgent
                 }
 
                 return $choices[0];
+            case 'dig':
+                // Kinnan : la créature de plus grande valeur.
+                $best = $by('none') ?? $choices[0];
+                $score = -1;
+                foreach ($choices as $c) {
+                    $card = ResolutionChoice::find($p->library, $c->cardId());
+                    if ($card !== null && $this->cardValue($card, 0) > $score) {
+                        [$best, $score] = [$c, $this->cardValue($card, 0)];
+                    }
+                }
+
+                return $best;
+            case 'doom_keep':
+                // Mount Doom : garder ses propres créatures les plus fortes.
+                $best = $by('none') ?? $choices[0];
+                $power = -1;
+                foreach ($choices as $c) {
+                    $card = ResolutionChoice::find($p->battlefield, $c->cardId());
+                    if ($card !== null && $card->currentPower() > $power) {
+                        [$best, $power] = [$c, $card->currentPower()];
+                    }
+                }
+
+                return $best;
             case 'symmetry':
                 $best = $choices[0];
                 $score = -1;
@@ -1134,8 +1159,11 @@ final class HeuristicAgent implements PlayerAgent
             foreach ($card->abilities() as $ability) {
                 if ($ability->isManaAbility) {
                     foreach (AbilityManager::allowedOptions($p, $card, $ability) as $i) {
-                        foreach ($ability->options[$i] as $color) {
+                        foreach ($ability->scale === '' ? $ability->options[$i] : [] as $color) {
                             $set[$color->symbol()] = true;
+                        }
+                        foreach ($ability->scale === '' ? [] : array_keys($p->manaProduced($card, $ability, $i)) as $symbol) {
+                            $set[$symbol] = true; // Gaea's Cradle sans créature, Bloom Tender : seulement ce qu'ils produisent maintenant
                         }
                     }
                 }
@@ -1158,7 +1186,7 @@ final class HeuristicAgent implements PlayerAgent
             foreach ($card->abilities() as $ability) {
                 if ($ability->isManaAbility) {
                     foreach (AbilityManager::allowedOptions($p, $card, $ability) as $i) {
-                        $best = max($best, count($ability->options[$i]));
+                        $best = max($best, $ability->scale === '' ? count($ability->options[$i]) : array_sum($p->manaProduced($card, $ability, $i)));
                     }
                 }
             }

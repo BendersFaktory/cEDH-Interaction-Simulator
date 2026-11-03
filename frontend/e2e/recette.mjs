@@ -97,6 +97,30 @@ Deck
 const DECK_CAVERNS = DECK_21.replace('1 Divination', '1 Gemstone Caverns')
 // Scénario 43 (lot H5b) : J0 avec Ad Nauseam ({3}{B}{B}), même deck Kraum / Tymna que le 41.
 const DECK_AD_NAUSEAM = DECK_WISHCLAW.replace('1 Wishclaw Talisman', '1 Ad Nauseam')
+// Scénarios 44 et 45 (lot S1a) : commandant Kinnan, Bonder Prodigy (G/U), 14 créatures non-Humain (cartes figées de Scryfall).
+const DECK_KINNAN = `Commander
+1 Kinnan, Bonder Prodigy
+
+Deck
+1 Sol Ring
+1 Mind Stone
+1 Arcane Signet
+1 Llanowar Elves
+1 Elvish Visionary
+1 Wind Drake
+1 Perilous Myr
+1 Birds of Paradise
+1 Delighted Halfling
+1 Ambush Viper
+1 Valley Floodcaller
+1 Faerie Mastermind
+1 Mockingbird
+1 Memnite
+1 Badgermole Cub
+1 Bloom Tender
+1 Selvala, Heart of the Wilds
+41 Forest
+41 Island`
 const J0_J1_HUMANS = { 0: 'human:auto', 1: 'human:auto', 2: 'ai:heuristic', 3: 'ai:heuristic' }
 const T0 = Date.now()
 try {
@@ -269,6 +293,8 @@ async function run() {
     ['41', (b) => scenario(b, '41', s41)],
     ['42', (b) => scenario(b, '42', s42)],
     ['43', (b) => scenario(b, '43', s43)],
+    ['44', (b) => scenario(b, '44', s44)],
+    ['45', (b) => scenario(b, '45', s45)],
   ].filter(([n]) => !ONLY || ONLY.includes(n))
   const results = []
   let next = 0
@@ -2042,4 +2068,85 @@ async function s43({ page, log, shot, problem, openGame }) {
   const expected = lost.at(-1)?.payload.life
   if (expected !== undefined && st.players[0].life !== expected) problem(`recette Ad Nauseam : PV de J0 ${st.players[0].life}, attendu ${expected}`)
   if (st.selection) problem('recette Ad Nauseam : la sélection aurait dû se terminer')
+}
+
+// 44 : CHOIX PENDANT LA RÉSOLUTION (Kinnan, lot S1a). J0 lance son commandant Kinnan et ses rocks, puis active « {5}{G}{U} :
+// regarder les cinq cartes du dessus » ; à la résolution, il choisit dans le panneau la créature non-Humain mise en jeu.
+async function s44({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_KINNAN),
+    (p) => {
+      if (p.actions.some((a) => a.type === 'choice' && a.label.includes('sur le champ de bataille'))) return 'stop'
+      if (p.actions.some((a) => a.type === 'choice')) return null // aucune créature regardée : choix par défaut (« none »), la partie continue
+      return (
+        p.actions.find((a) => a.type === 'ability' && a.label.includes('regarder les 5')) ??
+        castOf(p.actions, 'Kinnan') ??
+        castOf(p.actions, 'Sol Ring') ??
+        castOf(p.actions, 'Mind Stone') ??
+        castOf(p.actions, 'Arcane Signet') ??
+        null
+      )
+    },
+    { steps: 400 },
+  )
+  if (!found) return problem('recette Kinnan : aucune graine où J0 regarde une créature non-Humain')
+  log('44 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('44a-kinnan-choix')
+  const label = await clickIn(page, 'Choix pendant la résolution', 'sur le champ de bataille')
+  const name = label.split('Mettre ')[1]?.split(' sur le champ')[0] ?? ''
+  const line = await logLine(page, 'depuis sa bibliothèque (Kinnan')
+  const events = await api.events(found.sim.id)
+  const put = events.find((e) => e.type === 'CardPutOntoBattlefield' && e.payload.player === 0)
+  const st = await api.state(found.sim.id)
+  log('44 choix :', label, '| journal :', line)
+  await shot('44b-kinnan-fait')
+  if (!put || put.payload.card.name !== name) problem(`recette Kinnan : CardPutOntoBattlefield attendu pour ${name}`)
+  if (!st.players[0].battlefield.some((c) => c.name === name)) problem(`recette Kinnan : ${name} absent du champ de bataille de J0`)
+  if (!line.includes(name)) problem(`recette Kinnan : mise en jeu absente du journal (« ${line} »)`)
+  if (st.selection) problem('recette Kinnan : la sélection aurait dû se terminer')
+}
+
+// 45 : EARTHBEND (Badgermole Cub, lot S1a). J0 lance Badgermole Cub ; en posant son trigger d'entrée, il choisit le terrain
+// animé (« → <terrain> ») ; le terrain devient une créature 1/1 avec la célérité.
+async function s45({ page, log, shot, problem, openGame }) {
+  const found = await seek(
+    (seed) => api.createHumanWithDeck(seed, DECK_KINNAN),
+    (p) => {
+      if (p.actions.some((a) => a.type === 'trigger' && a.label.includes('earthbend'))) return 'stop'
+      return castOf(p.actions, 'Badgermole Cub') ?? null
+    },
+    { card: 'Badgermole Cub' },
+  )
+  if (!found) return problem('recette Earthbend : aucune graine où J0 lance Badgermole Cub')
+  log('45 graine retenue :', found.seed, '(#' + found.sim.id + ')')
+  await openGame(found.sim.id)
+  await shot('45a-earthbend-choix')
+  const label = await clickIn(page, 'Triggers à mettre sur la pile', 'earthbend')
+  const land = label.split('→ ').at(-1) ?? ''
+  await drivePasses(found.sim.id, (e) => e.some((x) => x.type === 'LandAnimated'))
+  await openGame(found.sim.id)
+  const line = await logLine(page, '(earthbend)')
+  const events = await api.events(found.sim.id)
+  const animated = events.find((e) => e.type === 'LandAnimated' && e.payload.player === 0)
+  const st = await api.state(found.sim.id)
+  const card = st.players[0].battlefield.find((c) => c.id === animated?.payload.card)
+  // `LandAnimated` porte le 0/0 de l'animation ; le marqueur +1/+1 suit (`CountersAdded`, force / endurance résultantes).
+  const counter = events.find((e) => e.type === 'CountersAdded' && e.payload.card === animated?.payload.card && e.seq > animated.seq)
+  log('45 choix :', label, '| journal :', line, '| terrain :', card?.name, counter ? `${counter.payload.power}/${counter.payload.toughness}` : '')
+  await shot('45b-earthbend-fait')
+  if (!animated || card?.name !== land) problem(`recette Earthbend : LandAnimated attendu pour ${land}`)
+  if (counter?.payload.power !== 1 || counter?.payload.toughness !== 1) problem('recette Earthbend : le terrain devait être une créature 1/1 (0/0 et un marqueur +1/+1)')
+  if (!card?.earthbent) problem('recette Earthbend : état `earthbent` absent')
+  if (!line.includes(land)) problem(`recette Earthbend : earthbend absent du journal (« ${line} »)`)
+}
+
+/** Fait passer J0 (décision par défaut) jusqu'à ce que `done(events)` soit vrai, au plus 20 décisions. */
+async function drivePasses(id, done) {
+  for (let i = 0; i < 20; i++) {
+    if (done(await api.events(id))) return
+    const sim = await api.get(id)
+    if (sim.status !== 'waiting' || !sim.pending) return
+    await api.decide(id, defaultAction(sim.pending.actions ?? []).id)
+  }
 }

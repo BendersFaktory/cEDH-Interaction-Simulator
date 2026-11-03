@@ -58,9 +58,17 @@ final class ActivatedAbility
         public readonly ?string $requires = null,  // condition d'activation : REQ_METALCRAFT (Mox Opal : trois artefacts ou plus)
         public readonly int $legendaryDiscount = 0, // coût réduit de {N} générique par créature légendaire contrôlée (Otawara : 1)
         public readonly string $removeCounter = '', // coût : retirer un marqueur de cette sorte de la source (Wishclaw Talisman : `wish`)
+        public readonly string $scale = '',         // mana proportionnel (SCALE_…) : la quantité produite dépend de l'état de la partie
+        public readonly string $sacrificeOther = '', // coût : sacrifier un autre permanent (SACRIFICE_…), choisi dans l'action
     ) {
         if ($fromHand !== '' && !in_array($fromHand, ['exile', 'discard'], true)) {
             throw new \InvalidArgumentException("Coût depuis la main inconnu : $fromHand");
+        }
+        if ($scale !== '' && !in_array($scale, [self::SCALE_CREATURES, self::SCALE_POWER, self::SCALE_VIVID], true)) {
+            throw new \InvalidArgumentException("Mana proportionnel inconnu : $scale");
+        }
+        if ($sacrificeOther !== '' && !in_array($sacrificeOther, [self::SACRIFICE_ANOTHER_CREATURE, self::SACRIFICE_LEGENDARY_ARTIFACT], true)) {
+            throw new \InvalidArgumentException("Sacrifice inconnu : $sacrificeOther");
         }
         if ($requires !== null && !in_array($requires, [self::REQ_METALCRAFT, self::REQ_YOUR_TURN], true)) {
             throw new \InvalidArgumentException("Condition d'activation inconnue : $requires");
@@ -74,6 +82,85 @@ final class ActivatedAbility
         if ($effect === 'pump') {
             $this->boost();
         }
+    }
+
+    /**
+     * Mana proportionnel (lot S1a), calculé par `PlayerState::manaProduced()` : `creatures` = chaque option multipliée par le
+     * nombre de créatures que l'on contrôle (Gaea's Cradle) ; `power` = multipliée par la plus grande force parmi ses créatures
+     * (Selvala, Heart of the Wilds : « X mana in any combination of colors », modélisé en X mana d'une seule couleur, limite
+     * assumée) ; `vivid` = l'option unique (les cinq couleurs) réduite aux couleurs parmi ses permanents (Bloom Tender).
+     */
+    public const SCALE_CREATURES = 'creatures';
+    public const SCALE_POWER = 'power';
+    public const SCALE_VIVID = 'vivid';
+
+    /** `sacrificeOther` : une autre créature que la source (Warren Soultrader) ; un artefact légendaire (Mount Doom). */
+    public const SACRIFICE_ANOTHER_CREATURE = 'another_creature';
+    public const SACRIFICE_LEGENDARY_ARTIFACT = 'legendary_artifact';
+
+    /** `[coût], {T} : mana proportionnel` (voir SCALE_…) ; `$spec` = alternatives comme `mana()`. */
+    public static function scaledMana(string $spec, string $scale, ?string $cost = null): self
+    {
+        [$options] = self::parseOptions(explode('|', $spec));
+
+        return new self(true, 'mana', true, $cost === null ? null : ManaCost::parse($cost), $options, scale: $scale);
+    }
+
+    /**
+     * Deathrite Shaman : `[coût], {T} : exiler une carte ciblée (de type `$types`, alternatives `|`) d'un cimetière`, puis
+     * `$effect` : `gy_exile_mana` (un mana de la couleur choisie à l'activation, cible `mana:<lettre>`), `gy_exile_drain`
+     * (chaque adversaire perd `$amount` PV) ou `gy_exile_gain` (on gagne `$amount` PV). Capacité ciblée : jamais une capacité
+     * de mana (CR 605.1a), elle passe par la pile.
+     */
+    public static function graveyardExile(string $effect, string $types, int $amount = 0, ?string $cost = null): self
+    {
+        if (!in_array($effect, ['gy_exile_mana', 'gy_exile_drain', 'gy_exile_gain'], true)) {
+            throw new \InvalidArgumentException("Effet d'exil du cimetière inconnu : $effect");
+        }
+
+        return new self(false, $effect, true, $cost === null ? null : ManaCost::parse($cost), [], $amount, spec: $types);
+    }
+
+    /** Le type de carte `$card` convient-il à `spec` (types séparés par `|`) d'une capacité `gy_exile_*` ? */
+    public function graveyardMatches(\App\Engine\Game\CardInstance $card): bool
+    {
+        foreach (explode('|', $this->spec) as $type) {
+            if ($card->hasType($type)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Mount Doom : `[coût], {T} : $amount dégâts à chaque adversaire`. */
+    public static function damageEachOpponent(int $amount, string $cost): self
+    {
+        return new self(false, 'damage_each_opponent', true, ManaCost::parse($cost), [], $amount);
+    }
+
+    /**
+     * Mount Doom : `[coût], {T}, sacrifier la source et un artefact légendaire : choisir jusqu'à deux créatures, détruire les
+     * autres`, au rythme d'un rituel (effet `doom_wrath` ; les créatures gardées sont choisies à la résolution, décision `doom_keep`).
+     */
+    public static function doomWrath(string $cost): self
+    {
+        return new self(false, 'doom_wrath', true, ManaCost::parse($cost), [], 2, true, sorcerySpeed: true, sacrificeOther: self::SACRIFICE_LEGENDARY_ARTIFACT);
+    }
+
+    /**
+     * Kinnan, Bonder Prodigy : `[coût] : regarder les `$n` cartes du dessus, en mettre une carte de créature non-Humain sur le
+     * champ de bataille, le reste dessous dans un ordre aléatoire` (effet `dig`, décision `dig` à la résolution).
+     */
+    public static function dig(int $n, string $cost): self
+    {
+        return new self(false, 'dig', false, ManaCost::parse($cost), [], $n, spec: 'creature!Human');
+    }
+
+    /** Warren Soultrader : `payer $life PV, sacrifier une autre créature : créer un Treasure` (passe par la pile). */
+    public static function sacrificeForTreasure(int $life): self
+    {
+        return new self(false, 'treasure', false, null, [], 1, lifeCost: $life, sacrificeOther: self::SACRIFICE_ANOTHER_CREATURE);
     }
 
     public const REQ_METALCRAFT = 'metalcraft';
@@ -362,10 +449,22 @@ final class ActivatedAbility
             $this->discard > 0 ? "défausser {$this->discard}" : '',
             $this->lifeCost > 0 ? "payer {$this->lifeCost} PV" : '',
             $this->removeCounter !== '' ? "retirer un marqueur {$this->removeCounter}" : '',
+            $this->sacrificeOther === self::SACRIFICE_ANOTHER_CREATURE ? 'sacrifier une autre créature' : '',
+            $this->sacrificeOther === self::SACRIFICE_LEGENDARY_ARTIFACT ? 'sacrifier un artefact légendaire' : '',
         ], static fn (string $p) => $p !== ''));
         $what = match ($this->effect) {
-            'mana' => implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? []))
-                . ($this->restriction($option) === null ? '' : ' (' . $this->restriction($option)->label() . ')'),
+            'mana' => match ($this->scale) {
+                self::SCALE_VIVID => 'un mana de chaque couleur parmi vos permanents',
+                default => implode('', array_map(static fn (Color $c) => '{' . $c->symbol() . '}', $this->options[$option] ?? []))
+                    . match ($this->scale) { self::SCALE_CREATURES => ' par créature', self::SCALE_POWER => ' × la plus grande force de vos créatures', default => '' },
+            } . ($this->restriction($option) === null ? '' : ' (' . $this->restriction($option)->label() . ')'),
+            'gy_exile_mana' => 'exiler une carte de terrain d\'un cimetière, un mana de la couleur choisie',
+            'gy_exile_drain' => "exiler un éphémère ou un rituel d'un cimetière, chaque adversaire perd {$this->amount} PV",
+            'gy_exile_gain' => "exiler une carte de créature d'un cimetière, gagner {$this->amount} PV",
+            'damage_each_opponent' => sprintf('%d dégât%s à chaque adversaire', $this->amount, $this->amount > 1 ? 's' : ''),
+            'doom_wrath' => 'garder jusqu\'à deux créatures, détruire les autres',
+            'dig' => "regarder les {$this->amount} cartes du dessus, mettre en jeu une créature non-Humain",
+            'treasure' => 'créer un Treasure',
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
             'draw' => sprintf('piocher %d', $this->amount),
             'each_draw' => sprintf('chaque joueur pioche %d', $this->amount),
@@ -408,6 +507,8 @@ final class ActivatedAbility
             'requires' => $this->requires,
             'legendaryDiscount' => $this->legendaryDiscount,
             'removeCounter' => $this->removeCounter,
+            'scale' => $this->scale,
+            'sacrificeOther' => $this->sacrificeOther,
         ]);
     }
 
@@ -436,6 +537,8 @@ final class ActivatedAbility
             $d['requires'] ?? null,
             (int) ($d['legendaryDiscount'] ?? 0),
             (string) ($d['removeCounter'] ?? ''),
+            (string) ($d['scale'] ?? ''),
+            (string) ($d['sacrificeOther'] ?? ''),
         );
     }
 

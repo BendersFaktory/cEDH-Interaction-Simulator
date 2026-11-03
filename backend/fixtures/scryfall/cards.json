@@ -471,12 +471,12 @@
     {
         "name": "Delighted Halfling",
         "layout": "normal",
-        "type_line": "Legendary Creature — Halfling",
-        "mana_cost": "{1}{G}",
-        "cmc": 2,
+        "type_line": "Creature — Halfling Citizen",
+        "mana_cost": "{G}",
+        "cmc": 1,
         "power": "1",
         "toughness": "2",
-        "oracle_text": "{T}: Add {G}. Spend this mana only to cast a legendary spell.",
+        "oracle_text": "{T}: Add {C}.\n{T}: Add one mana of any color. Spend this mana only to cast a legendary spell, and that spell can't be countered.",
         "keywords": []
     },
     {
@@ -674,5 +674,16 @@
     {"name":"Tundra","layout":"normal","type_line":"Land — Plains Island","mana_cost":"","cmc":0,"oracle_text":"({T}: Add {W} or {U}.)","keywords":[]},
     {"name":"Verdant Catacombs","layout":"normal","type_line":"Land","mana_cost":"","cmc":0,"oracle_text":"{T}, Pay 1 life, Sacrifice this land: Search your library for a Swamp or Forest card, put it onto the battlefield, then shuffle.","keywords":[]},
     {"name":"Volcanic Island","layout":"normal","type_line":"Land — Island Mountain","mana_cost":"","cmc":0,"oracle_text":"({T}: Add {U} or {R}.)","keywords":[]},
-    {"name":"Windswept Heath","layout":"normal","type_line":"Land","mana_cost":"","cmc":0,"oracle_text":"{T}, Pay 1 life, Sacrifice this land: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.","keywords":[]}
+    {"name":"Windswept Heath","layout":"normal","type_line":"Land","mana_cost":"","cmc":0,"oracle_text":"{T}, Pay 1 life, Sacrifice this land: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.","keywords":[]},
+    {"name":"Badgermole Cub","layout":"normal","type_line":"Creature — Badger Mole","mana_cost":"{1}{G}","cmc":2,"oracle_text":"When this creature enters, earthbend 1. (Target land you control becomes a 0/0 creature with haste that's still a land. Put a +1/+1 counter on it. When it dies or is exiled, return it to the battlefield tapped.)\nWhenever you tap a creature for mana, add an additional {G}.","keywords":["Earthbend"],"power":"2","toughness":"2"},
+    {"name":"Bloom Tender","layout":"normal","type_line":"Creature — Elf Druid","mana_cost":"{1}{G}","cmc":2,"oracle_text":"Vivid — {T}: For each color among permanents you control, add one mana of that color.","keywords":["Vivid"],"power":"1","toughness":"1"},
+    {"name":"Deathrite Shaman","layout":"normal","type_line":"Creature — Elf Shaman","mana_cost":"{B/G}","cmc":1,"oracle_text":"{T}: Exile target land card from a graveyard. Add one mana of any color. (Activate only as an instant.)\n{B}, {T}: Exile target instant or sorcery card from a graveyard. Each opponent loses 2 life.\n{G}, {T}: Exile target creature card from a graveyard. You gain 2 life.","keywords":[],"power":"1","toughness":"2"},
+    {"name":"Ignoble Hierarch","layout":"normal","type_line":"Creature — Goblin Shaman","mana_cost":"{G}","cmc":1,"oracle_text":"Exalted (Whenever a creature you control attacks alone, that creature gets +1/+1 until end of turn.)\n{T}: Add {B}, {R}, or {G}.","keywords":["Exalted"],"power":"0","toughness":"1"},
+    {"name":"Kinnan, Bonder Prodigy","layout":"normal","type_line":"Legendary Creature — Human Druid","mana_cost":"{G}{U}","cmc":2,"oracle_text":"Whenever you tap a nonland permanent for mana, add one mana of any type that permanent produced.\n{5}{G}{U}: Look at the top five cards of your library. You may put a non-Human creature card from among them onto the battlefield. Put the rest on the bottom of your library in a random order.","keywords":[],"power":"2","toughness":"2"},
+    {"name":"Noble Hierarch","layout":"normal","type_line":"Creature — Human Druid","mana_cost":"{G}","cmc":1,"oracle_text":"Exalted (Whenever a creature you control attacks alone, that creature gets +1/+1 until end of turn.)\n{T}: Add {G}, {W}, or {U}.","keywords":["Exalted"],"power":"0","toughness":"1"},
+    {"name":"Selvala, Heart of the Wilds","layout":"normal","type_line":"Legendary Creature — Elf Scout","mana_cost":"{1}{G}{G}","cmc":3,"oracle_text":"Whenever another creature enters, its controller may draw a card if its power is greater than each other creature's power.\n{G}, {T}: Add X mana in any combination of colors, where X is the greatest power among creatures you control.","keywords":[],"power":"2","toughness":"3"},
+    {"name":"Warren Soultrader","layout":"normal","type_line":"Creature — Zombie Goblin Wizard","mana_cost":"{2}{B}","cmc":3,"oracle_text":"Pay 1 life, Sacrifice another creature: Create a Treasure token. (It's an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")","keywords":["Treasure"],"power":"3","toughness":"3"},
+    {"name":"Forbidden Orchard","layout":"normal","type_line":"Land","mana_cost":"","cmc":0,"oracle_text":"{T}: Add one mana of any color.\nWhenever you tap this land for mana, target opponent creates a 1/1 colorless Spirit creature token.","keywords":[]},
+    {"name":"Gaea's Cradle","layout":"normal","type_line":"Legendary Land","mana_cost":"","cmc":0,"oracle_text":"{T}: Add {G} for each creature you control.","keywords":[]},
+    {"name":"Mount Doom","layout":"normal","type_line":"Legendary Land","mana_cost":"","cmc":0,"oracle_text":"{T}, Pay 1 life: Add {B} or {R}.\n{1}{B}{R}, {T}: Mount Doom deals 1 damage to each opponent.\n{5}{B}{R}, {T}, Sacrifice Mount Doom and a legendary artifact: Choose up to two creatures, then destroy the rest. Activate only as a sorcery.","keywords":[]}
 ]

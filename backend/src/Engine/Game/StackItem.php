@@ -30,6 +30,7 @@ final class StackItem
         public readonly bool $kicked = false, // kicker payé (Orim's Chant)
         public readonly ?int $owner = null, // propriétaire, s'il n'est pas le contrôleur (sort dont Commandeer a pris le contrôle)
         public readonly ?string $altCast = null, // lancé pour son coût de Flashback ou de Dash (CardInstance::ALT_CASTS)
+        public readonly bool $uncounterable = false, // ne peut pas être contré (Delighted Halfling : payé avec son mana restreint) ; un contresort le laisse sur la pile
     ) {
     }
 
@@ -39,7 +40,7 @@ final class StackItem
         $controller ??= $this->controller;
 
         return new self($this->id, $this->card, $controller, $targets ?? $this->targets, $this->x, $this->ability, $this->abilityIndex, $this->trigger,
-            $this->mode, $this->copy, $this->kicked, $controller === $this->ownerId() ? null : $this->ownerId(), $this->altCast);
+            $this->mode, $this->copy, $this->kicked, $controller === $this->ownerId() ? null : $this->ownerId(), $this->altCast, $this->uncounterable);
     }
 
     /** Lancé pour son coût de Flashback : exilé au lieu d'aller où que ce soit en quittant la pile (CR 702.34a). */
@@ -87,12 +88,12 @@ final class StackItem
             'abilityIndex' => $this->abilityIndex,
         ] + ($this->trigger === null ? [] : ['trigger' => $this->trigger->toArray()]) + ($this->mode === 0 ? [] : ['mode' => $this->mode])
             + ($this->copy ? ['copy' => true] : []) + ($this->kicked ? ['kicked' => true] : []) + ($this->owner === null ? [] : ['owner' => $this->owner])
-            + ($this->altCast === null ? [] : ['altCast' => $this->altCast]);
+            + ($this->altCast === null ? [] : ['altCast' => $this->altCast]) + ($this->uncounterable ? ['uncounterable' => true] : []);
     }
 
     public static function fromArray(array $d): self
     {
         return new self($d['id'], CardInstance::fromArray($d['card']), (int) $d['controller'], $d['targets'], (int) ($d['x'] ?? 0), isset($d['ability']) ? ActivatedAbility::fromArray($d['ability']) : null, (int) ($d['abilityIndex'] ?? 0), isset($d['trigger']) ? TriggeredAbility::fromArray($d['trigger']) : null, (int) ($d['mode'] ?? 0),
-            (bool) ($d['copy'] ?? false), (bool) ($d['kicked'] ?? false), isset($d['owner']) ? (int) $d['owner'] : null, $d['altCast'] ?? null);
+            (bool) ($d['copy'] ?? false), (bool) ($d['kicked'] ?? false), isset($d['owner']) ? (int) $d['owner'] : null, $d['altCast'] ?? null, (bool) ($d['uncounterable'] ?? false));
     }
 }

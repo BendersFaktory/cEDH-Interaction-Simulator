@@ -18,8 +18,10 @@ final class ManaRestriction
     public const ELDRAZI = 'eldrazi';
     /** Delighted Halfling : seulement pour lancer un sort légendaire (jamais pour une capacité). */
     public const LEGENDARY = 'legendary';
+    /** Delighted Halfling (texte complet) : seulement pour lancer un sort légendaire, et ce sort ne peut pas être contré (`StackItem::$uncounterable`). */
+    public const LEGENDARY_UNCOUNTERABLE = 'legendary_uncounterable';
 
-    private const KINDS = [self::ELDRAZI, self::LEGENDARY];
+    private const KINDS = [self::ELDRAZI, self::LEGENDARY, self::LEGENDARY_UNCOUNTERABLE];
 
     public function __construct(public readonly string $kind)
     {
@@ -37,7 +39,7 @@ final class ManaRestriction
 
         return match ($this->kind) {
             self::ELDRAZI => $paidFor->isColorless() && $paidFor->hasSubtype('Eldrazi', CardInstance::CREATURE),
-            self::LEGENDARY => $spell && $paidFor->isLegendary(),
+            self::LEGENDARY, self::LEGENDARY_UNCOUNTERABLE => $spell && $paidFor->isLegendary(),
         };
     }
 
@@ -47,6 +49,7 @@ final class ManaRestriction
         return match ($this->kind) {
             self::ELDRAZI => 'seulement pour un sort ou une capacité d\'Eldrazi incolore',
             self::LEGENDARY => 'seulement pour lancer un sort légendaire',
+            self::LEGENDARY_UNCOUNTERABLE => 'seulement pour lancer un sort légendaire, qui ne peut pas être contré',
         };
     }
 }

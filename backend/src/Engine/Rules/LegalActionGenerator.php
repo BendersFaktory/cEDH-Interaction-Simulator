@@ -95,6 +95,11 @@ final class LegalActionGenerator
             'vault' => [...array_map(static fn (CardInstance $c) => 'top:' . $c->id, array_slice($p->library, 0, $sel['count'])), ...($p->life >= 1 ? ['continue'] : [])],
             'oracle' => [...array_map(static fn (CardInstance $c) => 'top:' . $c->id, array_slice($p->library, 0, $sel['count'])), 'none'],
             'symmetry' => array_map(static fn (string $t) => $t === 'library:none' ? 'none' : 'card:' . substr($t, 8), self::libraryTargets($p)),
+            // Kinnan : une créature non-Humain parmi les cartes regardées (une par nom), ou aucune.
+            'dig' => [...array_values(array_unique(array_map(static fn (CardInstance $c) => 'card:' . $c->id, array_filter(array_slice($p->library, 0, $sel['count']),
+                static fn (CardInstance $c) => StackResolver::digMatches($c))))), 'none'],
+            // Mount Doom : une créature à garder (n'importe quel joueur, pas déjà gardée), ou s'arrêter là.
+            'doom_keep' => [...self::doomKeepChoices($s, $sel['keep'] ?? []), 'none'],
             default => null,
         };
         if ($choices !== null) {
@@ -492,8 +497,14 @@ final class LegalActionGenerator
                     'fetch' => self::fetchTargets($p, $ability),
                     // Channel : un artefact, une créature ou un enchantement (pas un terrain), de n'importe quel joueur en vie.
                     'bounce' => self::bounceTargets($s),
+                    // Deathrite Shaman : une carte du bon type d'un cimetière (une par nom et par cimetière) ; mana : la couleur en plus.
+                    'gy_exile_mana' => array_merge(...array_map(static fn (string $t) => array_map(static fn (string $c) => [$t, 'mana:' . $c], ['W', 'U', 'B', 'R', 'G']), self::graveyardTargets($s, $ability) ?: ['__none'])),
+                    'gy_exile_drain', 'gy_exile_gain' => array_map(static fn (string $t) => [$t], self::graveyardTargets($s, $ability)),
                     default => [[]],
                 };
+                if (str_starts_with($ability->effect, 'gy_exile_')) {
+                    $targetSets = array_values(array_filter($targetSets, static fn (array $t) => $t[0] !== '__none')); // rien à exiler : pas d'activation
+                }
                 foreach (AbilityManager::costChoices($p, $card, $ability) as $choices) {
                     $names = implode(',', array_map(static fn (CardInstance $c) => $c->name, $choices));
                     $ids = array_map(static fn (CardInstance $c) => $c->id, $choices);
@@ -511,6 +522,46 @@ final class LegalActionGenerator
         }
 
         return $actions;
+    }
+
+    /**
+     * @param list<string> $keep
+     * @return list<string>
+     */
+    private static function doomKeepChoices(GameState $s, array $keep): array
+    {
+        $out = [];
+        foreach ($s->players as $p) {
+            foreach ($p->lost ? [] : $p->battlefield as $card) {
+                if ($card->isCreature() && !in_array($card->id, $keep, true)) {
+                    $out[] = 'card:' . $card->id;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Cartes d'un cimetière (de n'importe quel joueur en vie) qu'une capacité `gy_exile_*` peut cibler (`card:<id>`), une par nom
+     * et par cimetière.
+     *
+     * @return list<string>
+     */
+    private static function graveyardTargets(GameState $s, \App\Engine\Ability\ActivatedAbility $ability): array
+    {
+        $out = [];
+        foreach ($s->players as $p) {
+            $seen = [];
+            foreach ($p->lost ? [] : $p->graveyard as $card) {
+                if ($ability->graveyardMatches($card) && !isset($seen[$card->name])) {
+                    $seen[$card->name] = true;
+                    $out[] = 'card:' . $card->id;
+                }
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -591,6 +642,19 @@ final class LegalActionGenerator
                 : ($pending->opponent !== null && in_array($ability->effect, ['draw_unless', 'treasure_exile_top'], true) ? [['player:' . $pending->opponent]] : [[]])); // Rhystic Study : le lanceur paiera ; Ragavan : le joueur blessé ; Kraum ne cible pas
             if ($ability->effect === 'counter_spell' && $pending->stackId !== null) {
                 $targetSets = [['stack:' . $pending->stackId]]; // Lavinia : le sort lancé sans mana
+            }
+            if (in_array($ability->effect, ['exalted', 'selvala_draw'], true) && $pending->stackId !== null) {
+                $targetSets = [['permanent:' . $pending->stackId]]; // la créature qui attaque seule ; la créature arrivée (ne la ciblent pas)
+            }
+            if ($ability->targetsOwnLand()) {
+                // Earthbend : un terrain que l'on contrôle (un par nom) ; aucun : le trigger ne fait rien.
+                $lands = [];
+                foreach ($s->player($playerId)->battlefield as $card) {
+                    if ($card->isLand() && !isset($lands[$card->name])) {
+                        $lands[$card->name] = ['permanent:' . $card->id];
+                    }
+                }
+                $targetSets = $lands === [] ? [[]] : array_values($lands);
             }
             if ($ability->effect === 'exile_discarded' && $pending->stackId !== null) {
                 $targetSets = [['card:' . $pending->stackId]]; // Necropotence : la carte défaussée
@@ -846,7 +910,8 @@ final class LegalActionGenerator
             // Scheming Symmetry : deux joueurs en vie distincts.
             'symmetry' => array_map(static fn (array $pair) => 'players:' . substr($pair[0], 7) . '+' . substr($pair[1], 7), self::playerPairs($s)),
             // Un contresort ne cible que des sorts, pas des capacités activées ; Dispel seulement les instants (`SpellEffect::canCounter()`).
-            'counter' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && $effect->canCounter($item->card, $item->x)))),
+            // Un sort qui ne peut pas être contré (Delighted Halfling) n'est pas proposé : le contresort ne ferait rien (simplification).
+            'counter' => array_map(static fn ($item) => 'stack:' . $item->id, array_values(array_filter($s->stack, static fn ($item) => !$item->isAbility() && !$item->uncounterable && $effect->canCounter($item->card, $item->x)))),
             default => [],
         };
     }

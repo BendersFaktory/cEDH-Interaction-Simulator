@@ -55,7 +55,7 @@ final class ActivateAbility implements Action
             foreach ($this->costChoices as $id) {
                 $names[] = ($p->findOnBattlefield($id) ?? $p->findInHand($id))?->name ?? $id;
             }
-            $label .= ' en ' . ($ability?->sacrificeCreature ? 'sacrifiant ' : 'défaussant ') . implode(', ', $names);
+            $label .= ' en ' . ($ability?->sacrificeCreature || $ability?->sacrificeOther !== '' ? 'sacrifiant ' : 'défaussant ') . implode(', ', $names);
         }
         $target = $this->targets[0] ?? null;
         if ($target !== null && str_starts_with($target, 'library:')) {
@@ -75,6 +75,19 @@ final class ActivateAbility implements Action
                 if (($found = $pl->findOnBattlefield($id)) !== null) {
                     $label .= sprintf(' → %s (joueur %d)', $found->name, $pl->id);
                 }
+            }
+        } elseif ($target !== null && str_starts_with($target, 'card:')) {
+            // Deathrite Shaman : une carte d'un cimetière, et la couleur du mana (`mana:<lettre>`).
+            $id = substr($target, 5);
+            foreach ($state->players as $pl) {
+                foreach ($pl->graveyard as $c) {
+                    if ($c->id === $id) {
+                        $label .= sprintf(' → %s (cimetière du joueur %d)', $c->name, $pl->id);
+                    }
+                }
+            }
+            if (str_starts_with($this->targets[1] ?? '', 'mana:')) {
+                $label .= ', {' . substr($this->targets[1], 5) . '}';
             }
         } elseif ($target !== null) {
             $label .= ' → joueur ' . substr($target, 7);

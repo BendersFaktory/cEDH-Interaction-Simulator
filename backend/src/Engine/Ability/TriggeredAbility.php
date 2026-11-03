@@ -61,6 +61,16 @@ use App\Engine\Game\CardInstance;
  * le cimetière pour l'exil) ; triggers retardés `necro_return` (`next_end` : la carte exilée face cachée `spec` va en main) et
  * `lose_game` (`next_end` : son contrôleur perd la partie, Final Fortune).
  *
+ * Étape 17 (lot S1a) : `attacks_alone` (une créature de son contrôleur attaque seule ; la créature est retenue par
+ * `PendingTrigger::$stackId`) avec `exalted` (CR 702.83 : elle gagne +1/+1 jusqu'à la fin du tour) ; `creature_enters` (une autre
+ * créature, de n'importe quel joueur, arrive sur le champ de bataille ; son contrôleur et son id sont retenus par
+ * `PendingTrigger::$opponent` et `$stackId`) avec `selvala_draw` (Selvala : si sa force est plus grande que celle de chaque autre
+ * créature, son contrôleur peut piocher une carte, choisi sauf bibliothèque vide) ; `tapped_for_mana` (la source est engagée pour
+ * du mana, `GameState::tappedForMana()`) avec `opponent_token` (Forbidden Orchard : l'adversaire ciblé crée `amount` jetons
+ * `spec`) ; `earthbend` (Badgermole Cub, `etb` : le terrain ciblé que l'on contrôle devient une créature 0/0 avec la célérité qui
+ * reste un terrain, avec `amount` marqueurs +1/+1, CR 701.66) et `return_tapped` (porté par le terrain animé, jamais par une carte :
+ * quand il meurt ou est exilé, il revient engagé sur le champ de bataille, `spec` = son id).
+ *
  * Forme sérialisée (`toArray`) : `spec` et `filter` omis s'ils sont vides.
  */
 final class TriggeredAbility
@@ -90,6 +100,12 @@ final class TriggeredAbility
     public const COMBAT_DAMAGE_PLAYER = 'combat_damage_player';
     /** Début de chaque étape de fin, celle de n'importe quel joueur (Underworld Breach : « At the beginning of the end step »). */
     public const EACH_END_STEP = 'each_end_step';
+    /** Une créature de son contrôleur attaque seule (Exalted). */
+    public const ATTACKS_ALONE = 'attacks_alone';
+    /** Une autre créature arrive sur le champ de bataille, sous le contrôle de n'importe quel joueur (Selvala). */
+    public const CREATURE_ENTERS = 'creature_enters';
+    /** La source est engagée pour du mana (Forbidden Orchard). */
+    public const TAPPED_FOR_MANA = 'tapped_for_mana';
 
     /** Coût `{X}` de `draw_unless` : X = force de la source (Esper Sentinel). */
     public const X_POWER = '{X}';
@@ -115,12 +131,14 @@ final class TriggeredAbility
     /** Filtre « si la source est engagée » (clause « if ~ is tapped », CR 603.4 : vérifiée à l'arrivée du trigger et à sa résolution). */
     public const TAPPED = 'tapped';
 
-    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW, self::ANY_CAST, self::COMBAT_DAMAGE_PLAYER, self::EACH_END_STEP];
+    private const EVENTS = [self::ETB, self::DIES, self::UPKEEP, self::ATTACKS, self::END_STEP, self::CAST, self::OPPONENT_CAST, self::DISCARD, self::DRAW_STEP, self::POSTCOMBAT_MAIN, self::LAND_PLAYED, self::NEXT_UPKEEP, self::NEXT_MAIN, self::NEXT_END, self::OPPONENT_DRAW, self::ANY_CAST, self::COMBAT_DAMAGE_PLAYER, self::EACH_END_STEP,
+        self::ATTACKS_ALONE, self::CREATURE_ENTERS, self::TAPPED_FOR_MANA];
     /** `spec` d'un effet `treasure` : jetons créés engagés (Tataru Taru). */
     public const TREASURE_TAPPED = 'tapped';
     private const EFFECTS = ['damage', 'draw', 'token', 'treasure', 'self_damage', 'imprint', 'pact', 'mana', 'draw_unless', 'pay_life_draw', 'sacrifice_self', 'tutor',
         'storm', 'counter_spell', 'mobilize', 'sacrifice_tokens', 'pump_untap', 'pay_untap', 'ping_amass', 'cumulative_upkeep', 'return_dashed',
-        'lose_life_treasure', 'draw_opponent_may', 'treasure_exile_top', 'oracle', 'exile_discarded', 'necro_return', 'lose_game'];
+        'lose_life_treasure', 'draw_opponent_may', 'treasure_exile_top', 'oracle', 'exile_discarded', 'necro_return', 'lose_game',
+        'exalted', 'selvala_draw', 'opponent_token', 'earthbend', 'return_tapped'];
     private const FILTERS = ['', self::INSTANT_SORCERY, self::TAPPED, self::SECOND_SPELL, self::NONCREATURE, self::NO_MANA, self::FIRST_NONCREATURE, self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST, self::OFF_TURN_ONCE];
 
     public function __construct(
@@ -143,7 +161,7 @@ final class TriggeredAbility
             || (in_array($filter, [self::SECOND_DRAW, self::NOT_DRAW_STEP_FIRST, self::OFF_TURN_ONCE], true) && $event !== self::OPPONENT_DRAW)) {
             throw new \InvalidArgumentException("Filtre de trigger invalide : $filter ($event)");
         }
-        if ($effect === 'token') {
+        if ($effect === 'token' || $effect === 'opponent_token') {
             ActivatedAbility::parseTokenSpec($spec);
         }
         if (in_array($effect, ['pact', 'draw_unless', 'pay_untap', 'cumulative_upkeep'], true) && !preg_match('/^(\{(?:\d+|[WUBRGC])\})+$/', $spec)
@@ -194,7 +212,13 @@ final class TriggeredAbility
     /** La capacité cible-t-elle un adversaire de son contrôleur (Tataru Taru : « target opponent may draw a card ») ? */
     public function targetsOpponent(): bool
     {
-        return $this->effect === 'draw_opponent_may';
+        return $this->effect === 'draw_opponent_may' || $this->effect === 'opponent_token';
+    }
+
+    /** Cible-t-elle un terrain que son contrôleur contrôle (Earthbend) ? */
+    public function targetsOwnLand(): bool
+    {
+        return $this->effect === 'earthbend';
     }
 
     /** La capacité cible-t-elle un joueur (à choisir en la mettant sur la pile) ? */
@@ -240,6 +264,9 @@ final class TriggeredAbility
             },
             self::COMBAT_DAMAGE_PLAYER => 'Quand elle inflige des dégâts de combat à un joueur',
             self::ANY_CAST => $this->filter === self::SECOND_SPELL ? 'Quand un joueur lance son deuxième sort du tour' : 'Quand un joueur lance un sort',
+            self::ATTACKS_ALONE => 'Quand une de vos créatures attaque seule',
+            self::CREATURE_ENTERS => 'Quand une autre créature arrive',
+            self::TAPPED_FOR_MANA => 'Quand vous l\'engagez pour du mana',
         } . ($this->filter === self::TAPPED ? ', si elle est engagée' : '');
         $what = match ($this->effect) {
             'damage' => sprintf('%d dégât%s', $this->amount, $this->amount > 1 ? 's' : ''),
@@ -270,6 +297,11 @@ final class TriggeredAbility
             'exile_discarded' => 'exiler la carte défaussée de votre cimetière',
             'necro_return' => 'mettre en main la carte exilée face cachée',
             'lose_game' => 'perdre la partie',
+            'exalted' => 'elle gagne +1/+1 jusqu\'à la fin du tour (exalted)',
+            'selvala_draw' => 'si sa force est la plus grande, son contrôleur peut piocher une carte',
+            'opponent_token' => sprintf('l\'adversaire ciblé crée %d jeton%s %s', $this->amount, $this->amount > 1 ? 's' : '', str_replace(':', ' ', $this->spec)),
+            'earthbend' => sprintf('earthbend %d : un terrain ciblé devient une créature 0/0 avec la célérité et %d marqueur%s +1/+1', $this->amount, $this->amount, $this->amount > 1 ? 's' : ''),
+            'return_tapped' => 'il revient engagé sur le champ de bataille',
         };
 
         return "$when : $what";
