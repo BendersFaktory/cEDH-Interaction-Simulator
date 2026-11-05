@@ -62,7 +62,8 @@ final class PhasesTest extends TestCase
         $this->assertCount(4, array_unique(array_merge(...array_values($drawers))));
     }
 
-    public function testUntapAndCleanupNeverOpenAPriorityRound(): void
+    /** Sans trigger ni SBA au cleanup (aucun permanent ici), le cleanup n'ouvre pas de ronde (voir TriggerTest pour 514.3a). */
+    public function testUntapAndCleanupOpenNoPriorityRoundWithoutTriggers(): void
     {
         $s = GameFactory::create(3, self::FOUR_PASS);
         $result = (new GameEngine(new AgentRegistry()))->advance($s);

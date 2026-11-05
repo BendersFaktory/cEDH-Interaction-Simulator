@@ -98,7 +98,7 @@ final class ActivatedCostsTest extends TestCase
         $s = (new ScenarioBuilder())->permanent(0, $bombardment)->build(self::PASS);
         $this->assertSame([], $this->abilities($s), 'Aucune créature à sacrifier');
 
-        $commander = new CardInstance('cmd', 'Test Commander', CardInstance::CREATURE, 3, null, 0, false, true, 3, 3);
+        $commander = ScenarioBuilder::commanderCard('cmd');
         $s->player(0)->battlefield = [$bombardment, self::bear('b1'), self::bear('b2'), $commander];
         $actions = $this->abilities($s);
         $this->assertCount(2 * 4, $actions, '2 noms de créature x 4 joueurs ciblables');
@@ -109,8 +109,13 @@ final class ActivatedCostsTest extends TestCase
         AbilityManager::activate($s, $sacCommander);
         $events = $s->drainEvents();
         $this->assertSame(['AbilityActivated', 'PermanentSacrificed'], array_map(static fn ($e) => $e->type, $events));
-        $this->assertSame('command', $events[1]->payload['destination']);
+        // CR 903.9a : le commandant sacrifié passe par le cimetière, les SBA le renvoient en zone de commandement.
+        $this->assertSame('graveyard', $events[1]->payload['destination']);
+        $this->assertSame('cmd', $s->player(0)->graveyard[0]->id);
+        (new StateBasedActions())->check($s);
         $this->assertSame('cmd', $s->player(0)->command[0]->id);
+        $this->assertSame([], $s->player(0)->graveyard);
+        $this->assertSame(['CommanderReturned'], array_map(static fn ($e) => $e->type, $s->drainEvents()));
 
         (new StackResolver())->resolveTop($s);
         $this->assertSame(19, $s->player(1)->life);
@@ -148,7 +153,7 @@ final class ActivatedCostsTest extends TestCase
         $this->assertSame(3, $copy->player(0)->findOnBattlefield('wm')->currentToughness());
         $s->phase = Phase::Cleanup;
         $s->stepStarted = false;
-        (new TurnManager(new StateBasedActions(), new CombatManager(new AgentRegistry(), new LegalActionGenerator())))->beginStep($s);
+        (new TurnManager(new CombatManager(new AgentRegistry(), new LegalActionGenerator())))->beginStep($s);
         $boosted = array_values(array_filter($s->drainEvents(), static fn ($e) => $e->type === 'CreatureBoosted'));
         $this->assertSame(2, $boosted[0]->payload['power']);
         $this->assertSame(2, $mongrel->currentPower());

@@ -1,0 +1,54 @@
+name: Backend
+
+# PHPUnit (MySQL 9.3 en service, couverture pcov avec seuil) + PHPStan niveau 3. Aucun secret versionné : le mot de passe MySQL du service
+# est jetable et l'URL passe par une variable d'environnement (qui prime sur backend/.env.test).
+on:
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:9.3
+        # Pull authentifié : évite la limite de pulls anonymes de Docker Hub.
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: mtg_sim_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      # Les variables d'environnement priment sur .env.test (qui contient CHANGEME).
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/mtg_sim_test?serverVersion=9.3.0&charset=utf8mb4
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+          coverage: pcov
+
+      - name: Dépendances
+        run: composer install --no-interaction --prefer-dist
+
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+
+      - name: PHPUnit (avec couverture)
+        run: vendor/bin/phpunit --coverage-clover var/clover.xml
+
+      # Seuil = taux mesuré le 2026-10-24 (95,76 % des instructions de src/) arrondi vers le bas. À relever quand la couverture monte.
+      - name: Seuil de couverture
+        run: php bin/check-coverage.php var/clover.xml 95

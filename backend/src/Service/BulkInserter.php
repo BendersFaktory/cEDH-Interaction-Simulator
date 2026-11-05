@@ -49,18 +49,29 @@ class BulkInserter
     }
 
     /**
+     * Ancre au point courant : remplace l'état d'une ancre déjà posée à ce seq (fork ou ancre de tour au même point,
+     * changement de stops répété), sinon l'insère. Le seq étant celui de la tête, aucune ancre passée n'est touchée.
+     */
+    public function upsertCheckpoint(int $simulationId, int $seq, array $state): void
+    {
+        $this->connection->executeStatement(
+            'INSERT INTO checkpoint (simulation_id, event_seq, state, decision) VALUES (?, ?, ?, NULL) ON DUPLICATE KEY UPDATE state = VALUES(state)',
+            [$simulationId, $seq, $this->json($state)],
+        );
+    }
+
+    /**
      * Ancre posée à une pause humaine : complète l'ancre existante à ce seq (une ancre de tour peut coïncider
-     * avec la pause, contrainte unique), sinon en insère une.
+     * avec la pause, contrainte unique ; son état est gardé), sinon en insère une.
+     * Une seule requête : un UPDATE sans ligne suivi d'un INSERT posait un verrou de trou en fin d'index
+     * (REPEATABLE READ) et deux décisions simultanées sur des parties différentes s'interbloquaient (deadlock 1213).
      */
     public function anchorDecision(int $simulationId, int $seq, array $state, string $actionId): void
     {
-        $updated = $this->connection->executeStatement(
-            'UPDATE checkpoint SET decision = ? WHERE simulation_id = ? AND event_seq = ?',
-            [$actionId, $simulationId, $seq],
+        $this->connection->executeStatement(
+            'INSERT INTO checkpoint (simulation_id, event_seq, state, decision) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE decision = VALUES(decision)',
+            [$simulationId, $seq, $this->json($state), $actionId],
         );
-        if ($updated === 0) {
-            $this->insertCheckpoints($simulationId, [$seq => $state], [$seq => $actionId]);
-        }
     }
 
     /**

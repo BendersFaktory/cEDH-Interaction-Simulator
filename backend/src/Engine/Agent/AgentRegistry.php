@@ -19,6 +19,8 @@ final class AgentRegistry
         $this->agents = $extra + [
             'ai:pass' => new AutoPassAgent(),
             'ai:heuristic' => new HeuristicAgent(),
+            'ai:aggro' => HeuristicAgent::aggro(),
+            'ai:control' => HeuristicAgent::control(),
             'human' => new HumanAgent(false),
             'human:auto' => new HumanAgent(true),
         ];

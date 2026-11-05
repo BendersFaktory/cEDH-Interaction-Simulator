@@ -107,7 +107,7 @@ final class TriggerQueueTest extends TestCase
         $s->stepStarted = false;
 
         $registry = new AgentRegistry();
-        (new TurnManager(new StateBasedActions(), new CombatManager($registry, new LegalActionGenerator())))->beginStep($s);
+        (new TurnManager(new CombatManager($registry, new LegalActionGenerator())))->beginStep($s);
 
         $this->assertSame([['tr1', 0, "Idole de l'Érudit", 0]], $this->pending($s));
     }

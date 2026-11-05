@@ -137,9 +137,13 @@ final class CombatTest extends TestCase
 
         $died = $this->of($result->events, 'CreatureDied');
         $this->assertSame('cmd', $died[0]->payload['card']['id']);
-        $this->assertSame('command', $died[0]->payload['destination']);
+        // CR 903.9a : au cimetière d'abord (il « meurt »), puis renvoyé en zone de commandement par les SBA suivantes.
+        $this->assertSame('graveyard', $died[0]->payload['destination']);
+        $returned = $this->of($result->events, 'CommanderReturned');
+        $this->assertSame('cmd', $returned[0]->payload['card']['id']);
+        $this->assertGreaterThan($died[0]->seq, $returned[0]->seq);
         $this->assertSame('cmd', $s->player(0)->command[0]->id);
-        $this->assertSame([], array_filter($s->player(0)->graveyard, static fn ($c) => $c->commander), 'jamais au cimetière');
+        $this->assertSame([], array_filter($s->player(0)->graveyard, static fn ($c) => $c->commander), 'plus au cimetière');
     }
 
     public function testCommanderDamageAccumulatesAndEliminatesAtTwentyOne(): void

@@ -12,5 +12,13 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      exclude: ['src/**/*.test.ts', 'src/**/__fixtures__/**'],
+      reporter: ['text', 'text-summary'],
+      // Seuil = taux de lignes mesuré le 2026-10-24 (60,59 %) arrondi vers le bas.
+      thresholds: { lines: 60 },
+    },
   },
 })

@@ -100,8 +100,9 @@ final class CommanderTest extends TestCase
 
         $countered = $this->first($result->events, 'SpellCountered');
         $this->assertNotNull($countered);
-        $this->assertSame('command', $countered->payload['destination']);
-        $this->assertSame(1, count($s->player(0)->command));  // retourné en zone de commandement…
+        $this->assertSame('graveyard', $countered->payload['destination']); // CR 903.9a : cimetière, puis SBA…
+        $this->assertNotNull($this->first($result->events, 'CommanderReturned'));
+        $this->assertSame(1, count($s->player(0)->command));  // …retourné en zone de commandement…
         $this->assertSame([], array_filter($s->player(0)->graveyard, static fn ($c) => $c->commander)); // …et pas au cimetière (d'autres cartes y arrivent par la défausse)
         // Et la taxe s'applique bien : le lancement contré compte.
         $this->assertSame(1, $s->player(0)->commanderCasts['cmd0']);

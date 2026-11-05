@@ -6,7 +6,7 @@ namespace App\Engine\Game;
 
 /**
  * Étapes d'un tour. Untap et Cleanup n'ouvrent jamais de ronde de priorité ; toutes les autres, si.
- * DeclareAttackers / DeclareBlockers / CombatDamage ne se jouent que s'il y a des attaquants (voir CombatManager::skips).
+ * DeclareAttackers / DeclareBlockers / FirstStrikeDamage / CombatDamage ne se jouent que s'il y a des attaquants (voir CombatManager::skips).
  */
 enum Phase: string
 {
@@ -17,6 +17,7 @@ enum Phase: string
     case BeginCombat = 'begin_combat';
     case DeclareAttackers = 'declare_attackers';
     case DeclareBlockers = 'declare_blockers';
+    case FirstStrikeDamage = 'first_strike_damage'; // seulement si une créature au combat a l'initiative ou la double initiative (CR 510.4)
     case CombatDamage = 'combat_damage';
     case EndCombat = 'end_combat';
     case Main2 = 'main2';
@@ -32,7 +33,8 @@ enum Phase: string
             self::Main1 => self::BeginCombat,
             self::BeginCombat => self::DeclareAttackers,
             self::DeclareAttackers => self::DeclareBlockers,
-            self::DeclareBlockers => self::CombatDamage,
+            self::DeclareBlockers => self::FirstStrikeDamage,
+            self::FirstStrikeDamage => self::CombatDamage,
             self::CombatDamage => self::EndCombat,
             self::EndCombat => self::Main2,
             self::Main2 => self::End,
