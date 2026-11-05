@@ -18,21 +18,28 @@ final class DeckLoader
     }
 
     /**
-     * @param ?string $commander nom du commandant s'il n'est pas dans la decklist (section « Commander » ou `CMDR:`)
+     * @param ?string $commander nom du commandant s'il n'est pas dans la decklist (section « Commander » ou `CMDR:`) ; il
+     *        remplace alors les commandants de la decklist (partenaire compris)
+     * @param ?string $partner nom du second commandant (Partner), avec `$commander`
      * @throws DeckLoadException
      */
-    public function load(string $decklist, ?string $commander = null): LoadedDeck
+    public function load(string $decklist, ?string $commander = null, ?string $partner = null): LoadedDeck
     {
         $parsed = DecklistParser::parse($decklist);
-        $commanderName = $commander !== null && trim($commander) !== '' ? trim($commander) : $parsed['commander'];
+        $given = $commander !== null && trim($commander) !== '';
+        $commanderName = $given ? trim($commander) : $parsed['commander'];
+        $partnerName = $given ? ($partner !== null && trim($partner) !== '' ? trim($partner) : null) : $parsed['partner'];
         if ($commanderName === null) {
             throw new DeckLoadException(['Aucun commandant indiqué (section « Commander » ou ligne « CMDR: nom »).']);
         }
-        // Le commandant n'est pas compté dans les 99 s'il figure aussi dans la liste principale.
+        // Les commandants ne sont pas comptés dans la bibliothèque s'ils figurent aussi dans la liste principale.
         $entries = $parsed['entries'];
-        unset($entries[$commanderName]);
+        $commanderNames = array_values(array_filter([$commanderName, $partnerName], static fn (?string $n): bool => $n !== null));
+        foreach ($commanderNames as $name) {
+            unset($entries[$name]);
+        }
 
-        $found = $this->catalog->get(array_merge([$commanderName], array_keys($entries)));
+        $found = $this->catalog->get(array_merge($commanderNames, array_keys($entries)));
         $problems = [];
         foreach ($found['missing'] as $name) {
             $problems[] = $found['degraded']
@@ -60,7 +67,7 @@ final class DeckLoader
                 $library[] = $definitions[$name];
             }
         }
-        $deck = new LoadedDeck($definitions[$commanderName], $library, $images, $found['degraded']);
+        $deck = new LoadedDeck($definitions[$commanderName], $library, $images, $found['degraded'], $partnerName === null ? null : $definitions[$partnerName]);
 
         try {
             Decks::validate($deck->instantiate(0), 0);

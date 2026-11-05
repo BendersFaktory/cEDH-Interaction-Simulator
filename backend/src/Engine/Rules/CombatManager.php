@@ -143,6 +143,11 @@ final class CombatManager
                 if ($c->declaring === CombatState::BLOCKERS) {
                     array_shift($c->queue);
                 } else {
+                    if (count($c->attackers) === 1) {
+                        // Exalted (CR 702.83) : une créature attaque seule ; chaque instance d'exalted de son contrôleur se déclenche.
+                        $alone = (string) array_key_first($c->attackers);
+                        $s->queuePlayerTriggers($s->activePlayer, TriggeredAbility::ATTACKS_ALONE, stackId: $alone);
+                    }
                     $this->finish($s);
 
                     return;

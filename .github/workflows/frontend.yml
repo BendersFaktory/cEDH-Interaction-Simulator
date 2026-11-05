@@ -36,8 +36,12 @@ jobs:
         run: npx vue-tsc --noEmit
         working-directory: frontend
 
-      - name: Tests
-        run: npm test
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Tests et couverture (seuil dans vite.config.ts)
+        run: npm run coverage
         working-directory: frontend
 
       - name: Build

@@ -8,7 +8,7 @@ const events = fixture.events as GameEvent[]
 describe('reducer — test de contrat avec le moteur PHP', () => {
   const view = replay(events)
 
-  it('retrouve l\'état final calculé par le moteur', () => {
+  it("retrouve l'état final calculé par le moteur", () => {
     expect(view.over).toBe(fixture.final.over)
     expect(view.winner).toBe(fixture.final.winner)
     expect(view.turn).toBe(fixture.final.turn)
@@ -35,7 +35,7 @@ describe('reducer — test de contrat avec le moteur PHP', () => {
     expect(view.stack.map((i) => i.id)).toEqual(pushed.filter((id) => !resolved.has(id)))
   })
 
-  it('peut s\'arrêter à n\'importe quel événement (replay partiel)', () => {
+  it("peut s'arrêter à n'importe quel événement (replay partiel)", () => {
     const mid = events[Math.floor(events.length / 2)].seq
     const partial = replay(events, mid)
     expect(partial.lastSeq).toBe(mid)
@@ -51,7 +51,7 @@ describe('reducer — test de contrat avec le moteur PHP', () => {
 })
 
 describe('reducer — combat', () => {
-  it('les créatures mortes quittent le champ de bataille, l\'attaque est effacée en fin de combat', () => {
+  it("les créatures mortes quittent le champ de bataille, l'attaque est effacée en fin de combat", () => {
     const attacker = events.find((e) => e.type === 'AttackerDeclared')!
     const after = replay(events, attacker.seq)
     const card = after.players[attacker.payload.player].battlefield.find((c) => c.id === attacker.payload.card)!
@@ -100,7 +100,13 @@ describe('reducer — capacités et réserve de mana', () => {
   const pinger: PublicCard = { id: 'a1', name: 'Pinger', type: 'artifact', cost: 2, effect: null, amount: 0 }
   const start = () =>
     replay([
-      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h' }, { id: 1, life: 40, library: 0, controller: 'ai' }] }),
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 0, controller: 'h' },
+          { id: 1, life: 40, library: 0, controller: 'ai' },
+        ],
+      }),
       ev(2, 'LandPlayed', { player: 0, card: land }),
       ev(3, 'LandPlayed', { player: 0, card: pinger }),
     ])
@@ -118,7 +124,7 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.stack).toEqual([])
   })
 
-  it('AbilityActivated pose l\'élément de pile, AbilityResolved le retire sans bouger la carte', () => {
+  it("AbilityActivated pose l'élément de pile, AbilityResolved le retire sans bouger la carte", () => {
     const v = start()
     v.priority.passed = [1]
     const ability = { isManaAbility: false, effect: 'damage', tap: true, amount: 1 }
@@ -159,7 +165,7 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].pool).toEqual({ R: 1 })
   })
 
-  it('mana restreint : recopié depuis le snapshot et les payloads, vidé en fin d\'étape', () => {
+  it("mana restreint : recopié depuis le snapshot et les payloads, vidé en fin d'étape", () => {
     const r = replay([ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h', restricted: { eldrazi: { C: 2 } } }] })])
     expect(r.players[0].restricted).toEqual({ eldrazi: { C: 2 } })
     expect(start().players[0].restricted).toEqual({})
@@ -198,7 +204,82 @@ describe('reducer — capacités et réserve de mana', () => {
     expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
   })
 
-  it('CreatureBoosted fixe la force et l\'endurance (valeurs absolues)', () => {
+  it('LegendRuleApplied retire les légendes non gardées (cimetière, ou rien pour un jeton)', () => {
+    const v = start()
+    const legend = { id: 'g1', name: 'Isamaru', type: 'creature' as const, cost: 1, effect: null, amount: 0 }
+    const copy = { ...legend, id: 'p0_t1', token: true }
+    v.players[0].battlefield.push({ ...legend, tapped: true }, { ...copy, tapped: false })
+    applyEvent(v, ev(4, 'LegendRuleApplied', { player: 0, kept: 'p0_t1', removed: [{ card: legend, destination: 'graveyard' }] }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1', 'p0_t1'])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['g1'])
+    applyEvent(v, ev(5, 'LegendRuleApplied', { player: 0, kept: 'g2', removed: [{ card: copy, destination: 'none' }] }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1', 'a1'])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['g1'])
+  })
+
+  it("CardExiled met la carte en exil (un jeton disparaît) ; CommanderReturned depuis l'exil la vide", () => {
+    const v = start()
+    expect(v.players[0].exile).toEqual([])
+    const spirit = { id: 'p0_t1', name: 'Spirit', type: 'creature' as const, cost: 0, effect: null, amount: 0, token: true }
+    applyEvent(v, ev(4, 'TokenCreated', { player: 0, card: spirit }))
+    applyEvent(v, ev(5, 'CardExiled', { player: 0, card: spirit, from: 'battlefield', destination: 'none', source: 'Path', exile: 0 }))
+    applyEvent(v, ev(6, 'CardExiled', { player: 0, card: pinger, from: 'battlefield', destination: 'exile', source: 'Path', exile: 1 }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1'])
+    expect(v.players[0].exile.map((c) => c.id)).toEqual(['a1'])
+    expect(v.players[0].graveyard).toEqual([])
+    const cmd = { id: 'cmd', name: 'Commandant', type: 'creature' as const, cost: 3, effect: null, amount: 0, commander: true }
+    v.players[1].battlefield.push({ ...cmd, tapped: true })
+    applyEvent(v, ev(7, 'CardExiled', { player: 1, card: cmd, from: 'battlefield', destination: 'exile', source: 'Swords', exile: 1 }))
+    expect(v.players[1].exile.map((c) => c.tapped)).toEqual([false])
+    applyEvent(v, ev(8, 'CommanderReturned', { player: 1, card: cmd, from: 'exile' }))
+    expect(v.players[1].exile).toEqual([])
+    expect(v.players[1].command.map((c) => c.id)).toContain('cmd')
+  })
+
+  it('PermanentDestroyed envoie le permanent au cimetière ; AbilitiesGranted / AbilitiesExpired ajoutent puis retirent la capacité accordée', () => {
+    const v = start()
+    applyEvent(v, ev(4, 'PermanentDestroyed', { player: 0, card: pinger, destination: 'graveyard', source: 'Pyroblast' }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['l1'])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['a1'])
+
+    const grant = { isManaAbility: true, effect: 'mana', tap: false, options: ['{B}'], sacrifice: true }
+    const before = v.players[0].battlefield[0].abilities?.length ?? 0
+    applyEvent(v, ev(5, 'AbilitiesGranted', { player: 0, cards: ['l1'], ability: grant }))
+    expect(v.players[0].battlefield[0].abilities).toHaveLength(before + 1)
+    expect(v.players[0].battlefield[0].abilities?.at(-1)).toEqual(grant)
+    applyEvent(v, ev(6, 'AbilitiesExpired', { player: 0, card: 'l1', count: 1 }))
+    expect(v.players[0].battlefield[0].abilities ?? []).toHaveLength(before)
+  })
+
+  it('interaction gratuite : Île renvoyée en main, coût payé à la résolution, sort contré exilé ou remis sur la bibliothèque', () => {
+    const v = start()
+    applyEvent(v, ev(4, 'PermanentReturnedToHand', { player: 0, card: land, destination: 'hand', hand: 1, source: 'Daze' }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['a1'])
+    expect(v.players[0].hand.map((c) => [c.id, c.tapped])).toEqual([['l1', false]])
+    v.players[1].battlefield.push({ ...land, id: 'l2', tapped: false })
+    applyEvent(v, ev(5, 'CostPaid', { player: 1, cost: '{1}', source: 'Daze', stackId: 's2', tapped: ['l2'], paid: { R: 1 }, fromPool: {}, pool: {} }))
+    expect(v.players[1].battlefield.find((c) => c.id === 'l2')?.tapped).toBe(true)
+    applyEvent(v, ev(6, 'CostNotPaid', { player: 1, cost: '{1}', source: 'Daze', stackId: 's2' }))
+    const bolt = { id: 'b1', name: 'Lightning Bolt', type: 'instant' as const, cost: 1, effect: 'damage', amount: 3 }
+    v.stack.push({ id: 's1', card: bolt, controller: 1, targets: [] })
+    applyEvent(v, ev(7, 'SpellCountered', { stackId: 's1', card: bolt, controller: 1, by: 's3', destination: 'exile' }))
+    expect(v.players[1].exile.map((c) => c.id)).toEqual(['b1'])
+    v.stack.push({ id: 's4', card: bolt, controller: 1, targets: [] })
+    applyEvent(v, ev(8, 'SpellCountered', { stackId: 's4', card: bolt, controller: 1, by: 's5', destination: 'library', library: 7 }))
+    expect(v.stack).toEqual([])
+    expect(v.players[1].library).toBe(7)
+    expect(v.players[1].graveyard).toEqual([])
+  })
+
+  it('CardImprinted fixe les couleurs retenues par le permanent (valeurs absolues)', () => {
+    const v = start()
+    const mox = { id: 'mox', name: 'Chrome Mox', type: 'artifact' as const, cost: 0, effect: null, amount: 0 }
+    applyEvent(v, ev(4, 'SpellResolved', { stackId: 's1', card: mox, controller: 0, destination: 'battlefield' }))
+    applyEvent(v, ev(5, 'CardImprinted', { player: 0, card: 'mox', exiled: 'Lightning Bolt', colors: ['R'] }))
+    expect(v.players[0].battlefield.find((c) => c.id === 'mox')?.imprint).toEqual(['R'])
+  })
+
+  it("CreatureBoosted fixe la force et l'endurance (valeurs absolues)", () => {
     const v = start()
     const bear = { id: 'c1', name: 'Wild Mongrel', type: 'creature' as const, cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
     v.players[0].battlefield.push({ ...bear, tapped: false })
@@ -207,6 +288,67 @@ describe('reducer — capacités et réserve de mana', () => {
     applyEvent(v, ev(5, 'CreatureBoosted', { player: 0, card: 'c1', power: 2, toughness: 2 }))
     expect(v.players[0].battlefield[2].power).toBe(2)
   })
+
+  it('CountersAdded fixe le total de la sorte et la force / endurance résultantes (valeurs absolues)', () => {
+    const v = start()
+    const army = { id: 'p1_t1', name: 'Orc Army', type: 'creature' as const, cost: 0, effect: null, amount: 0, power: 0, toughness: 0, token: true }
+    const remora = { id: 'rem', name: 'Mystic Remora', type: 'enchantment' as const, cost: 1, effect: null, amount: 0 }
+    v.players[1].battlefield.push({ ...army, tapped: false }, { ...remora, tapped: false })
+    applyEvent(v, ev(4, 'CountersAdded', { player: 1, card: 'p1_t1', kind: '+1/+1', count: 2, power: 2, toughness: 2 }))
+    applyEvent(v, ev(5, 'CountersAdded', { player: 1, card: 'rem', kind: 'age', count: 1 }))
+    const [a, r] = v.players[1].battlefield.slice(-2)
+    expect([a.counters, a.power, a.toughness]).toEqual([{ '+1/+1': 2 }, 2, 2])
+    expect([r.counters, r.power]).toEqual([{ age: 1 }, undefined])
+  })
+
+  it('CountersRemoved et PregameCardPlaced (valeurs absolues)', () => {
+    const v = start()
+    const caverns = { id: 'p0_c9', name: 'Gemstone Caverns', type: 'land' as const, cost: 0, effect: null, amount: 0 }
+    v.players[0].hand.push({ ...caverns, tapped: false })
+    applyEvent(v, ev(4, 'PregameCardPlaced', { player: 0, card: caverns, hand: 0 }))
+    applyEvent(v, ev(5, 'CountersAdded', { player: 0, card: 'p0_c9', kind: 'wish', count: 2 }))
+    applyEvent(v, ev(6, 'CountersRemoved', { player: 0, card: 'p0_c9', kind: 'wish', count: 1 }))
+    const c = v.players[0].battlefield.find((x) => x.id === 'p0_c9')
+    expect(v.players[0].hand.some((x) => x.id === 'p0_c9')).toBe(false)
+    expect(c?.counters).toEqual({ wish: 1 })
+    applyEvent(v, ev(7, 'CountersRemoved', { player: 0, card: 'p0_c9', kind: 'wish', count: 0 }))
+    expect(c?.counters).toEqual({})
+  })
+
+  it('SpellCast par flashback retire la carte du cimetière', () => {
+    const v = start()
+    const rich = { id: 'p0_c4', name: 'Strike It Rich', type: 'sorcery' as const, cost: 1, effect: 'treasure', amount: 0 }
+    v.players[0].graveyard.push({ ...rich, tapped: false })
+    applyEvent(v, ev(4, 'SpellCast', { player: 0, card: rich, stackId: 's9', targets: [], tapped: [], fromCommand: false, altCast: 'flashback' }))
+    expect(v.players[0].graveyard).toEqual([])
+    expect(v.stack.map((i) => i.id)).toEqual(['s9'])
+  })
+
+  it("SpellCast et LandPlayed avec `fromExile` retirent la carte de l'exil de son propriétaire", () => {
+    const v = start()
+    const goblin = { id: 'p1_c9', name: 'Goblin', type: 'creature' as const, cost: 1, effect: null, amount: 0, power: 1, toughness: 1 }
+    const wastes = { id: 'p1_c8', name: 'Wastes', type: 'land' as const, cost: 0, effect: null, amount: 0 }
+    v.players[1].exile.push({ ...goblin, tapped: false }, { ...wastes, tapped: false })
+    applyEvent(v, ev(4, 'ExilePlayGranted', { player: 0, card: goblin, owner: 1, until: 'turn', source: 'Ragavan, Nimble Pilferer' }))
+    applyEvent(v, ev(5, 'SpellCast', { player: 0, card: goblin, stackId: 's9', targets: [], tapped: [], fromCommand: false, fromExile: true, owner: 1 }))
+    applyEvent(v, ev(6, 'LandPlayed', { player: 0, card: wastes, fromExile: true, owner: 1 }))
+    expect(v.players[1].exile).toEqual([])
+    expect(v.stack.map((i) => i.id)).toEqual(['s9'])
+    expect(v.players[0].battlefield.some((c) => c.id === 'p1_c8')).toBe(true)
+  })
+
+  it('PermanentControlChanged déplace le permanent ; à son départ, `owner` le range chez son propriétaire', () => {
+    const v = start()
+    const talisman = { id: 'p0_c50', name: 'Wishclaw Talisman', type: 'artifact' as const, cost: 1, effect: null, amount: 0 }
+    v.players[0].battlefield.push({ ...talisman, tapped: false })
+    applyEvent(v, ev(4, 'PermanentControlChanged', { player: 1, from: 0, card: talisman, tapped: true, source: 'Wishclaw Talisman' }))
+    expect(v.players[0].battlefield.some((c) => c.id === 'p0_c50')).toBe(false)
+    expect(v.players[1].battlefield.find((c) => c.id === 'p0_c50')?.tapped).toBe(true)
+    applyEvent(v, ev(5, 'PermanentSacrificed', { player: 1, card: talisman, destination: 'graveyard', owner: 0 }))
+    expect(v.players[1].battlefield.some((c) => c.id === 'p0_c50')).toBe(false)
+    expect(v.players[1].graveyard).toEqual([])
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['p0_c50'])
+  })
 })
 
 describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', () => {
@@ -214,7 +356,13 @@ describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', ()
   const bear: PublicCard = { id: 'b1', name: 'Grizzly Bears', type: 'creature', cost: 2, effect: null, amount: 0, power: 2, toughness: 2 }
   const start = () =>
     replay([
-      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 0, controller: 'h' }, { id: 1, life: 40, library: 0, controller: 'ai' }] }),
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 0, controller: 'h' },
+          { id: 1, life: 40, library: 0, controller: 'ai' },
+        ],
+      }),
       ev(2, 'LandPlayed', { player: 0, card: bear }),
     ])
 
@@ -231,13 +379,35 @@ describe('reducer — triggers élargis et ronde de cleanup (règle 514.3a)', ()
   it('un trigger attacks et un trigger end_step se posent sur la pile sans toucher la priorité autrement', () => {
     const v = start()
     v.priority = { holder: 1, passed: [0] }
-    applyEvent(v, ev(3, 'AbilityTriggered', { player: 0, stackId: 's2', card: bear, triggerIndex: 0, trigger: { event: 'attacks', effect: 'damage', amount: 1 }, label: 'Quand elle attaque : 1 dégât', targets: ['player:1'] }))
-    applyEvent(v, ev(4, 'AbilityTriggered', { player: 0, stackId: 's3', card: bear, triggerIndex: 1, trigger: { event: 'end_step', effect: 'draw', amount: 1 }, label: 'Au début de votre fin de tour : piocher 1', targets: [] }))
+    applyEvent(
+      v,
+      ev(3, 'AbilityTriggered', {
+        player: 0,
+        stackId: 's2',
+        card: bear,
+        triggerIndex: 0,
+        trigger: { event: 'attacks', effect: 'damage', amount: 1 },
+        label: 'Quand elle attaque : 1 dégât',
+        targets: ['player:1'],
+      }),
+    )
+    applyEvent(
+      v,
+      ev(4, 'AbilityTriggered', {
+        player: 0,
+        stackId: 's3',
+        card: bear,
+        triggerIndex: 1,
+        trigger: { event: 'end_step', effect: 'draw', amount: 1 },
+        label: 'Au début de votre fin de tour : piocher 1',
+        targets: [],
+      }),
+    )
     expect(v.stack.map((i) => i.label)).toEqual(['Quand elle attaque : 1 dégât', 'Au début de votre fin de tour : piocher 1'])
     expect(v.priority.passed).toEqual([])
   })
 
-  it('une seconde étape cleanup (ronde de priorité) réinitialise la priorité ; la ronde s\'affiche comme un checkpoint', () => {
+  it("une seconde étape cleanup (ronde de priorité) réinitialise la priorité ; la ronde s'affiche comme un checkpoint", () => {
     const v = start()
     applyEvent(v, ev(3, 'PhaseChanged', { turn: 1, phase: 'cleanup', activePlayer: 0 }))
     expect(v.phase).toBe('cleanup')
@@ -259,7 +429,13 @@ describe('reducer — mulligan de Londres', () => {
   const card = (id: string): PublicCard => ({ id, name: `Carte ${id}`, type: 'land', cost: 0, effect: null, amount: 0 })
   const start = () =>
     replay([
-      ev(1, 'GameStarted', { seed: 1, players: [{ id: 0, life: 40, library: 93, controller: 'h' }, { id: 1, life: 40, library: 93, controller: 'ai' }] }),
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 93, controller: 'h' },
+          { id: 1, life: 40, library: 93, controller: 'ai' },
+        ],
+      }),
       ev(2, 'CardDrawn', { player: 0, card: card('a'), library: 92 }),
       ev(3, 'CardDrawn', { player: 0, card: card('b'), library: 91 }),
       ev(4, 'CardDrawn', { player: 0, card: card('c'), library: 90 }),
@@ -287,10 +463,178 @@ describe('reducer — mulligan de Londres', () => {
     expect(v.players[0].library).toBe(92)
   })
 
-  it('HandKept ne modifie pas l\'état affiché', () => {
+  it('CardPutOnTop (Brainstorm) retire la carte de la main et met à jour la bibliothèque', () => {
+    const v = start()
+    applyEvent(v, ev(5, 'CardPutOnTop', { player: 0, card: card('c'), hand: 2, library: 92, source: 'Brainstorm' }))
+    expect(v.players[0].hand.map((c) => c.id)).toEqual(['a', 'b'])
+    expect(v.players[0].library).toBe(92)
+  })
+
+  it("HandKept ne modifie pas l'état affiché", () => {
     const v = start()
     const snapshot = JSON.stringify(v.players)
     applyEvent(v, ev(5, 'HandKept', { player: 0, mulligans: 1, toBottom: 1 }))
     expect(JSON.stringify(v.players)).toBe(snapshot)
+  })
+})
+
+describe('reducer — shocklands, fetchlands et PV payés', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const card = (id: string, name: string): PublicCard => ({ id, name, type: 'land', cost: 0, effect: null, amount: 0 })
+
+  it("terrain engagé à l'arrivée, terrain cherché, mélange et PV payés en valeurs absolues", () => {
+    const start = events.find((e) => e.type === 'GameStarted')!
+    let v = replay(events, start.seq)
+    const pl = v.players[0]
+    pl.hand.push({ ...card('vents', 'Steam Vents'), tapped: false })
+    let seq = start.seq
+    v = applyEvent(v, ev(++seq, 'LandPlayed', { player: 0, card: card('vents', 'Steam Vents'), tapped: true }))
+    expect(v.players[0].battlefield.find((c) => c.id === 'vents')?.tapped).toBe(true)
+    expect(v.players[0].hand.some((c) => c.id === 'vents')).toBe(false)
+
+    v = applyEvent(v, ev(++seq, 'LifePaid', { player: 0, amount: 1, life: 39, source: 'Polluted Delta' }))
+    v = applyEvent(v, ev(++seq, 'LandFetched', { player: 0, card: card('grave', 'Watery Grave'), library: 80 }))
+    v = applyEvent(v, ev(++seq, 'LifePaid', { player: 0, amount: 2, life: 37, source: 'Watery Grave' }))
+    v = applyEvent(v, ev(seq + 1, 'LibraryShuffled', { player: 0, library: 80 }))
+    const after = v.players[0]
+    expect(after.life).toBe(37)
+    expect(after.library).toBe(80)
+    expect(after.battlefield.find((c) => c.id === 'grave')?.tapped).toBe(false)
+  })
+})
+
+describe('reducer — pile et restrictions (lot H3)', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const bolt: PublicCard = { id: 'b1', name: 'Lightning Bolt', type: 'instant', cost: 1, effect: 'damage', amount: 3 }
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 10, controller: 'h' },
+          { id: 1, life: 40, library: 10, controller: 'ai' },
+        ],
+      }),
+    ])
+
+  it('copie, nouvelle cible, contrôle pris : la pile suit ; la copie disparaît, le sort volé va chez son propriétaire', () => {
+    const v = start()
+    v.stack.push({ id: 's1', card: bolt, controller: 1, targets: ['player:0'] })
+    v.priority.passed = [0]
+    applyEvent(v, ev(2, 'SpellCopied', { player: 1, card: bolt, stackId: 's3', targets: ['player:0'], source: 'Storm', copyOf: 's1' }))
+    expect(v.stack.map((i) => i.id)).toEqual(['s1', 's3'])
+    expect(v.priority.passed).toEqual([])
+    applyEvent(v, ev(3, 'TargetChanged', { stackId: 's1', targets: ['player:1'], by: 's4', source: 'Deflecting Swat' }))
+    expect(v.stack[0].targets).toEqual(['player:1'])
+    applyEvent(v, ev(4, 'SpellControlChanged', { stackId: 's1', controller: 0, previous: 1, source: 'Commandeer' }))
+    expect(v.stack[0].controller).toBe(0)
+    applyEvent(v, ev(5, 'SpellResolved', { stackId: 's3', card: bolt, controller: 1, destination: 'none' }))
+    applyEvent(v, ev(6, 'SpellResolved', { stackId: 's1', card: bolt, controller: 0, owner: 1, destination: 'graveyard' }))
+    expect(v.stack).toEqual([])
+    expect(v.players[0].graveyard).toEqual([])
+    expect(v.players[1].graveyard.map((c) => c.id)).toEqual(['b1'])
+  })
+
+  it('SpellExiled exile chez le propriétaire ; CardsMilled ; jetons engagés et attaquants', () => {
+    const v = start()
+    v.stack.push({ id: 's1', card: bolt, controller: 1, targets: [] })
+    applyEvent(v, ev(2, 'SpellExiled', { stackId: 's1', card: bolt, controller: 1, owner: 1, by: 's2', destination: 'exile' }))
+    expect(v.stack).toEqual([])
+    expect(v.players[1].exile.map((c) => c.id)).toEqual(['b1'])
+    applyEvent(
+      v,
+      ev(3, 'CardsMilled', {
+        player: 0,
+        cards: [
+          { ...bolt, id: 'm1' },
+          { ...bolt, id: 'm2' },
+        ],
+        library: 8,
+        source: 'Brain Freeze',
+      }),
+    )
+    expect(v.players[0].library).toBe(8)
+    expect(v.players[0].graveyard.map((c) => c.id)).toEqual(['m1', 'm2'])
+    const warrior: PublicCard = { id: 'p0_t1', name: 'Warrior', type: 'creature', cost: 0, effect: null, amount: 0, token: true }
+    applyEvent(v, ev(4, 'TokenCreated', { player: 0, card: warrior, tapped: true, attacking: 1 }))
+    expect(v.players[0].battlefield[0]).toMatchObject({ tapped: true, attacking: 1 })
+    applyEvent(v, ev(5, 'TokenCreated', { player: 1, card: { ...warrior, id: 'p1_t2' } }))
+    expect(v.players[1].battlefield[0].tapped).toBe(false)
+    expect(v.players[1].battlefield[0].attacking).toBeUndefined()
+  })
+})
+
+describe('reducer — effets de remplacement (Mox Diamond)', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const mox: PublicCard = { id: 'mox', name: 'Mox Diamond', type: 'artifact', cost: 0, effect: null, amount: 0 }
+  const island: PublicCard = { id: 'i1', name: 'Island', type: 'land', cost: 0, effect: null, amount: 0 }
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 10, controller: 'h' },
+          { id: 1, life: 40, library: 10, controller: 'ai' },
+        ],
+      }),
+    ])
+
+  it('SpellResolved vers `replaced` ne pose rien ; ReplacementApplied pose la carte sur le champ de bataille ou au cimetière', () => {
+    const v = start()
+    v.stack.push({ id: 's1', card: mox, controller: 0, targets: [] })
+    applyEvent(v, ev(2, 'SpellResolved', { stackId: 's1', card: mox, controller: 0, destination: 'replaced' }))
+    expect(v.stack).toEqual([])
+    expect(v.players[0].battlefield).toEqual([])
+    expect(v.players[0].graveyard).toEqual([])
+    applyEvent(v, ev(3, 'ReplacementApplied', { player: 0, card: mox, event: 'enters', destination: 'battlefield', discarded: island }))
+    expect(v.players[0].battlefield.map((c) => c.id)).toEqual(['mox'])
+    applyEvent(v, ev(4, 'ReplacementApplied', { player: 0, owner: 1, card: { ...mox, id: 'mox2' }, event: 'enters', destination: 'graveyard' }))
+    expect(v.players[1].graveyard.map((c) => c.id)).toEqual(['mox2'])
+  })
+})
+
+describe('reducer — combos (lot H5b)', () => {
+  const ev = (seq: number, type: string, payload: Record<string, unknown>): GameEvent => ({ seq, type, payload, verbose: false })
+  const c = (id: string, name: string): PublicCard => ({ id, name, type: 'sorcery', cost: 1, effect: null, amount: 0 })
+  const start = () =>
+    replay([
+      ev(1, 'GameStarted', {
+        seed: 1,
+        players: [
+          { id: 0, life: 40, library: 10, controller: 'h' },
+          { id: 1, life: 40, library: 10, controller: 'ai' },
+        ],
+      }),
+    ])
+
+  it('CardPutIntoHand depuis la bibliothèque ou l’exil, CardExiled depuis le cimetière, escape depuis le cimetière', () => {
+    const v = start()
+    applyEvent(v, ev(2, 'CardPutIntoHand', { player: 0, card: c('a', 'Lib'), from: 'library', hand: 1, library: 9, source: 'Ad Nauseam' }))
+    expect([v.players[0].hand.map((x) => x.id), v.players[0].library]).toEqual([['a'], 9])
+    applyEvent(v, ev(3, 'CardExiled', { player: 0, card: c('b', 'Top'), from: 'library', destination: 'exile', source: 'Necropotence', exile: 1, library: 8, faceDown: true }))
+    applyEvent(v, ev(4, 'CardPutIntoHand', { player: 0, card: c('b', 'Top'), from: 'exile', hand: 2, exile: 0, source: 'Necropotence' }))
+    expect([v.players[0].hand.map((x) => x.id), v.players[0].exile]).toEqual([['a', 'b'], []])
+    v.players[0].graveyard.push({ ...c('g1', 'Old'), tapped: false }, { ...c('g2', 'Bolt'), tapped: false })
+    applyEvent(v, ev(5, 'CardExiled', { player: 0, card: c('g1', 'Old'), from: 'graveyard', destination: 'exile', source: 'Escape', exile: 1, graveyard: 1 }))
+    expect(v.players[0].exile.map((x) => x.id)).toEqual(['g1'])
+    applyEvent(
+      v,
+      ev(6, 'SpellCast', {
+        player: 0,
+        card: c('g2', 'Bolt'),
+        stackId: 's1',
+        targets: [],
+        tapped: [],
+        cost: 1,
+        manaCost: '{R}',
+        x: 0,
+        paid: {},
+        fromPool: [],
+        pool: [],
+        fromCommand: false,
+        altCast: 'escape',
+      }),
+    )
+    expect([v.players[0].graveyard, v.stack.map((i) => i.id)]).toEqual([[], ['s1']])
   })
 })

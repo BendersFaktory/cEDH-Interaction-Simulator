@@ -1,8 +1,15 @@
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, ref } from 'vue'
-import { api } from '../api/client'
+import { computed, onScopeDispose, ref, watch } from 'vue'
+import { api, ApiError } from '../api/client'
 import { replay } from '../engine/reducer'
-import type { GameEvent, PublicCard, SimulationView, StopsConfig } from '../types/engine'
+import type { ActionView, BranchTree, DeckInput, GameEvent, PublicCard, SimulationView, StopsConfig } from '../types/engine'
+
+/** Profils d'IA proposés pour un siège (clés acceptées par l'API, cf. `AgentRegistry`). */
+export const AI_PROFILES = [
+  { key: 'ai:heuristic', label: 'Équilibrée' },
+  { key: 'ai:aggro', label: 'Aggro' },
+  { key: 'ai:control', label: 'Contrôle' },
+]
 
 /**
  * Store central : journal d'événements + curseur.
@@ -18,9 +25,13 @@ export const useSimulationStore = defineStore('simulation', () => {
   const showVerbose = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** Problèmes d'une decklist refusée (422), par siège (« J0 » → messages). */
+  const deckProblems = ref<Record<string, string[]> | null>(null)
   /** Tour courant de la simulation en cours côté serveur (null hors attente). */
   const progress = ref<number | null>(null)
   const waiting = ref(false)
+  /** Profil d'IA choisi par siège à la création : sert de défaut quand on rend la main à l'IA. */
+  const seatProfiles = ref<Record<number, string>>({})
   const POLL_MS = 200
 
   let timer: ReturnType<typeof setInterval> | null = null
@@ -34,9 +45,7 @@ export const useSimulationStore = defineStore('simulation', () => {
    * Points de bifurcation valides : les PriorityGranted marqués `checkpoint` par le moteur
    * (début de ronde, ou pile non vide). Les autres octrois n'ont pas de snapshot.
    */
-  const checkpointSeqs = computed(() =>
-    events.value.filter((e) => e.type === 'PriorityGranted' && e.payload.checkpoint).map((e) => e.seq),
-  )
+  const checkpointSeqs = computed(() => events.value.filter((e) => e.type === 'PriorityGranted' && e.payload.checkpoint).map((e) => e.seq))
   const forkPoint = computed(() => {
     const before = checkpointSeqs.value.filter((s) => s <= cursor.value)
     return before.length ? before[before.length - 1] : null
@@ -48,9 +57,11 @@ export const useSimulationStore = defineStore('simulation', () => {
   async function run<T>(fn: () => Promise<T>): Promise<T | undefined> {
     loading.value = true
     error.value = null
+    deckProblems.value = null
     try {
       return await fn()
     } catch (e) {
+      deckProblems.value = e instanceof ApiError ? (e.problems ?? null) : null
       error.value = e instanceof Error ? e.message : String(e)
       return undefined
     } finally {
@@ -72,13 +83,15 @@ export const useSimulationStore = defineStore('simulation', () => {
    * sinon les 4 sièges sont des IA et tu regardes, quitte à bifurquer ensuite.
    * `ai` : profil d'IA par siège (`ai:heuristic`, `ai:aggro`, `ai:control`), `ai:heuristic` par défaut.
    */
-  async function create(seed?: number, playAsJ0 = true, ai: string[] = []): Promise<void> {
+  async function create(seed?: number, playAsJ0 = true, ai: string[] = [], decks: Record<number, DeckInput> = {}): Promise<void> {
     pause()
+    const seat = (i: number) => ai[i] ?? 'ai:heuristic'
+    seatProfiles.value = { 0: seat(0), 1: seat(1), 2: seat(2), 3: seat(3) }
     await run(async () => {
-      const seat = (i: number) => ai[i] ?? 'ai:heuristic'
       const sim = await api.create({
         seed,
         controllers: { 0: playAsJ0 ? 'human:auto' : seat(0), 1: seat(1), 2: seat(2), 3: seat(3) },
+        ...(Object.keys(decks).length ? { decks } : {}),
       })
       const done = await waitUntilPlayed(sim)
       // Si la partie t'attend déjà, on se place à la fin du journal pour voir tes actions possibles.
@@ -149,6 +162,19 @@ export const useSimulationStore = defineStore('simulation', () => {
     }
   }
 
+  // --- arbre des branches ---
+
+  /** Arbre des branches de la simulation courante (null avant le premier chargement). */
+  const branchTree = ref<BranchTree | null>(null)
+
+  /** Relit l'arbre des branches auquel appartient la simulation courante. */
+  async function refreshBranches(): Promise<void> {
+    if (!simulation.value) return
+    await run(async () => {
+      branchTree.value = await api.branches(simulation.value!.id)
+    })
+  }
+
   // --- fork & décisions ---
 
   /** « Reprendre la main ici » : crée une branche et prend le contrôle des joueurs donnés. */
@@ -158,6 +184,19 @@ export const useSimulationStore = defineStore('simulation', () => {
     await run(async () => {
       const controllers = Object.fromEntries(takeOver.map((id) => [id, 'human:auto']))
       const child = await api.fork(simulation.value!.id, forkPoint.value!, controllers)
+      await load(child.id, true)
+    })
+  }
+
+  /**
+   * « Rendre la main à l'IA » : crée une branche à partir du point de bifurcation, où le siège passe
+   * à l'agent `profile` (`ai:heuristic` par défaut). Le journal de la branche garde l'historique avant.
+   */
+  async function handBackToAi(seat: number, profile = seatProfiles.value[seat] ?? 'ai:heuristic'): Promise<void> {
+    if (!simulation.value || forkPoint.value === null) return
+    pause()
+    await run(async () => {
+      const child = await api.fork(simulation.value!.id, forkPoint.value!, { [seat]: profile })
       await load(child.id, true)
     })
   }
@@ -177,6 +216,67 @@ export const useSimulationStore = defineStore('simulation', () => {
     Object.entries(simulation.value?.controllers ?? {})
       .filter(([, c]) => c.startsWith('human'))
       .map(([id]) => Number(id)),
+  )
+
+  // --- choix de cible au clic (plateau) ---
+
+  /** Cibles déjà choisies au plateau pour l'action en cours (vide hors choix). */
+  const pickedTargets = ref<string[]>([])
+
+  /** Actions légales à cibles dont les cibles contiennent toutes `picked` (ordre indifférent). */
+  function candidatesFor(picked: string[]): ActionView[] {
+    return (pending.value?.actions ?? []).filter((a) => (a.targets ?? []).length > 0 && picked.every((t) => a.targets!.includes(t)))
+  }
+
+  /** Cibles qu'un clic peut encore choisir (surbrillance sur le plateau). */
+  const targetHighlights = computed(() => {
+    const picked = pickedTargets.value
+    const next = new Set<string>()
+    for (const a of candidatesFor(picked)) for (const t of a.targets ?? []) if (!picked.includes(t)) next.add(t)
+    return next
+  })
+
+  /** Actions encore possibles après les cibles choisies : listées quand les clics ne suffisent pas à trancher. */
+  const pickCandidates = computed(() => candidatesFor(pickedTargets.value))
+
+  /**
+   * Clic sur une cible (joueur, permanent, sort de la pile). Une cible impossible est ignorée. Dès qu'une seule action
+   * légale est complète et qu'aucune autre ne la prolonge, elle est envoyée ; sinon les cibles s'accumulent (sorts à
+   * plusieurs cibles) et `pickCandidates` liste les actions restantes.
+   */
+  async function pickTarget(target: string): Promise<void> {
+    if (!pending.value || pickedTargets.value.includes(target)) return
+    const next = [...pickedTargets.value, target]
+    const cands = candidatesFor(next)
+    if (!cands.length) return
+    const exact = cands.filter((a) => (a.targets ?? []).length === next.length)
+    if (exact.length === 1 && exact.length === cands.length) {
+      pickedTargets.value = []
+      await decide(exact[0].id)
+      return
+    }
+    pickedTargets.value = next
+  }
+
+  function cancelTarget(): void {
+    pickedTargets.value = []
+  }
+
+  /** Carte choisie au clic (menu de carte) : ses actions légales sont listées sous la main. */
+  const selectedCardId = ref<string | null>(null)
+  const cardActions = computed(() => (selectedCardId.value ? (pending.value?.actions ?? []).filter((a) => a.cardId === selectedCardId.value) : []))
+
+  function selectCard(id: string): void {
+    selectedCardId.value = selectedCardId.value === id ? null : id
+  }
+
+  // Un choix de cible ou de carte ne survit pas à la décision suivante.
+  watch(
+    () => pending.value?.eventSeq,
+    () => {
+      cancelTarget()
+      selectedCardId.value = null
+    },
   )
 
   /** Stops d'un joueur tels que renvoyés par le serveur (null = défaut). */
@@ -213,9 +313,51 @@ export const useSimulationStore = defineStore('simulation', () => {
   onScopeDispose(pause)
 
   return {
-    simulation, events, cursor, playing, speedMs, showVerbose, loading, error, progress, waiting,
-    lastSeq, atEnd, view, visibleEvents, checkpointSeqs, forkPoint, pending,
-    humanSeats, cardImage, stopsOf, setStops, playableCardIds, hoveredCard,
-    load, create, step, stepBack, seek, play, pause, setSpeed, forkHere, decide,
+    simulation,
+    events,
+    cursor,
+    playing,
+    speedMs,
+    showVerbose,
+    loading,
+    error,
+    deckProblems,
+    progress,
+    waiting,
+    lastSeq,
+    atEnd,
+    view,
+    visibleEvents,
+    checkpointSeqs,
+    forkPoint,
+    pending,
+    humanSeats,
+    cardImage,
+    stopsOf,
+    setStops,
+    playableCardIds,
+    hoveredCard,
+    load,
+    create,
+    step,
+    stepBack,
+    seek,
+    play,
+    pause,
+    setSpeed,
+    seatProfiles,
+    pickedTargets,
+    pickCandidates,
+    targetHighlights,
+    pickTarget,
+    cancelTarget,
+    selectedCardId,
+    cardActions,
+    selectCard,
+    branchTree,
+    refreshBranches,
+    forkHere,
+    handBackToAi,
+    decide,
   }
 })

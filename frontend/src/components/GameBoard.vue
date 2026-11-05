@@ -4,6 +4,7 @@ import { useSimulationStore } from '../stores/simulation'
 import PlayerArea from './PlayerArea.vue'
 import StackPanel from './StackPanel.vue'
 import CardPreview from './CardPreview.vue'
+import PhaseStrip from './PhaseStrip.vue'
 import { phaseLabel } from '../engine/phases'
 
 const store = useSimulationStore()
@@ -14,7 +15,9 @@ const SEATS = ['bottom', 'left', 'top', 'right'] as const
 
 /** Premier siège humain en bas (J0 en mode 4 IA), les suivants dans l'ordre du tour. */
 const seated = computed(() => {
-  const ids = Object.keys(view.value.players).map(Number).sort((a, b) => a - b)
+  const ids = Object.keys(view.value.players)
+    .map(Number)
+    .sort((a, b) => a - b)
   const start = Math.max(0, ids.indexOf(store.humanSeats[0] ?? ids[0]))
   return ids.map((_, i) => ({ seat: SEATS[i] ?? 'top', player: view.value.players[ids[(start + i) % ids.length]] }))
 })
@@ -22,6 +25,7 @@ const seated = computed(() => {
 
 <template>
   <div class="board">
+    <PhaseStrip />
     <div class="board-header">
       <strong>Tour {{ view.turn }}</strong>
       <span>{{ phaseLabel(view.phase) }}</span>

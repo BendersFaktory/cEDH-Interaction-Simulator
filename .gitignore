@@ -62,3 +62,6 @@ backend/config/reference.php
 
 # Worktrees des sous-agents (locaux)
 .claude/
+
+# macOS
+.DS_Store

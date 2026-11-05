@@ -21,26 +21,46 @@ final class Decks
     public const BASIC_LANDS = ['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes'];
 
     /**
-     * Règles de construction Commander : commandant créature légendaire (CR 903.3), 99 cartes en bibliothèque (CR 903.5a),
-     * singleton hors terrains de base
-     * (CR 903.5b) et identité de couleurs (CR 903.4) : toute carte doit avoir une identité incluse dans celle du commandant.
+     * Règles de construction Commander : commandant créature légendaire (CR 903.3), deux commandants seulement si les deux
+     * ont Partner (CR 702.124), 100 cartes commandants compris (99 en bibliothèque, 98 avec un partenaire, CR 903.5a),
+     * singleton hors terrains de base (CR 903.5b) et identité de couleurs (CR 903.4) : toute carte doit avoir une identité
+     * incluse dans celle des commandants réunis (CR 702.124c).
      *
-     * @param array{commander: CardInstance, library: list<CardInstance>} $deck
+     * @param array{commander: CardInstance, partner?: ?CardInstance, library: list<CardInstance>} $deck
      * @throws \InvalidArgumentException
      */
     public static function validate(array $deck, int $playerId): void
     {
-        if (!$deck['commander']->isLegendary() || !$deck['commander']->isCreature()) {
+        $commanders = self::commanders($deck);
+        foreach ($commanders as $commander) {
+            if (!$commander->isLegendary() || !$commander->isCreature()) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Joueur %d : le commandant « %s » doit être une créature légendaire.', $playerId, $commander->name,
+                ));
+            }
+        }
+        if (count($commanders) === 2) {
+            foreach ($commanders as $commander) {
+                if (!$commander->hasKeyword(CardInstance::PARTNER)) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Joueur %d : deux commandants exigent Partner, « %s » ne l\'a pas.', $playerId, $commander->name,
+                    ));
+                }
+            }
+            if ($commanders[0]->name === $commanders[1]->name) {
+                throw new \InvalidArgumentException(sprintf('Joueur %d : « %s » est en plusieurs exemplaires.', $playerId, $commanders[0]->name));
+            }
+        }
+        $size = self::LIBRARY_SIZE + 1 - count($commanders);
+        if (count($deck['library']) !== $size) {
             throw new \InvalidArgumentException(sprintf(
-                'Joueur %d : le commandant « %s » doit être une créature légendaire.', $playerId, $deck['commander']->name,
+                'Joueur %d : la bibliothèque compte %d cartes au lieu de %d.', $playerId, count($deck['library']), $size,
             ));
         }
-        if (count($deck['library']) !== self::LIBRARY_SIZE) {
-            throw new \InvalidArgumentException(sprintf(
-                'Joueur %d : la bibliothèque compte %d cartes au lieu de %d.', $playerId, count($deck['library']), self::LIBRARY_SIZE,
-            ));
+        $seen = [];
+        foreach ($commanders as $commander) {
+            $seen[$commander->name] = true;
         }
-        $seen = [$deck['commander']->name => true];
         foreach ($deck['library'] as $card) {
             if (isset($seen[$card->name]) && !in_array($card->name, self::BASIC_LANDS, true)) {
                 throw new \InvalidArgumentException(sprintf(
@@ -49,16 +69,33 @@ final class Decks
             }
             $seen[$card->name] = true;
         }
-        $allowed = array_map(static fn (Color $c) => $c->symbol(), $deck['commander']->colorIdentity());
+        $allowed = [];
+        foreach ($commanders as $commander) {
+            foreach ($commander->colorIdentity() as $color) {
+                $allowed[$color->symbol()] = $color->symbol();
+            }
+        }
+        $names = implode(' + ', array_map(static fn (CardInstance $c): string => $c->name, $commanders));
         foreach ($deck['library'] as $card) {
             $outside = array_diff(array_map(static fn (Color $c) => $c->symbol(), $card->colorIdentity()), $allowed);
             if ($outside !== []) {
                 throw new \InvalidArgumentException(sprintf(
                     'Joueur %d : « %s » (couleurs %s) sort de l\'identité de couleurs du commandant « %s » (%s).',
-                    $playerId, $card->name, implode('', $outside), $deck['commander']->name, implode('', $allowed) ?: 'incolore',
+                    $playerId, $card->name, implode('', $outside), $names, implode('', $allowed) ?: 'incolore',
                 ));
             }
         }
+    }
+
+    /**
+     * Commandants d'un deck (le partenaire éventuel en second).
+     *
+     * @param array{commander: CardInstance, partner?: ?CardInstance, library: list<CardInstance>} $deck
+     * @return list<CardInstance>
+     */
+    public static function commanders(array $deck): array
+    {
+        return isset($deck['partner']) ? [$deck['commander'], $deck['partner']] : [$deck['commander']];
     }
 
     /**
@@ -93,7 +130,11 @@ final class Decks
         $counter = static fn (string $name, int $cost, string $manaCost): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'counter', 0, false, 0, 0, $manaCost);
         $ritual = static fn (string $name, int $cost, string $manaCost, string $adds): CardInstance => $make($name, CardInstance::INSTANT, $cost, 'mana', 0, false, 0, 0, $manaCost, [], [], $adds);
 
-        $commander = (new CardDefinition("Commandant J$playerId", CardInstance::CREATURE, 3, "{1}{{$a}}{{$b}}", 3, 3, supertypes: [CardInstance::LEGENDARY]))
+        // J3 : R U + splash blanc et noir (quatre couleurs au commandant : cartes blanches et noires du combat, recettes).
+        $splash = $playerId === 3;
+        $identity = $splash ? [$a, $b, 'W', 'B'] : [$a, $b];
+        $pips = implode('', array_map(static fn (string $c): string => "{{$c}}", $identity));
+        $commander = (new CardDefinition("Commandant J$playerId", CardInstance::CREATURE, count($identity) + 1, "{1}$pips", 3, 3, supertypes: [CardInstance::LEGENDARY]))
             ->instantiate(sprintf('p%d_c%d', $playerId, $n++), true);
 
         // Terrains non-basiques (les basiques complètent le deck à la fin). Dégâts des pain lands, entrée engagée et
@@ -135,6 +176,8 @@ final class Decks
         $library[] = $make('Cendrier des Regrets', CardInstance::ARTIFACT, 2, null, 0, false, 0, 0, '{2}', triggers: [new TriggeredAbility(TriggeredAbility::DISCARD, 'damage', 1)]);
         // Carte factice à coût hybride.
         $library[] = $make('Hybrid Bear', CardInstance::CREATURE, 2, null, 0, false, 2, 2, "{{$a}/{$b}}{1}");
+        // Carte factice (type Cackling Counterpart sans flashback) : jeton copie d'une créature qu'on contrôle, y compris le commandant (règle des légendes).
+        $library[] = $make('Reflet de Légende', CardInstance::INSTANT, 3, 'copy', 0, false, 0, 0, '{3}');
 
         if ($hasRed) {
             // Kher Keep : terrain {T} : {C} ; {1}{R}, {T} : créer un jeton Kobold 0/1.
@@ -217,6 +260,21 @@ final class Decks
             $library[] = $creature('Craw Wurm', 6, '{4}{G}{G}', 6, 4);
             $library[] = $creature('Yavimaya Wurm', 6, '{4}{G}{G}', 6, 4, CardInstance::TRAMPLE);
             $library[] = $creature('Colossal Dreadmaw', 6, '{4}{G}{G}', 6, 6, CardInstance::TRAMPLE);
+        }
+        if ($splash) {
+            // Deux Plains et deux Swamp pour le splash (les coûts de Black Knight et d'Angelic Skirmisher exigent deux symboles).
+            $library[] = $land('Plains', ['W']);
+            $library[] = $land('Plains', ['W']);
+            $library[] = $land('Swamp', ['B']);
+            $library[] = $land('Swamp', ['B']);
+            // Black Knight : protection contre le blanc non modélisée (pas de cible, dégâts ni blocage blancs). Première frappe modélisée.
+            $library[] = $creature('Black Knight', 2, '{B}{B}', 2, 2, CardInstance::FIRST_STRIKE);
+            $library[] = $creature('Alabaster Host Sanctifier', 2, '{1}{W}', 2, 2, CardInstance::LIFELINK);
+            // Angelic Skirmisher : le choix à chaque combat (première frappe, vigilance ou lien de vie) n'est pas modélisé.
+            $library[] = $creature('Angelic Skirmisher', 6, '{4}{W}{W}', 4, 4, CardInstance::FLYING);
+            // Serra Angel : vol et vigilance (elle attaque sans s'engager).
+            $library[] = $creature('Serra Angel', 5, '{3}{W}{W}', 4, 4, CardInstance::FLYING, CardInstance::VIGILANCE);
+            $library[] = $creature('Banehound', 1, '{B}', 1, 1, CardInstance::LIFELINK, CardInstance::HASTE);
         }
 
         if (count($library) > self::LIBRARY_SIZE) {

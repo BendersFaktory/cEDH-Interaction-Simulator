@@ -89,4 +89,12 @@ final class ColorIdentityTest extends TestCase
         }
         $this->addToAssertionCount(1);
     }
+
+    public function testAnyColorManaHasNoIdentity(): void
+    {
+        self::assertSame([], self::identity(new CardInstance('p', 'Lotus Petal', CardInstance::ARTIFACT, 0, manaCost: '{0}', abilities: [ActivatedAbility::treasure()])));
+        self::assertSame([], self::identity(new CardInstance('t', 'Command Tower', CardInstance::LAND, produces: ['W', 'U', 'B', 'R', 'G'])));
+        self::assertSame(['U', 'B'], self::identity(new CardInstance('s', 'Underground Sea', CardInstance::LAND, produces: ['U', 'B'])));
+        self::assertSame(['G'], self::identity(self::spell('Birds', '{G}', [ActivatedAbility::mana('{W}|{U}|{B}|{R}|{G}')])));
+    }
 }

@@ -40,9 +40,7 @@ const reset = () => player.value !== null && store.setStops(player.value, null)
       </select>
     </label>
     <p class="muted">S'arrêter à ces étapes (seulement si une action est possible) :</p>
-    <label v-for="step in STOP_STEPS" :key="step" class="inline">
-      <input v-model="form.steps" type="checkbox" :value="step" /> {{ phaseLabel(step) }}
-    </label>
+    <label v-for="step in STOP_STEPS" :key="step" class="inline"> <input v-model="form.steps" type="checkbox" :value="step" /> {{ phaseLabel(step) }} </label>
     <p class="muted">Options :</p>
     <label class="inline"><input v-model="form.onOpponentSpell" type="checkbox" /> Sort, capacité ou trigger adverse sur la pile</label>
     <label class="inline"><input v-model="form.onDeclareAttackers" type="checkbox" /> Déclaration des attaquants</label>

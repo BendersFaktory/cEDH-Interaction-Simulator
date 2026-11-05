@@ -7,6 +7,7 @@ namespace App\Tests\Engine;
 use App\Engine\Action\Action;
 use App\Engine\Action\CastSpell;
 use App\Engine\Agent\AgentRegistry;
+use App\Engine\Card\SpellEffect;
 use App\Engine\Game\CardInstance;
 use App\Engine\Game\GameEngine;
 use App\Engine\Game\GameState;
@@ -79,6 +80,21 @@ final class ManaCastTest extends TestCase
         $this->assertSame(1, $cast['cost']);
         $this->assertSame(17, $s->player(2)->life);
         $this->assertTrue($s->player(0)->pool->isEmpty());
+    }
+
+    public function testSpellWithSeveralEffectsResolvesThemInOrder(): void
+    {
+        $spell = new CardInstance('s1', 'Shock and Draw', CardInstance::INSTANT, 2, manaCost: '{1}{R}', effects: [new SpellEffect('damage', 2), new SpellEffect('draw', 1)]);
+        $s = $this->state([$spell], [self::land('l1', 'Mountain', 'R'), self::land('l2', 'Mountain', 'R')]);
+        $library = count($s->player(0)->library);
+        $s->controllers[0] = 'scripted';
+        $result = (new GameEngine(new AgentRegistry(['scripted' => new ScriptedAgent('Shock and Draw', 'player:2')])))->advance($s);
+
+        $this->assertSame(18, $s->player(2)->life);
+        $resolved = array_search('SpellResolved', array_map(static fn ($e) => $e->type, $result->events), true);
+        $after = array_map(static fn ($e) => $e->type, array_slice($result->events, (int) $resolved));
+        $this->assertLessThan(array_search('CardDrawn', $after, true), array_search('DamageDealt', $after, true)); // dégâts puis pioche
+        $this->assertLessThan($library, count($s->player(0)->library));
     }
 
     public function testXSpellOffersOneActionPerPayableXAndDealsXDamage(): void

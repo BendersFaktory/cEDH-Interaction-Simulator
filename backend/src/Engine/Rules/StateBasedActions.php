@@ -19,8 +19,8 @@ use App\Engine\Game\PriorityState;
  * qui doit être fait sur l'état courant puis l'applique ; les passages se répètent tant qu'une SBA a agi (CR 704.3).
  *
  * Dans un passage :
- * - commandant au cimetière depuis la dernière vérification : retour en zone de commandement (CR 903.9a, toujours
- *   appliqué) ; un commandant qui meurt dans ce passage revient donc au passage suivant, après que ses triggers « meurt »
+ * - commandant au cimetière ou en exil depuis la dernière vérification : retour en zone de commandement (CR 903.9a,
+ *   toujours appliqué) ; un commandant qui meurt dans ce passage revient donc au passage suivant, après que ses triggers « meurt »
  *   ont été mis en file ;
  * - joueur à 0 PV ou moins (704.5a), qui a pioché dans une bibliothèque vide (704.5b), ou à 21 dégâts d'un même
  *   commandant (704.6c) : éliminé, et ses objets quittent la partie (800.4a, voir eliminate()) ;
@@ -75,9 +75,11 @@ final class StateBasedActions
             if ($p->lost) {
                 continue;
             }
-            foreach ($p->graveyard as $card) {
-                if ($card->commander) {
-                    $commanders[] = [$p, $card];
+            foreach (['graveyard', 'exile'] as $zone) {
+                foreach ($p->$zone as $card) {
+                    if ($card->commander) {
+                        $commanders[] = [$p, $card, $zone];
+                    }
                 }
             }
             if ($p->life <= 0) {
@@ -94,10 +96,10 @@ final class StateBasedActions
             }
         }
 
-        foreach ($commanders as [$p, $card]) {
-            $p->graveyard = array_values(array_filter($p->graveyard, static fn (CardInstance $c) => $c !== $card));
+        foreach ($commanders as [$p, $card, $zone]) {
+            $p->$zone = array_values(array_filter($p->$zone, static fn (CardInstance $c) => $c !== $card));
             $p->command[] = $card;
-            $s->emit('CommanderReturned', ['player' => $p->id, 'card' => $card->toPublic(), 'from' => 'graveyard']);
+            $s->emit('CommanderReturned', ['player' => $p->id, 'card' => $card->toPublic(), 'from' => $zone]);
         }
         foreach ($losers as $id => $reason) {
             $this->eliminate($s, $id, $reason);
@@ -109,8 +111,8 @@ final class StateBasedActions
             $card->damage = 0;
             $card->deathtouchDamage = false;
             $card->tapped = false;
-            $destination = $s->sendToGraveyard($p->id, $card);
-            $s->emit('CreatureDied', ['player' => $p->id, 'card' => $card->toPublic(), 'destination' => $destination, 'reason' => $reason]);
+            $destination = $s->sendToGraveyard($card->ownerOr($p->id), $card);
+            $s->emit('CreatureDied', ['player' => $p->id, 'card' => $card->printed()->toPublic(), 'destination' => $destination, 'reason' => $reason] + GameState::ownerField($p->id, $card));
             $s->queueTriggers($p->id, $card, TriggeredAbility::DIES);
         }
 
@@ -205,7 +207,7 @@ final class StateBasedActions
             $card->damage = 0;
             $card->deathtouchDamage = false;
             $card->tapped = false;
-            $removed[] = ['card' => $card->toPublic(), 'destination' => $s->sendToGraveyard($p->id, $card)];
+            $removed[] = ['card' => $card->printed()->toPublic(), 'destination' => $s->sendToGraveyard($card->ownerOr($p->id), $card)] + GameState::ownerField($p->id, $card);
             if ($card->isCreature()) {
                 $s->queueTriggers($p->id, $card, TriggeredAbility::DIES);
             }
@@ -214,8 +216,9 @@ final class StateBasedActions
     }
 
     /**
-     * Élimine un joueur, puis ses objets quittent la partie (CR 800.4a) : ses permanents (le contrôle ne change jamais de
-     * main ici : propriétaire = contrôleur) et ses objets sur la pile disparaissent sans passer par le cimetière ; ses
+     * Élimine un joueur, puis ses objets quittent la partie (CR 800.4a) : les permanents dont il est propriétaire, qui que
+     * soit leur contrôleur, et ses objets sur la pile disparaissent sans passer par le cimetière ; ceux d'autrui qu'il
+     * contrôlait reviennent à leur propriétaire (`PermanentControlChanged`) ; ses
      * triggers en attente sont retirés par TriggerManager. Le combat n'est pas retouché : CombatResolver ignore les
      * créatures qui ne sont plus sur le champ de bataille et ne blesse pas un joueur éliminé.
      */
@@ -226,11 +229,29 @@ final class StateBasedActions
         $p->drewFromEmpty = false;
         $s->emit('PlayerLost', ['player' => $playerId, 'reason' => $reason]);
 
+        // Les effets qui lui donnaient le contrôle d'un permanent d'autrui prennent fin (CR 800.4a) : il revient à son propriétaire.
+        foreach ($p->battlefield as $card) {
+            $owner = $card->ownerOr($playerId);
+            if ($owner !== $playerId && !$s->player($owner)->lost) {
+                $s->gainControl($playerId, $card->id, $owner, 'player_left');
+            }
+        }
         $battlefield = array_map(static fn (CardInstance $c) => $c->id, $p->battlefield);
         $p->battlefield = [];
+        // Ses cartes contrôlées par un autre joueur quittent aussi la partie.
+        foreach ($s->players as $q) {
+            if ($q->id !== $playerId) {
+                foreach ($q->battlefield as $card) {
+                    if ($card->ownerOr($q->id) === $playerId) {
+                        $q->takeFromBattlefield($card->id);
+                        $battlefield[] = $card->id;
+                    }
+                }
+            }
+        }
         $stack = [];
         foreach ($s->stack as $k => $item) {
-            if ($item->controller === $playerId) {
+            if ($item->controller === $playerId || $item->ownerId() === $playerId) {
                 $stack[] = $item->id;
                 unset($s->stack[$k]);
             }

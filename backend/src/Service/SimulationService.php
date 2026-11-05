@@ -171,6 +171,32 @@ class SimulationService
     }
 
     /**
+     * Toutes les branches de l'arbre auquel appartient $sim : on remonte à la racine, puis on parcourt les fils (en largeur).
+     *
+     * @return list<Simulation> la racine d'abord
+     */
+    public function branches(Simulation $sim): array
+    {
+        $root = $sim;
+        for ($p = $sim->getParent(); $p !== null; $p = $p->getParent()) {
+            $root = $p;
+        }
+
+        $repo = $this->em->getRepository(Simulation::class);
+        $all = [];
+        $queue = [$root];
+        while ($queue !== []) {
+            $node = array_shift($queue);
+            $all[] = $node;
+            foreach ($repo->findBy(['parent' => $node], ['id' => 'ASC']) as $child) {
+                $queue[] = $child;
+            }
+        }
+
+        return $all;
+    }
+
+    /**
      * Journal d'une branche : événements des ancêtres jusqu'au point de bifurcation, puis les siens.
      *
      * @return list<array{seq:int,type:string,payload:array,verbose:bool}>

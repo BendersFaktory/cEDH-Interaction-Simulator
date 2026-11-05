@@ -32,7 +32,7 @@ final class KeepLegend implements Action
     {
         $card = $state->player($this->player)->findOnBattlefield($this->cardId);
 
-        return 'Garder ' . ($card?->name ?? $this->cardId) . ($card?->tapped ? ' (engagé)' : '');
+        return 'Garder ' . ($card?->name ?? $this->cardId) . ' (' . $this->cardId . ')' . ($card?->tapped ? ' (engagé)' : '');
     }
 
     public function toArray(): array
