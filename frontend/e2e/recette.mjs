@@ -488,8 +488,11 @@ async function s9({ page, log, shot, problem, enabled, tryClick, newUiGame }) {
     const mana = page.locator('.actions h4:has-text("Capacités") ~ button.mana-ability:not([disabled])').first()
     if (await mana.count()) {
       if (await tryClick(mana)) {
-        await page.waitForTimeout(300)
-        poolSeen = (await page.locator('.mana-pool').count()) > 0
+        // Attente de la réserve plutôt qu'un délai fixe : sous charge (scénarios en parallèle, CI), 300 ms ne suffisaient pas.
+        poolSeen = await page
+          .waitForSelector('.mana-pool', { timeout: 5000 })
+          .then(() => true)
+          .catch(() => false)
         if (poolSeen) break
       }
     } else if (await enabled('Terrains').count()) await tryClick(enabled('Terrains'))
@@ -1403,6 +1406,8 @@ async function s25({ page, log, shot, problem, newUiGame }) {
   await Promise.all([page.waitForResponse((r) => new RegExp(`/api/simulations/${root}/events`).test(r.url())), page.locator(`[data-testid="branch-${root}"] button:has-text("Ouvrir")`).click()])
   await page.waitForFunction((r) => (document.querySelector('.topbar .muted')?.textContent ?? '').includes(`simulation #${r}`), root, { timeout: TIMEOUT })
   log('25 après « Ouvrir » racine :', (await page.locator('.topbar .muted').textContent()).replace(/\s+/g, ' '))
+  // L'en-tête change avant que l'arbre soit relu (GET /branches) : on attend que la racine devienne la courante.
+  await page.waitForFunction((r) => document.querySelector(`[data-testid="branch-${r}"]`)?.classList.contains('current'), root, { timeout: TIMEOUT }).catch(() => {})
   if (!(await page.locator(`[data-testid="branch-${root}"]`).evaluate((el) => el.classList.contains('current')))) problem('recette arbre : après « Ouvrir », la racine n’est pas la courante')
 
   await page.locator(`[data-testid="branch-compare-${root}"]`).check()
@@ -1690,6 +1695,16 @@ async function s32({ page, log, shot, problem, openGame }) {
   log('32 espace : bouton Pause affiché', pauseShown, '| position après 1 s de lecture', playing, '(depuis', playStart + ')')
   if (!pauseShown) problem('recette clavier : espace ne lance pas la lecture (bouton Pause absent)')
   if (!(playing > playStart)) problem('recette clavier : la position n’avance pas pendant la lecture')
+  // Pendant la lecture, la fenêtre ne suit pas le journal : fenêtre basse (journal hors écran),
+  // remontée en haut, elle y reste.
+  const viewport = page.viewportSize()
+  await page.setViewportSize({ width: viewport.width, height: 500 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForTimeout(1000)
+  const scroll = await page.evaluate(() => ({ y: window.scrollY, h: document.documentElement.scrollHeight, vh: window.innerHeight }))
+  await page.setViewportSize(viewport)
+  log('32 défilement pendant la lecture : scrollY', scroll.y, '| page', scroll.h, '/ fenêtre', scroll.vh)
+  if (scroll.y !== 0) problem(`recette lecture : la fenêtre défile toute seule pendant la lecture (scrollY ${scroll.y})`)
   await key(' ')
   await page.waitForTimeout(300)
   const paused = await pos()

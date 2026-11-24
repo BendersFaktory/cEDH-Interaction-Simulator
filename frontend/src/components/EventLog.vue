@@ -13,12 +13,20 @@ const playerIds = computed(() => Object.keys(store.view.players).map(Number))
 const types = computed(() => [...new Set(store.events.map((e) => e.type))].sort())
 const shown = computed(() => filterJournal(store.visibleEvents, playerFilter.value, typeFilter.value))
 
-// Garde l'événement courant visible quand le curseur avance.
+const list = ref<HTMLOListElement | null>(null)
+
+// Garde l'événement courant visible quand le curseur avance, en ne faisant défiler que la liste du
+// journal : `scrollIntoView` ferait aussi défiler la fenêtre, qui suivrait alors l'action en continu.
 watch(
   () => store.cursor,
   async () => {
     await nextTick()
-    document.querySelector('.log li.current')?.scrollIntoView({ block: 'nearest' })
+    const ol = list.value
+    const li = ol?.querySelector<HTMLElement>('li.current')
+    if (!ol || !li) return
+    const top = li.getBoundingClientRect().top - ol.getBoundingClientRect().top + ol.scrollTop
+    if (top < ol.scrollTop) ol.scrollTop = top
+    else if (top + li.offsetHeight > ol.scrollTop + ol.clientHeight) ol.scrollTop = top + li.offsetHeight - ol.clientHeight
   },
 )
 </script>
@@ -44,7 +52,7 @@ watch(
       </label>
       <small class="muted">{{ shown.length }} / {{ store.visibleEvents.length }}</small>
     </div>
-    <ol>
+    <ol ref="list">
       <li v-for="e in shown" :key="e.seq" :class="{ current: e.seq === store.cursor, future: e.seq > store.cursor, verbose: e.verbose }" @click="store.seek(e.seq)">
         <small>#{{ e.seq }}</small> {{ describeEvent(e) }}
       </li>
