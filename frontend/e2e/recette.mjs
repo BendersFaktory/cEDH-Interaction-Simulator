@@ -1690,6 +1690,16 @@ async function s32({ page, log, shot, problem, openGame }) {
   log('32 espace : bouton Pause affiché', pauseShown, '| position après 1 s de lecture', playing, '(depuis', playStart + ')')
   if (!pauseShown) problem('recette clavier : espace ne lance pas la lecture (bouton Pause absent)')
   if (!(playing > playStart)) problem('recette clavier : la position n’avance pas pendant la lecture')
+  // Pendant la lecture, la fenêtre ne suit pas le journal : fenêtre basse (journal hors écran),
+  // remontée en haut, elle y reste.
+  const viewport = page.viewportSize()
+  await page.setViewportSize({ width: viewport.width, height: 500 })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForTimeout(1000)
+  const scroll = await page.evaluate(() => ({ y: window.scrollY, h: document.documentElement.scrollHeight, vh: window.innerHeight }))
+  await page.setViewportSize(viewport)
+  log('32 défilement pendant la lecture : scrollY', scroll.y, '| page', scroll.h, '/ fenêtre', scroll.vh)
+  if (scroll.y !== 0) problem(`recette lecture : la fenêtre défile toute seule pendant la lecture (scrollY ${scroll.y})`)
   await key(' ')
   await page.waitForTimeout(300)
   const paused = await pos()
